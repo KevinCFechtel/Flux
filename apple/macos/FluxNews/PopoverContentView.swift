@@ -177,7 +177,11 @@ private struct ArticlePane: View {
                 .help(sidebarToggleLabel)
                 .accessibilityLabel(sidebarToggleLabel)
             Text(title).font(.headline).lineLimit(1)
-            Text("\(store.selectionTotal)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if store.showArticleCount {
+                Text("\(store.selectionTotal)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Button { store.sync() } label: {
                 if store.isLoading { ProgressView().controlSize(.small).frame(width: 16, height: 16) }
@@ -236,7 +240,7 @@ private struct ArticlePane: View {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: store.articlePresentationMode == .visual ? 4 : 0) {
+                        LazyVStack(spacing: store.articlePresentationMode == .compact ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
                                  ArticleItem(article: article, mode: store.articlePresentationMode, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
@@ -1241,7 +1245,7 @@ private extension View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .contentShape(Rectangle())
             .onHover(perform: onHoverChanged)
-            .contextMenu(menuItems: menu)
+            .contextMenu { menu() }
     }
 }
 
@@ -1960,10 +1964,11 @@ private struct ReadingSettingsView: View {
                 .disabled(store.catalog.feeds.isEmpty)
             }
             Picker("Article Presentation", selection: Binding(get: { store.articlePresentationMode }, set: { store.setArticlePresentationMode($0) })) {
-                Text("Visual").tag(ArticlePresentationMode.visual)
-                Text("Compact").tag(ArticlePresentationMode.compact)
+                ForEach(ArticlePresentationMode.allCases, id: \.self) { mode in
+                    Text(LocalizedStringKey(mode.displayNameKey)).tag(mode)
+                }
             }
-            Text(store.articlePresentationMode == .compact ? "Text-focused presentation with higher information density." : "Image-forward article presentation.")
+            Text(articlePresentationDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
@@ -1971,6 +1976,20 @@ private struct ReadingSettingsView: View {
                 Text("3 lines").tag(ArticlePreviewLines.standard)
                 Text("5 lines").tag(ArticlePreviewLines.extended)
             }
+            Toggle(
+                "Show article count",
+                isOn: Binding(
+                    get: { store.showArticleCount },
+                    set: { store.setShowArticleCount($0) }
+                )
+            )
+            Toggle(
+                "Show relative publication time",
+                isOn: Binding(
+                    get: { store.showRelativePublicationTime },
+                    set: { store.setShowRelativePublicationTime($0) }
+                )
+            )
             Picker("Click on News", selection: Binding(get: { store.clickOnNews }, set: { store.setClickOnNews($0) })) {
                 Text("Open Link").tag(ClickOnNews.openLink)
                 Text("Open Detail View").tag(ClickOnNews.openDetailView)
@@ -1986,6 +2005,17 @@ private struct ReadingSettingsView: View {
             Toggle("Hide Empty Feeds / Categories", isOn: Binding(get: { store.hideEmptyNavigationEntries }, set: { store.setHideEmptyNavigationEntries($0) }))
         }
         .formStyle(.grouped)
+    }
+
+    private var articlePresentationDescription: String {
+        switch store.articlePresentationMode {
+        case .visual:
+            String(localized: "Image-forward presentation with a large article image.")
+        case .visualCompact:
+            String(localized: "Compact visual presentation with a 4:3 thumbnail beside the headline.")
+        case .compact:
+            String(localized: "Text-focused presentation with higher information density.")
+        }
     }
 }
 
@@ -2025,6 +2055,7 @@ private struct FeedSettingsView: View {
     let target: FeedSettingsTarget
     @State private var preferences: FeedPreferences?
     @State private var error: String?
+    @State private var isSaving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -2037,9 +2068,17 @@ private struct FeedSettingsView: View {
                         Text("Text Only").tag(DetailRenderingMode.textOnly)
                     }
                      Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                     Toggle(
+                        "System Notifications",
+                        isOn: Binding(
+                            get: { preferences.systemNotificationsEnabled },
+                            set: updateSystemNotifications
+                        )
+                     )
                      Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
                      Toggle("Automatically download audio from this feed", isOn: Binding(get: { preferences.autoDownloadAudio }, set: updateAutoDownloadAudio))
                  }
+                .disabled(isSaving)
                 .formStyle(.grouped)
             } else {
                 ProgressView()
@@ -2068,6 +2107,24 @@ private struct FeedSettingsView: View {
         do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
+    private func updateSystemNotifications(_ enabled: Bool) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else {
+            dismiss()
+            return
+        }
+        isSaving = true
+        error = nil
+        store.setSystemNotificationsEnabled(feedID: target.id, enabled: enabled) { result in
+            isSaving = false
+            switch result {
+            case .success:
+                load()
+            case let .failure(error):
+                self.error = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     private func updateOpenInMiniflux(_ enabled: Bool) {
         guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
