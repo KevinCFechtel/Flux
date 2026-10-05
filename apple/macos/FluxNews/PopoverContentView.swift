@@ -95,8 +95,6 @@ private struct ArticlePane: View {
     @State private var selectedID: Int64?
     @State private var hoveredID: Int64?
     @State private var scrollPhase = ScrollPhase.idle
-    @State private var latestUserScrollDelta: CGFloat = 0
-    @State private var pendingUserScrollGeometry = false
     @State private var suppressUntil: TimeInterval = 0
     @State private var scrollPosition = ScrollPosition()
     @State private var pendingAudioReplacement: Enclosure?
@@ -151,8 +149,6 @@ private struct ArticlePane: View {
         }
         .onChange(of: store.listPresentationRevision) { _, revision in
             tracker.reset()
-            pendingUserScrollGeometry = false
-            latestUserScrollDelta = 0
             trackerRevision = revision
             selectedID = nil
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
@@ -290,24 +286,10 @@ private struct ArticlePane: View {
                     .onChange(of: geometry.size) { _, size in
                         viewport = CGRect(origin: .zero, size: size)
                         tracker.reset()
-                        pendingUserScrollGeometry = false
-                        latestUserScrollDelta = 0
                     }
                     .onPreferenceChange(ArticleFrameKey.self) { newFrames in
                         frames = newFrames
-                        if pendingUserScrollGeometry {
-                            processScrollover(
-                                frames: newFrames,
-                                delta: latestUserScrollDelta
-                            )
-                            pendingUserScrollGeometry = false
-                            latestUserScrollDelta = 0
-                            if !userScrolling {
-                                store.finishScrolloverUndoBatch()
-                            }
-                        } else if !userScrolling {
-                            tracker.rebase(frames: newFrames, unread: unreadIDs)
-                        }
+                        if !userScrolling { tracker.rebase(frames: newFrames, unread: unreadIDs) }
                         observe()
                     }
                 }
@@ -352,34 +334,15 @@ private struct ArticlePane: View {
     }
     private func scrollChanged(_ delta: CGFloat) {
         guard userScrolling else {
-            pendingUserScrollGeometry = false
-            latestUserScrollDelta = 0
             tracker.rebase(frames: frames, unread: unreadIDs)
             observe()
             return
         }
-
         store.noteMeaningfulInteraction()
         guard !store.isSearchActive,
               store.markReadOnScrolloverEnabled,
               ProcessInfo.processInfo.systemUptime >= suppressUntil,
-              trackerRevision == store.listPresentationRevision else {
-            pendingUserScrollGeometry = false
-            latestUserScrollDelta = 0
-            return
-        }
-
-        latestUserScrollDelta = delta
-        pendingUserScrollGeometry = true
-
-        // Keep the immediate pass as a low-latency path. Row geometry is
-        // delivered independently through ArticleFrameKey, so the preference
-        // callback performs a second idempotent pass with the fresh frames.
-        processScrollover(frames: frames, delta: delta)
-    }
-
-    private func processScrollover(frames: [Int64: CGRect], delta: CGFloat) {
-        guard !viewport.isEmpty else { return }
+              trackerRevision == store.listPresentationRevision else { return }
         let ids = tracker.process(
             frames: frames,
             viewport: viewport,
@@ -388,9 +351,7 @@ private struct ArticlePane: View {
             offsetDelta: delta,
             userInitiated: true
         )
-        if !ids.isEmpty {
-            store.flushScrollover(ids)
-        }
+        if !ids.isEmpty { store.flushScrollover(ids) }
     }
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
         switch command {
