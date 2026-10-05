@@ -994,21 +994,28 @@ private struct ArticleItem: View {
                 }
                 .buttonStyle(.plain)
 
-                quickActions
-                    .opacity(hovered ? 1 : 0)
-                    .allowsHitTesting(hovered)
-
                 if hasAvailableThumbnail {
-                    Button { onSelect(); store.open(article) } label: {
-                        ThumbnailSlot(
-                            article: article,
-                            store: store,
-                            width: 112,
-                            height: 84,
-                            cornerRadius: 9
-                        )
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Button { onSelect(); store.open(article) } label: {
+                            ThumbnailSlot(
+                                article: article,
+                                store: store,
+                                width: 112,
+                                height: 84,
+                                cornerRadius: 9
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        quickActions
+                            .opacity(hovered ? 1 : 0)
+                            .allowsHitTesting(hovered)
                     }
-                    .buttonStyle(.plain)
+                    .frame(width: 112, alignment: .trailing)
+                } else {
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
                 }
             }
 
