@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.SyncCancellation
+import uniffi.flux_uniffi.SyncCompleted
+import uniffi.flux_uniffi.SyncOutcome
 import uniffi.flux_uniffi.SyncReason
 
 /**
@@ -22,23 +24,49 @@ import uniffi.flux_uniffi.SyncReason
 class AndroidSyncCoordinator private constructor(
     private val scope: CoroutineScope,
     private val cancellationFactory: () -> AndroidSyncCancellationHandle,
-    private val syncRunner: suspend (SyncReason, AndroidSyncCancellationHandle) -> Unit,
+    private val sessionGeneration: () -> Long?,
+    private val syncRunner: suspend (Long, SyncReason, AndroidSyncCancellationHandle) -> AndroidSyncExecutionResult,
+    private val postSync: suspend (Long, SyncCompleted) -> Unit,
 ) {
-    internal constructor(coreRuntime: AndroidCoreRuntime) : this(
+    internal constructor(
+        coreRuntime: AndroidCoreRuntime,
+        postSyncEffects: AndroidPostSyncEffects,
+    ) : this(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         cancellationFactory = { CoreSyncCancellationHandle() },
-        syncRunner = { reason, cancellation ->
+        sessionGeneration = coreRuntime::activeSessionGeneration,
+        syncRunner = { generation, reason, cancellation ->
             val coreCancellation = (cancellation as CoreSyncCancellationHandle).coreCancellation
-            coreRuntime.remote { core -> core.syncCancellable(reason, coreCancellation) }
+            when (
+                val outcome = coreRuntime.remoteForGeneration(generation) { core ->
+                    core.syncCancellable(reason, coreCancellation)
+                }
+            ) {
+                is SyncOutcome.Completed -> AndroidSyncExecutionResult.Completed(outcome.metadata)
+                is SyncOutcome.Cancelled -> AndroidSyncExecutionResult.Cancelled
+            }
         },
+        postSync = postSyncEffects::handle,
     )
 
     internal constructor(
         scope: CoroutineScope,
         cancellationFactory: () -> AndroidSyncCancellationHandle,
+        sessionGeneration: () -> Long? = { 1L },
         syncRunner: suspend (SyncReason, AndroidSyncCancellationHandle) -> Unit,
+        syncMetadata: SyncCompleted? = null,
+        postSync: suspend (Long, SyncCompleted) -> Unit = { _, _ -> },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(scope, cancellationFactory, syncRunner)
+    ) : this(
+        scope = scope,
+        cancellationFactory = cancellationFactory,
+        sessionGeneration = sessionGeneration,
+        syncRunner = { _, reason, cancellation ->
+            syncRunner(reason, cancellation)
+            AndroidSyncExecutionResult.Completed(syncMetadata)
+        },
+        postSync = postSync,
+    )
 
     sealed interface State {
         data object Idle : State
@@ -54,6 +82,7 @@ class AndroidSyncCoordinator private constructor(
 
     private data class ActiveRun(
         val generation: Long,
+        val sessionGeneration: Long,
         val reason: SyncReason,
         val cancellation: AndroidSyncCancellationHandle,
         val job: Job,
@@ -70,13 +99,14 @@ class AndroidSyncCoordinator private constructor(
     fun requestSync(reason: SyncReason): Boolean = synchronized(lock) {
         if (activeRun != null) return false
 
+        val activeSessionGeneration = sessionGeneration() ?: return false
         val generation = ++nextGeneration
         val cancellation = cancellationFactory()
         _state.value = State.Syncing(generation, reason)
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            runSync(generation, reason, cancellation)
+            runSync(generation, activeSessionGeneration, reason, cancellation)
         }
-        activeRun = ActiveRun(generation, reason, cancellation, job)
+        activeRun = ActiveRun(generation, activeSessionGeneration, reason, cancellation, job)
         job.start()
         true
     }
@@ -101,15 +131,25 @@ class AndroidSyncCoordinator private constructor(
 
     private suspend fun runSync(
         generation: Long,
+        sessionGenerationAtStart: Long,
         reason: SyncReason,
         cancellation: AndroidSyncCancellationHandle,
     ) {
         val terminalState = try {
-            syncRunner(reason, cancellation)
-            if (cancellation.isCancelled()) {
-                State.Cancelled(generation, reason)
-            } else {
-                State.Succeeded(generation, reason)
+            when (val result = syncRunner(sessionGenerationAtStart, reason, cancellation)) {
+                is AndroidSyncExecutionResult.Cancelled -> State.Cancelled(generation, reason)
+                is AndroidSyncExecutionResult.Completed -> {
+                    if (cancellation.isCancelled()) {
+                        State.Cancelled(generation, reason)
+                    } else {
+                        result.metadata?.let { metadata ->
+                            if (sessionGeneration() == sessionGenerationAtStart) {
+                                postSync(sessionGenerationAtStart, metadata)
+                            }
+                        }
+                        State.Succeeded(generation, reason)
+                    }
+                }
             }
         } catch (_: Exception) {
             if (cancellation.isCancelled()) {
@@ -143,4 +183,10 @@ private class CoreSyncCancellationHandle : AndroidSyncCancellationHandle {
     override fun cancel() = coreCancellation.cancel()
 
     override fun isCancelled(): Boolean = coreCancellation.isCancelled()
+}
+
+
+internal sealed interface AndroidSyncExecutionResult {
+    data class Completed(val metadata: SyncCompleted? = null) : AndroidSyncExecutionResult
+    data object Cancelled : AndroidSyncExecutionResult
 }

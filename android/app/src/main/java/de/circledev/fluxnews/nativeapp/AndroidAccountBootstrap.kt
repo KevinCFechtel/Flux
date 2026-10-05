@@ -21,6 +21,7 @@ class AndroidAccountBootstrap private constructor(
     private val serverVersionReader: suspend (String) -> String?,
     private val serverVersionWriter: suspend (String, String) -> Unit,
     private val serverVersionClearer: suspend () -> Unit,
+    private val widgetStateClearer: () -> Unit,
     storagePaths: AndroidStoragePaths,
 ) {
     internal constructor(
@@ -28,6 +29,7 @@ class AndroidAccountBootstrap private constructor(
         preferenceStore: AndroidPreferenceStore,
         coreRuntime: AndroidCoreRuntime,
         storagePaths: AndroidStoragePaths,
+        onWidgetStateCleared: () -> Unit = {},
     ) : this(
         credentialReader = credentialStore::read,
         credentialWriter = credentialStore::write,
@@ -57,6 +59,10 @@ class AndroidAccountBootstrap private constructor(
             preferenceStore.remove(SERVER_INFO_BASE)
             preferenceStore.remove(SERVER_INFO_VERSION)
         },
+        widgetStateClearer = {
+            AndroidWidgetProjectionStore(storagePaths.widget).clear()
+            onWidgetStateCleared()
+        },
         storagePaths = storagePaths,
     )
 
@@ -75,6 +81,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionReader: suspend (String) -> String? = { null },
         serverVersionWriter: suspend (String, String) -> Unit = { _, _ -> },
         serverVersionClearer: suspend () -> Unit = {},
+        widgetStateClearer: () -> Unit = {},
         storagePaths: AndroidStoragePaths,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -91,6 +98,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionReader,
         serverVersionWriter,
         serverVersionClearer,
+        widgetStateClearer,
         storagePaths,
     )
 
@@ -170,6 +178,7 @@ class AndroidAccountBootstrap private constructor(
         configFactory.create(credentials)
 
     internal fun publishRestoredAccount(credentials: StoredAccountCredentials) {
+        widgetStateClearer()
         localStateRebuildState = LocalStateRebuildState.Idle
         state = State.Ready(credentials.serverUrl)
     }
@@ -231,6 +240,7 @@ class AndroidAccountBootstrap private constructor(
             )
         }
 
+        widgetStateClearer()
         try {
             serverVersionWriter(normalized.serverUrl, validation.version)
         } catch (_: Exception) {
@@ -271,6 +281,7 @@ class AndroidAccountBootstrap private constructor(
                 accountStateRemover()
             }
             credentialClearer()
+            widgetStateClearer()
             try {
                 serverVersionClearer()
             } catch (_: Exception) {

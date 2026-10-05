@@ -6,10 +6,13 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.disk.directory
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
 
 /**
@@ -25,12 +28,44 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
-    val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidSyncCoordinator(coreRuntime) }
+    internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidSystemNotificationManager(applicationContext, coreRuntime, diagnostics)
+    }
+    internal val widgetProjection: AndroidWidgetProjectionCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidWidgetProjectionCoordinator(
+            coreRuntime = coreRuntime,
+            store = AndroidWidgetProjectionStore(storagePaths.widget),
+            scope = applicationScope,
+            diagnostics = diagnostics,
+            onProjectionChanged = { AndroidWidgetUpdates.refreshAll(applicationContext) },
+        )
+    }
+    internal val widgetRouting: AndroidWidgetRouting by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidWidgetRouting()
+    }
+    internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidPostSyncEffects(
+            activeSessionGeneration = coreRuntime::activeSessionGeneration,
+            effects = listOf(systemNotifications, widgetProjection),
+            onEffectError = { effect, error ->
+                diagnostics.record(
+                    AndroidAppLogLevel.Error,
+                    "post-sync",
+                    "${effect.javaClass.simpleName} failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+                )
+            },
+        )
+    }
+    val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidSyncCoordinator(coreRuntime, postSyncEffects)
+    }
     internal val timelineStore: AndroidArticleTimelineStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticleTimelineStore(coreRuntime) }
     internal val searchStore: AndroidSearchStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidSearchStore(coreRuntime) }
     internal val readerStore: AndroidReaderStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidReaderStore(coreRuntime) }
     internal val articleOpenResolver: AndroidArticleOpenResolver by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticleOpenResolver(coreRuntime) }
-    internal val backgroundSync: AndroidBackgroundSync by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidBackgroundSync(applicationContext, coreRuntime) }
+    internal val backgroundSync: AndroidBackgroundSync by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidBackgroundSync(applicationContext, coreRuntime, accountBootstrap, postSyncEffects, diagnostics)
+    }
     val credentialStore: AndroidCredentialStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCredentialStore(applicationContext) }
     internal val navigationPreferences: AndroidNavigationPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidNavigationPreferences(preferenceStore) }
     internal val articlePreferences: AndroidArticlePreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticlePreferences(preferenceStore) }
@@ -39,11 +74,34 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidConfigurationBackupController(accountBootstrap, coreRuntime, navigationPreferences, articlePreferences, actionBarPreferences)
     }
     val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidAccountBootstrap(credentialStore = credentialStore, preferenceStore = preferenceStore, coreRuntime = coreRuntime, storagePaths = storagePaths)
+        AndroidAccountBootstrap(
+            credentialStore = credentialStore,
+            preferenceStore = preferenceStore,
+            coreRuntime = coreRuntime,
+            storagePaths = storagePaths,
+            onWidgetStateCleared = { AndroidWidgetUpdates.refreshAll(applicationContext) },
+        )
     }
 
-    override fun newImageLoader(context: Context): ImageLoader =
-        ImageLoader.Builder(context.applicationContext)
+    override fun newImageLoader(context: Context): ImageLoader {
+        val imageHttpClient = OkHttpClient.Builder()
+            // OkHttp 5 Happy Eyeballs: race IPv6/IPv4 routes instead of waiting
+            // for a broken IPv6 path to time out before trying IPv4.
+            .fastFallback(true)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(8, TimeUnit.SECONDS)
+            .build()
+
+        return ImageLoader.Builder(context.applicationContext)
+            .components {
+                add(
+                    OkHttpNetworkFetcherFactory(
+                        callFactory = { imageHttpClient },
+                    ),
+                )
+            }
             .memoryCache {
                 MemoryCache.Builder()
                     .maxSizePercent(context.applicationContext, 0.15)
@@ -56,6 +114,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .build()
+    }
 
     override fun onCreate() {
         super.onCreate()

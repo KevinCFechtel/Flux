@@ -33,7 +33,7 @@ use domain::{
     CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
-    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences,
+    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences, FeedPreferencesPatch,
     FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListFeed, ListeningListItem, ListeningListSort, MediaChapter, MediaDownload,
@@ -560,6 +560,9 @@ impl FluxCore {
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
     }
+    pub fn article_summary(&self, article_id: i64) -> Result<Option<ArticleSummary>, CoreError> {
+        self.store.article_summary(article_id)
+    }
     pub fn article_page(
         &self,
         query: ArticleQuery,
@@ -1072,6 +1075,16 @@ impl FluxCore {
     pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
         self.store.feed_preferences(feed_id)
     }
+    pub fn feed_preferences_bulk(&self, feed_ids: &[i64]) -> Result<Vec<FeedPreferences>, CoreError> {
+        self.store.feed_preferences_bulk(feed_ids)
+    }
+    pub fn patch_feed_preferences_bulk(
+        &self,
+        feed_ids: &[i64],
+        patch: FeedPreferencesPatch,
+    ) -> Result<(), CoreError> {
+        self.store.patch_feed_preferences_bulk(feed_ids, patch)
+    }
     pub fn set_feed_detail_rendering(
         &self,
         feed_id: i64,
@@ -1123,6 +1136,43 @@ impl FluxCore {
     /// platform-owned widget snapshot.
     pub fn widget_data(&self) -> Result<WidgetData, CoreError> {
         self.store.widget_data()
+    }
+
+    /// Pages the complete compact widget article projection without changing the
+    /// intentionally bounded WidgetData contract used by WidgetKit snapshots.
+    pub fn widget_articles_page(
+        &self,
+        limit: u32,
+        cursor: Option<domain::ArticleCursor>,
+    ) -> Result<domain::WidgetArticlePage, CoreError> {
+        let page = self.store.article_page(
+            &ArticleQuery {
+                scope: domain::ArticleScope::All,
+                read_filter: domain::ReadFilter::All,
+                starred_filter: domain::StarredFilter::All,
+                sort: domain::ArticleSort::NewestFirst,
+                limit,
+                cursor,
+            },
+            false,
+        )?;
+        Ok(domain::WidgetArticlePage {
+            articles: page
+                .articles
+                .into_iter()
+                .map(|article| domain::WidgetArticle {
+                    id: article.id,
+                    feed_id: article.feed_id,
+                    category_id: article.category_id,
+                    feed_title: article.feed_title,
+                    title: article.title,
+                    published_at: article.published_at,
+                    is_read: article.is_read,
+                    is_starred: article.is_starred,
+                })
+                .collect(),
+            next_cursor: page.next_cursor,
+        })
     }
 
     pub fn database_path(&self) -> PathBuf {

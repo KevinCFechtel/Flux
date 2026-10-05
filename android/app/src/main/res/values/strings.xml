@@ -3,4 +3,29 @@
     <string name="native_android">Native Android</string>
     <string name="phase_e1a">Phase E1-A</string>
     <string name="application_id">Application ID: %1$s</string>
+    <string name="system_notification_channel_name">New articles</string>
+    <string name="system_notification_channel_description">Notifications for new articles from enabled feeds</string>
+    <string name="system_notification_body">%1$s · %2$s</string>
+    <plurals name="system_notification_new_articles">
+        <item quantity="one">%d new article</item>
+        <item quantity="other">%d new articles</item>
+    </plurals>
+    <string name="widget_description">FluxNews headlines and unread counts</string>
+    <string name="widget_all_news">All News</string>
+    <string name="widget_unread">unread</string>
+    <string name="widget_articles">articles</string>
+    <string name="widget_waiting_for_sync">Waiting for first successful sync</string>
+    <string name="widget_no_articles">No articles</string>
+    <string name="widget_last_sync">Last sync: %1$s</string>
+    <string name="widget_configuration_title">FluxNews Widget</string>
+    <string name="widget_scope">Scope</string>
+    <string name="widget_read_filter">Articles</string>
+    <string name="widget_sort_order">Sort order</string>
+    <string name="widget_bookmarks">Bookmarks</string>
+    <string name="widget_category">Category</string>
+    <string name="widget_feed">Feed</string>
+    <string name="widget_all_articles">All</string>
+    <string name="widget_newest_first">Newest first</string>
+    <string name="widget_oldest_first">Oldest first</string>
+    <string name="widget_add">Add widget</string>
 </resources>

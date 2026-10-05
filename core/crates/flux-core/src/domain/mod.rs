@@ -682,6 +682,12 @@ pub struct WidgetArticle {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetArticlePage {
+    pub articles: Vec<WidgetArticle>,
+    pub next_cursor: Option<ArticleCursor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WidgetCounts {
     pub all_unread: u64,
     pub all_articles: u64,
@@ -739,6 +745,15 @@ impl FeedPreferences {
             auto_download_audio: false,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FeedPreferencesPatch {
+    pub system_notifications_enabled: Option<bool>,
+    pub detail_rendering: Option<DetailRenderingMode>,
+    pub truncate_detail: Option<bool>,
+    pub open_in_miniflux: Option<bool>,
+    pub auto_download_audio: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

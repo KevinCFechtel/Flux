@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +24,7 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
     Articles("Articles", "Article presentation and reading behavior"),
     ActionBar("Action Bar", "Article list actions"),
     Navigation("Navigation", "Startup scope and navigation behavior"),
+    FeedSettings("Feed Settings", "Search and configure one or multiple feeds"),
     Media("Media", "Playback and Listening List preferences"),
     DownloadedData("Downloaded Data", "Downloaded media storage"),
     BackgroundSync("Background Sync", "Background refresh preference"),
@@ -65,7 +67,15 @@ internal fun SettingsShell(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(selected?.title ?: "Settings") },
+                    title = {
+                        AnimatedContent(
+                            targetState = selected?.title ?: "Settings",
+                            transitionSpec = { AndroidMotion.detailCrossfade() },
+                            label = "settings-title",
+                        ) { title ->
+                            Text(title)
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { if (compactDetail) selected = null else onBack() }) {
                             Icon(
@@ -86,17 +96,39 @@ internal fun SettingsShell(
                         maxWidth = AndroidSettingsDetailMaxWidth,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     ) { detailModifier ->
-                        SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                        AnimatedContent(
+                            targetState = selected ?: SettingsDestination.Account,
+                            transitionSpec = { AndroidMotion.detailCrossfade() },
+                            label = "settings-detail",
+                            modifier = detailModifier,
+                        ) { destination ->
+                            SettingsDetail(destination, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, Modifier.fillMaxSize())
+                        }
                     }
                 }
-            } else if (selected == null) {
-                SettingsList(null, { selected = it }, contentModifier)
             } else {
-                AndroidCenteredContent(
-                    maxWidth = AndroidSettingsDetailMaxWidth,
+                AnimatedContent(
+                    targetState = selected,
+                    transitionSpec = {
+                        when {
+                            initialState == null && targetState != null -> AndroidMotion.settingsForward()
+                            initialState != null && targetState == null -> AndroidMotion.settingsBack()
+                            else -> AndroidMotion.detailCrossfade()
+                        }
+                    },
+                    label = "settings-navigation",
                     modifier = contentModifier,
-                ) { detailModifier ->
-                    SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                ) { destination ->
+                    if (destination == null) {
+                        SettingsList(null, { selected = it }, Modifier.fillMaxSize())
+                    } else {
+                        AndroidCenteredContent(
+                            maxWidth = AndroidSettingsDetailMaxWidth,
+                            modifier = Modifier.fillMaxSize(),
+                        ) { detailModifier ->
+                            SettingsDetail(destination, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                        }
+                    }
                 }
             }
         }
@@ -154,6 +186,7 @@ private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidA
         SettingsDestination.Articles -> ArticleSettingsScreen(articlePreferences, articleState, coreArticleSettings, modifier)
         SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionBarPreferences, actionBarState, modifier)
         SettingsDestination.Navigation -> NavigationSettingsScreen(navigationPreferences, navigationState, categories, feeds, modifier)
+        SettingsDestination.FeedSettings -> AndroidBulkFeedSettingsScreen(feeds, modifier)
         SettingsDestination.Media -> MediaSettingsScreen(mediaSettings, modifier)
         SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
         SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)

@@ -2532,8 +2532,8 @@ private fun ArticleImage(
         )
         if (failed) {
             Icon(
-                painter = painterResource(R.drawable.ic_news),
-                contentDescription = "Image could not be loaded",
+                painter = painterResource(R.drawable.ic_image_unavailable),
+                contentDescription = "Image unavailable",
                 modifier = Modifier.size(32.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )

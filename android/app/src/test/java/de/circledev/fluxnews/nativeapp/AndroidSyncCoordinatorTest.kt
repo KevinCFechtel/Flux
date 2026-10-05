@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uniffi.flux_uniffi.SyncCompleted
 import uniffi.flux_uniffi.SyncReason
 
 class AndroidSyncCoordinatorTest {
@@ -76,6 +77,63 @@ class AndroidSyncCoordinatorTest {
     }
 
     @Test
+    fun requestIsRejectedWithoutAnActiveCoreSession() {
+        val coordinator = AndroidSyncCoordinator(
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
+            cancellationFactory = { FakeCancellation() },
+            sessionGeneration = { null },
+            syncRunner = { _, _ -> },
+            testOnly = Unit,
+        )
+
+        assertFalse(coordinator.requestSync(SyncReason.RESUME))
+        assertTrue(coordinator.state.value is AndroidSyncCoordinator.State.Idle)
+    }
+
+    @Test
+    fun successfulSyncPublishesPostSyncMetadataForItsSessionGeneration() = runBlocking {
+        val metadata = syncMetadata(SyncReason.MANUAL)
+        val published = mutableListOf<Pair<Long, SyncCompleted>>()
+        val coordinator = AndroidSyncCoordinator(
+            scope = this,
+            cancellationFactory = { FakeCancellation() },
+            sessionGeneration = { 41L },
+            syncRunner = { _, _ -> },
+            syncMetadata = metadata,
+            postSync = { generation, completed -> published += generation to completed },
+            testOnly = Unit,
+        )
+
+        assertTrue(coordinator.requestSync(SyncReason.MANUAL))
+        awaitTerminal(coordinator)
+
+        assertEquals(listOf(41L to metadata), published)
+    }
+
+    @Test
+    fun replacedCoreSessionSuppressesStalePostSyncEffects() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        var activeGeneration: Long? = 51L
+        val published = mutableListOf<Pair<Long, SyncCompleted>>()
+        val coordinator = AndroidSyncCoordinator(
+            scope = this,
+            cancellationFactory = { FakeCancellation() },
+            sessionGeneration = { activeGeneration },
+            syncRunner = { _, _ -> release.await() },
+            syncMetadata = syncMetadata(SyncReason.APP_START),
+            postSync = { generation, completed -> published += generation to completed },
+            testOnly = Unit,
+        )
+
+        assertTrue(coordinator.requestSync(SyncReason.APP_START))
+        activeGeneration = 52L
+        release.complete(Unit)
+        awaitTerminal(coordinator)
+
+        assertTrue(published.isEmpty())
+    }
+
+    @Test
     fun successPresentationIsImmediateAndOnlyDismissesAfterItsGenerationExpires() {
         assertFalse(
             AndroidSyncPresentationPolicy.successVisible(
@@ -126,6 +184,17 @@ class AndroidSyncCoordinatorTest {
         assertEquals("Sync failed. Showing locally stored data.", state.message)
         assertFalse(state.message.contains("must-not-leak"))
     }
+
+    private fun syncMetadata(reason: SyncReason) = SyncCompleted(
+        reason = reason,
+        newArticles = 0u,
+        updatedArticles = 0u,
+        mutationsDelivered = 0u,
+        dataChanged = false,
+        navigationChanged = false,
+        newArticlesByFeed = emptyList(),
+        systemNotificationCandidates = emptyList(),
+    )
 
     private fun kotlinx.coroutines.CoroutineScope.coordinator(
         runner: suspend (SyncReason, AndroidSyncCancellationHandle) -> Unit,

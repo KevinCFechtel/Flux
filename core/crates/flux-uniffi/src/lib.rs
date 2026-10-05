@@ -303,6 +303,11 @@ pub struct WidgetArticle {
     pub is_starred: bool,
 }
 #[derive(uniffi::Record)]
+pub struct WidgetArticlePage {
+    pub articles: Vec<WidgetArticle>,
+    pub next_cursor: Option<ArticleCursor>,
+}
+#[derive(uniffi::Record)]
 pub struct WidgetCounts {
     pub all_unread: u64,
     pub all_articles: u64,
@@ -375,6 +380,14 @@ pub struct FeedPreferences {
     pub truncate_detail: bool,
     pub open_in_miniflux: bool,
     pub auto_download_audio: bool,
+}
+#[derive(uniffi::Record)]
+pub struct FeedPreferencesPatch {
+    pub system_notifications_enabled: Option<bool>,
+    pub detail_rendering: Option<DetailRenderingMode>,
+    pub truncate_detail: Option<bool>,
+    pub open_in_miniflux: Option<bool>,
+    pub auto_download_audio: Option<bool>,
 }
 #[derive(uniffi::Record)]
 pub struct SystemNotificationCandidate {
@@ -1000,6 +1013,12 @@ impl Flux {
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(map_error)
     }
+    pub fn article_summary(&self, article_id: i64) -> Result<Option<ArticleSummary>, FluxError> {
+        self.core
+            .article_summary(article_id)
+            .map(|article| article.map(Into::into))
+            .map_err(map_error)
+    }
     pub fn article_page(
         &self,
         query: ArticleQuery,
@@ -1444,6 +1463,21 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn feed_preferences_bulk(&self, feed_ids: Vec<i64>) -> Result<Vec<FeedPreferences>, FluxError> {
+        self.core
+            .feed_preferences_bulk(&feed_ids)
+            .map(|values| values.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn patch_feed_preferences_bulk(
+        &self,
+        feed_ids: Vec<i64>,
+        patch: FeedPreferencesPatch,
+    ) -> Result<(), FluxError> {
+        self.core
+            .patch_feed_preferences_bulk(&feed_ids, patch.into())
+            .map_err(map_error)
+    }
     pub fn set_feed_detail_rendering(
         &self,
         feed_id: i64,
@@ -1502,6 +1536,22 @@ impl Flux {
     }
     pub fn widget_data(&self) -> Result<WidgetData, FluxError> {
         self.core.widget_data().map(Into::into).map_err(map_error)
+    }
+    pub fn widget_articles_page(
+        &self,
+        limit: u32,
+        cursor: Option<ArticleCursor>,
+    ) -> Result<WidgetArticlePage, FluxError> {
+        self.core
+            .widget_articles_page(
+                limit,
+                cursor.map(|value| domain::ArticleCursor {
+                    published_at: value.published_at,
+                    article_id: value.article_id,
+                }),
+            )
+            .map(Into::into)
+            .map_err(map_error)
     }
     pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, FluxError> {
         self.core
@@ -1741,6 +1791,17 @@ impl From<FeedPreferences> for domain::FeedPreferences {
             feed_id: value.feed_id,
             system_notifications_enabled: value.system_notifications_enabled,
             detail_rendering: value.detail_rendering.into(),
+            truncate_detail: value.truncate_detail,
+            open_in_miniflux: value.open_in_miniflux,
+            auto_download_audio: value.auto_download_audio,
+        }
+    }
+}
+impl From<FeedPreferencesPatch> for domain::FeedPreferencesPatch {
+    fn from(value: FeedPreferencesPatch) -> Self {
+        Self {
+            system_notifications_enabled: value.system_notifications_enabled,
+            detail_rendering: value.detail_rendering.map(Into::into),
             truncate_detail: value.truncate_detail,
             open_in_miniflux: value.open_in_miniflux,
             auto_download_audio: value.auto_download_audio,
@@ -2276,6 +2337,17 @@ impl From<domain::WidgetArticle> for WidgetArticle {
             published_at: value.published_at,
             is_read: value.is_read,
             is_starred: value.is_starred,
+        }
+    }
+}
+impl From<domain::WidgetArticlePage> for WidgetArticlePage {
+    fn from(value: domain::WidgetArticlePage) -> Self {
+        Self {
+            articles: value.articles.into_iter().map(Into::into).collect(),
+            next_cursor: value.next_cursor.map(|cursor| ArticleCursor {
+                published_at: cursor.published_at,
+                article_id: cursor.article_id,
+            }),
         }
     }
 }

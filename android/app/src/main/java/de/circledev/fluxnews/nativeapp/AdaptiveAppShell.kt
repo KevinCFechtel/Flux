@@ -1,15 +1,9 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.content.res.Configuration
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +69,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -97,6 +93,7 @@ private object ShellRoute {
     const val Search = "search"
     const val ListeningList = "listening-list"
     const val Settings = "settings"
+    const val FeedSettings = "feed-settings"
 }
 
 private const val ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE = 1.35f
@@ -134,12 +131,21 @@ internal fun AdaptiveAppShell(
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
+    systemNotifications: AndroidSystemNotificationManager,
+    widgetProjection: AndroidWidgetProjectionCoordinator,
+    widgetRouting: AndroidWidgetRouting,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
+    val pendingNotificationFeedId by systemNotifications.pendingFeedRoute.collectAsState()
+    val pendingWidgetArticleId by widgetRouting.pendingArticleId.collectAsState()
+    var pendingWidgetArticle by remember(sessionGeneration) {
+        mutableStateOf<uniffi.flux_uniffi.ArticleSummary?>(null)
+    }
+    var feedSettingsTarget by remember { mutableStateOf<AndroidNavigationFeedRef?>(null) }
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -156,6 +162,9 @@ internal fun AdaptiveAppShell(
     LaunchedEffect(sessionGeneration) {
         searchStore.activateSession(sessionGeneration)
         readerStore.activateSession(sessionGeneration)
+        sessionGeneration?.let { generation ->
+            runCatching { widgetProjection.ensureAvailable(generation) }
+        }
     }
 
     suspend fun reloadNavigation() {
@@ -173,6 +182,9 @@ internal fun AdaptiveAppShell(
             timelineStore.handleCoreEvent(runtimeEvent)
             if (runtimeEvent.event.requiresNavigationRefresh()) {
                 navigationRefreshes.trySend(Unit)
+            }
+            if (runtimeEvent.event.requiresWidgetProjectionRefresh()) {
+                widgetProjection.requestRefresh(runtimeEvent.generation)
             }
         }
     }
@@ -214,14 +226,40 @@ internal fun AdaptiveAppShell(
         AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
     }.orEmpty()
 
+    LaunchedEffect(pendingNotificationFeedId, navigation.projection, feeds, sessionGeneration) {
+        val feedId = pendingNotificationFeedId ?: return@LaunchedEffect
+        if (navigation.projection == null) return@LaunchedEffect
+        val feed = feeds.firstOrNull { it.id == feedId }
+        if (feed != null) {
+            timelineSelection = timelineSelection.selectingScope(
+                AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title),
+            )
+            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        }
+        systemNotifications.consumeFeedRoute(feedId)
+    }
+
+    LaunchedEffect(pendingWidgetArticleId, sessionGeneration) {
+        val articleId = pendingWidgetArticleId ?: return@LaunchedEffect
+        val generation = sessionGeneration ?: return@LaunchedEffect
+        val article = runCatching {
+            coreRuntime.localForGeneration(generation) { core -> core.articleSummary(articleId) }
+        }.getOrNull()
+        widgetRouting.consumeArticle(articleId)
+        if (article != null) {
+            pendingWidgetArticle = article
+            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = ShellRoute.Timeline,
         modifier = modifier,
-        enterTransition = { forwardEnterTransition() },
-        exitTransition = { forwardExitTransition() },
-        popEnterTransition = { backEnterTransition() },
-        popExitTransition = { backExitTransition() },
+        enterTransition = { AndroidMotion.topLevelEnter() },
+        exitTransition = { AndroidMotion.topLevelExit() },
+        popEnterTransition = { AndroidMotion.topLevelEnter() },
+        popExitTransition = { AndroidMotion.topLevelExit() },
     ) {
         composable(ShellRoute.Timeline) {
             TimelineDestination(
@@ -235,6 +273,14 @@ internal fun AdaptiveAppShell(
                 articleOpenResolver = articleOpenResolver,
                 sessionGeneration = sessionGeneration,
                 navController = navController,
+                pendingWidgetArticle = pendingWidgetArticle,
+                onWidgetArticleConsumed = { articleId ->
+                    if (pendingWidgetArticle?.id == articleId) pendingWidgetArticle = null
+                },
+                onFeedSettings = { feed ->
+                    feedSettingsTarget = feed
+                    navController.navigate(ShellRoute.FeedSettings)
+                },
                 onSelectionChanged = { timelineSelection = it },
             )
         }
@@ -254,6 +300,18 @@ internal fun AdaptiveAppShell(
                 onBack = navController::popBackStack,
             )
         }
+        composable(ShellRoute.FeedSettings) {
+            val target = feedSettingsTarget
+            if (target != null) {
+                AndroidFeedSettingsDestination(
+                    feedId = target.id,
+                    feedTitle = target.title,
+                    onBack = navController::popBackStack,
+                )
+            } else {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            }
+        }
         composable(ShellRoute.Settings) {
             SettingsDestination(
                 bootstrap = bootstrap,
@@ -268,6 +326,13 @@ internal fun AdaptiveAppShell(
     }
 }
 
+private fun CoreEvent.requiresWidgetProjectionRefresh(): Boolean = when (this) {
+    is CoreEvent.ArticleReadStateChanged,
+    is CoreEvent.ArticleStarredStateChanged,
+    -> true
+    else -> false
+}
+
 private fun CoreEvent.requiresNavigationRefresh(): Boolean = when (this) {
     is CoreEvent.ArticleReadStateChanged,
     is CoreEvent.ArticleStarredStateChanged,
@@ -275,18 +340,6 @@ private fun CoreEvent.requiresNavigationRefresh(): Boolean = when (this) {
     is CoreEvent.SyncDidComplete -> metadata.navigationChanged || metadata.dataChanged
     else -> false
 }
-
-private fun forwardEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(260), initialOffsetX = { it / 5 }) + fadeIn(animationSpec = tween(220))
-
-private fun forwardExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(260), targetOffsetX = { -it / 12 }) + fadeOut(animationSpec = tween(180))
-
-private fun backEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(240), initialOffsetX = { -it / 12 }) + fadeIn(animationSpec = tween(200))
-
-private fun backExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it / 5 }) + fadeOut(animationSpec = tween(180))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -301,6 +354,9 @@ private fun TimelineDestination(
     articleOpenResolver: AndroidArticleOpenResolver,
     sessionGeneration: Long?,
     navController: NavHostController,
+    pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
+    onWidgetArticleConsumed: (Long) -> Unit,
+    onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
     val scope = selection.scope
@@ -328,6 +384,7 @@ private fun TimelineDestination(
                             onSearch = { navController.navigate(ShellRoute.Search) },
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
+                            onFeedSettings = onFeedSettings,
                             navigationToggleIcon = R.drawable.ic_arrow_back,
                             navigationToggleDescription = "Collapse navigation",
                             onNavigationToggle = { persistentNavigationCollapsed = true },
@@ -345,6 +402,8 @@ private fun TimelineDestination(
                     articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
+                    pendingWidgetArticle = pendingWidgetArticle,
+                    onWidgetArticleConsumed = onWidgetArticleConsumed,
                     persistentNavigation = true,
                     collapsedPersistentNavigation = false,
                     scopeTitleLeading = false,
@@ -378,13 +437,21 @@ private fun TimelineDestination(
                             preferences = preferences,
                             timelineStore = timelineStore,
                             selectedScope = scope,
-                            onScopeSelected = {
-                                onSelectionChanged(selection.selectingScope(it))
-                                coroutineScope.launch { drawerState.close() }
+                            onScopeSelected = { selectedScope ->
+                                coroutineScope.launch {
+                                    drawerState.close()
+                                    onSelectionChanged(selection.selectingScope(selectedScope))
+                                }
                             },
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
                             onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
+                            onFeedSettings = { feed ->
+                                coroutineScope.launch {
+                                    drawerState.close()
+                                    onFeedSettings(feed)
+                                }
+                            },
                             navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
                             navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
                             onNavigationToggle = if (collapsedPersistentNavigation) {
@@ -411,6 +478,8 @@ private fun TimelineDestination(
                     articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
+                    pendingWidgetArticle = pendingWidgetArticle,
+                    onWidgetArticleConsumed = onWidgetArticleConsumed,
                     persistentNavigation = false,
                     collapsedPersistentNavigation = collapsedPersistentNavigation,
                     scopeTitleLeading = collapsedPersistentNavigation || compactLandscape,
@@ -437,6 +506,8 @@ private fun NewsRootContent(
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferenceState,
     sessionGeneration: Long?,
+    pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
+    onWidgetArticleConsumed: (Long) -> Unit,
     persistentNavigation: Boolean,
     collapsedPersistentNavigation: Boolean,
     scopeTitleLeading: Boolean,
@@ -518,6 +589,12 @@ private fun NewsRootContent(
                 null -> shellSnackbar.showSnackbar("The article could not be opened.")
             }
         }
+    }
+
+    LaunchedEffect(pendingWidgetArticle?.id) {
+        val article = pendingWidgetArticle ?: return@LaunchedEffect
+        onWidgetArticleConsumed(article.id)
+        openArticle(article)
     }
 
     LaunchedEffect(syncState) {
@@ -1096,6 +1173,7 @@ private fun NewsNavigationContent(
     onSearch: () -> Unit,
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
+    onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -1254,6 +1332,7 @@ private fun NewsNavigationContent(
                                     iconVariant = feedIconVariant,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
                                     onClick = { onScopeSelected(feedScope) },
+                                    onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                                 )
                             }
                     }
@@ -1273,6 +1352,7 @@ private fun NewsNavigationContent(
                         iconVariant = feedIconVariant,
                         onRequestFeedIcon = timelineStore::ensureFeedIcon,
                         onClick = { onScopeSelected(feedScope) },
+                        onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                     )
                 }
         }
@@ -1338,6 +1418,7 @@ private fun CategoryNavigationRow(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FeedNavigationRow(
     feedId: Long,
@@ -1348,38 +1429,63 @@ private fun FeedNavigationRow(
     iconVariant: uniffi.flux_uniffi.FeedIconVariant,
     onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
     onClick: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     val selectedContainer = if (selected && !isSystemInDarkTheme()) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
     } else {
         MaterialTheme.colorScheme.background
     }
+    val haptics = LocalHapticFeedback.current
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         color = selectedContainer,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 2.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FeedIcon(
-                feedId = feedId,
-                title = title,
-                pngData = iconPng,
-                variant = iconVariant,
-                onRequest = onRequestFeedIcon,
-            )
-            Text(
-                title,
-                modifier = Modifier.weight(1f).padding(start = 12.dp),
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-            CountText(count)
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuExpanded = true
+                        },
+                    )
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FeedIcon(
+                    feedId = feedId,
+                    title = title,
+                    pngData = iconPng,
+                    variant = iconVariant,
+                    onRequest = onRequestFeedIcon,
+                )
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f).padding(start = 12.dp),
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                CountText(count)
+            }
+
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Feed Settings") },
+                    onClick = {
+                        menuExpanded = false
+                        onSettings()
+                    },
+                )
+            }
         }
     }
 }
