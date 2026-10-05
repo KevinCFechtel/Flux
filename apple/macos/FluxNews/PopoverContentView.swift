@@ -279,7 +279,7 @@ private struct ArticlePane: View {
                             store.finishScrolloverUndoBatch()
                         }
                         scrollPhase = phase
-                        if !userScrolling { tracker.rebase(frames: frames, unread: unreadIDs) }
+                        if !userScrolling { scrollDirection = 0 }
                     }
                     .onChange(of: store.snapshotResetRevision) { _, revision in
                         NativeLog.snapshot.debug("snapshot reset requested revision=\(revision, privacy: .public)")
@@ -410,7 +410,8 @@ private struct ArticlePane: View {
         let index = min(max(0, (current ?? (delta < 0 ? store.articles.count : -1)) + delta), store.articles.count - 1)
         selectedID = store.articles[index].id
         suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
-        tracker.reset()
+        visibleArticleIDs.removeAll()
+        scrollDirection = 0
         proxy.scrollTo(store.articles[index].id, anchor: .center)
     }
 }
