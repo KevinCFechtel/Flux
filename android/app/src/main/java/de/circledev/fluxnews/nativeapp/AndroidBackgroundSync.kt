@@ -29,6 +29,7 @@ internal class AndroidBackgroundSync(
     private val coreRuntime: AndroidCoreRuntime,
     private val accountBootstrap: AndroidAccountBootstrap,
     private val postSyncEffects: AndroidPostSyncEffects,
+    private val diagnostics: AndroidAppDiagnostics,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     private val resumeLock = Any()
@@ -41,6 +42,7 @@ internal class AndroidBackgroundSync(
     suspend fun setEnabled(enabled: Boolean): Result<Unit> = runCatching {
         coreRuntime.local { it.setBackgroundSyncEnabled(enabled) }
         reconcile(enabled)
+        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "setting enabled=$enabled")
         if (enabled) requestResumeIfNeeded()
     }
 
@@ -57,6 +59,7 @@ internal class AndroidBackgroundSync(
 
         val cancellation = SyncCancellation()
         val job = scope.launch {
+            diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "resume requested")
             try {
                 val state = accountBootstrap.restoreStoredAccount()
                 if (state !is AndroidAccountBootstrap.State.Ready) return@launch
