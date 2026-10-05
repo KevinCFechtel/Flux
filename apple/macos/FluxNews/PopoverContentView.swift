@@ -1457,7 +1457,6 @@ enum MacOSSettingsWindowPresentation {
 }
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: BrowserStore
     @State private var server = ""
     @State private var key = ""
@@ -1487,7 +1486,7 @@ struct SettingsView: View {
             Divider()
             HStack {
                 Spacer()
-                Button { dismiss() } label: {
+                Button { settingsWindow?.performClose(nil) } label: {
                     if section == .account { Text("Cancel") } else { Text("Done") }
                 }
                 if section == .account {
