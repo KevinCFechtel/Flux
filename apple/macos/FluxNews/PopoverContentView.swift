@@ -1931,47 +1931,53 @@ private struct AccountSettingsView: View {
     }
 
     private var customHeadersEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Header Name")
-                    .frame(minWidth: 240, idealWidth: 260, maxWidth: 300, alignment: .leading)
-                Text("Value")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(width: 24)
-                Text("Remove")
-                    .hidden()
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(customHeaders.indices, id: \.self) { index in
-                HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Header Name")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            revealedHeaderIDs.remove(customHeaders[index].id)
+                            customHeaders.remove(at: index)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
                     TextField("", text: $customHeaders[index].name)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.leading)
-                        .frame(minWidth: 240, idealWidth: 260, maxWidth: 300)
-                    headerValueField(at: index)
-                        .frame(minWidth: 300, maxWidth: .infinity)
-                        .layoutPriority(1)
-                    Button {
-                        toggleHeaderValueVisibility(for: customHeaders[index].id)
-                    } label: {
-                        Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
+
+                    Text("Value")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        headerValueField(at: index)
+                            .frame(maxWidth: .infinity)
+
+                        Button {
+                            toggleHeaderValueVisibility(for: customHeaders[index].id)
+                        } label: {
+                            Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
+                        .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
+                        .frame(width: 24)
                     }
-                    .buttonStyle(.borderless)
-                    .help(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
-                    .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
-                    .frame(width: 24)
-                    Button("Remove", role: .destructive) {
-                        revealedHeaderIDs.remove(customHeaders[index].id)
-                        customHeaders.remove(at: index)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                }
+
+                if index < customHeaders.indices.last {
+                    Divider()
                 }
             }
 
-            Button("Add Header") { customHeaders.append(CustomHTTPHeader()) }
+            Button { customHeaders.append(CustomHTTPHeader()) } label: {
+                Label("Add Header", systemImage: "plus")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
