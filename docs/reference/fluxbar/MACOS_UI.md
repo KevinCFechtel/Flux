@@ -65,10 +65,13 @@ is enabled by default.
 
 ## Menu Bar Item
 
-The current native status item has a fixed 62 pt width so its popover
-anchor does not move when the unread count changes. It uses a template
-icon and shows the global unread count according to the rules in
-`Counts` below.
+The native status item uses the system variable-length width so short unread
+counts do not reserve unnecessary Menu Bar space. When the popover or fallback
+panel opens, the current width is frozen; unread-count changes may continue
+visually while the menu is open, but the status-item anchor does not move.
+After the menu closes, variable-length sizing is restored and the item adapts
+once to the current count. It uses a template icon and shows the global unread
+count according to the rules in `Counts` below.
 
 ## Collapsible Feed Sidebar
 
@@ -168,65 +171,54 @@ scrollover geometry during sidebar transitions.
 
 ## Article Row
 
-The default macOS layout uses the compact landscape-style row. A persisted
-header-menu choice also provides a one-column card layout with the image
-above the same metadata, title, teaser, and progressive actions.
+macOS retains desktop-native hover, context-menu, keyboard, and popover behavior,
+but article content semantics are aligned with the native mobile clients.
 
-Concept:
+Three persisted presentation modes are available:
 
-``` text
-╭──────────────────────────────────────────────────╮
-│ ┌───────────┐  Feed icon · Feed · 18 min · 💬 12│
-│ │           │                                    │
-│ │ Thumbnail │  Article title                     │
-│ │           │                                    │
-│ │           │  Short teaser over a few lines...  │
-│ └───────────┘                         ✓   ★   ⋯   │
-╰──────────────────────────────────────────────────╯
-```
+-   **Visual** — large 16:9 lead image above the article content.
+-   **Visual Compact** — full-width feed/status metadata followed by a 4:3
+    thumbnail beside the headline/publication row; preview text remains below.
+-   **Compact** — text-focused layout without an article image.
 
-### Information hierarchy
+Across all three productive variants the semantic order is:
 
-A row may contain:
+1.  feed icon + feed/source metadata
+2.  stable status accessories: Unread → Star → Comments → Audio
+3.  article title
+4.  publication row
+5.  preview/teaser
+6.  desktop-specific progressive audio/actions where applicable
 
-1.  thumbnail/lead image
-2.  feed icon
-3.  feed name
-4.  publication/relative time
-5.  optional comment count
-6.  article title
-7.  short teaser
-8.  contextual actions
+The publication row shows either the localized absolute date/time or the
+configured relative age. When Miniflux reading time is available it appears
+inline with the publication value. Relative time uses the
+`clock.arrow.circlepath` symbol; reading time uses `doc.text`, or
+`headphones` for audio articles.
 
-The title should remain visually stronger than the teaser.
+Feed icons use the Core-provided normal/dark variants. macOS prepares and caches
+a display-ready circular image off the main UI path. Article rows use a 22 pt
+icon; sidebar, Listening List, and player surfaces use 16 pt. If Core has no
+icon, the native fallback is a circular accent-colored tile containing the
+feed's first letter.
 
-### Image layout
+### Visual styling
 
-Prefer thumbnail on the left and text on the right.
+Avoid permanently elevated mobile-style cards. Prefer clean spacing, neutral
+normal state, subtle hover/selection feedback, native system colors/materials,
+and minimal permanent chrome.
 
-The row layout uses a 240 × 168 pt thumbnail. The card layout uses a large
-366 × 206 pt image above the text composition. Titles may occupy up to
-three lines and teasers up to six lines. These values remain subject to
-visual tuning.
+The Visual lead image remains approximately 366 × 206 pt in the current 390 pt
+article column. Visual Compact uses a small 4:3 side thumbnail. These are
+presentation tuning values rather than compatibility requirements.
 
-### Row/card styling
+### Interaction separation
 
-Avoid permanently elevated mobile-style cards.
+Permanent row accessories communicate article state/availability. Mutation and
+navigation controls remain desktop-native progressive actions: read/unread,
+star/unstar, overflow, context menu, and keyboard shortcuts can appear on hover
+without changing the semantic article content order.
 
-Prefer:
-
--   clean spacing
--   subtle separators or grouping
--   neutral normal state
--   subtle hover background/material
--   clear native selected/focus state
--   system colors/materials
--   minimal permanent chrome
-
-The root popover remains transparent. The article pane and native sidebar use
-separate regular system materials for legibility while retaining some of the
-popover translucency. Article rows remain content-oriented and use only
-restrained hover/selection feedback; they are not presented as glass surfaces.
 
 ## Article Interaction
 
@@ -407,8 +399,9 @@ Implemented in the current prototype:
 -   All News/Starred with per-destination Unread/All filtering
 -   native sidebar list with expandable categories/feeds
 -   stable-width article content column
--   persisted row/card article-list layouts
--   thumbnail-left article rows
+-   persisted Visual / Visual Compact / Compact article-list layouts
+-   shared native article information hierarchy and publication/reading-time row
+-   prepared circular feed icons with first-letter fallback
 -   hover state
 -   read/star/overflow actions
 -   right-click context menu
