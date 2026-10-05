@@ -29,6 +29,7 @@ internal class AndroidWidgetProjectionCoordinator(
     private val coreRuntime: AndroidCoreRuntime,
     private val store: AndroidWidgetProjectionStore,
     scope: CoroutineScope,
+    private val diagnostics: AndroidAppDiagnostics? = null,
     private val onProjectionChanged: () -> Unit = {},
 ) : AndroidPostSyncEffect {
     private val writeMutex = Mutex()
@@ -52,12 +53,20 @@ internal class AndroidWidgetProjectionCoordinator(
     }
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
+        diagnostics?.record(
+            AndroidAppLogLevel.Info,
+            "widget",
+            "post-sync projection pass reason=" + metadata.reason +
+                " data_changed=" + metadata.dataChanged +
+                " navigation_changed=" + metadata.navigationChanged,
+        )
         if (!metadata.dataChanged && !metadata.navigationChanged && store.hasCurrentProjection()) {
             val lastSuccessfulSyncAt = coreRuntime.localForGeneration(sessionGeneration) {
                 it.lastSuccessfulSyncAt()
             }
             store.writeLastSuccessfulSyncAt(lastSuccessfulSyncAt)
             onProjectionChanged()
+            diagnostics?.record(AndroidAppLogLevel.Info, "widget", "projection timestamp refreshed")
             return
         }
         refreshNow(sessionGeneration)
@@ -96,6 +105,11 @@ internal class AndroidWidgetProjectionCoordinator(
             store.replace(widgetData, articles, icons)
             store.writeLastSuccessfulSyncAt(widgetData.lastSuccessfulSyncAt)
             onProjectionChanged()
+            diagnostics?.record(
+                AndroidAppLogLevel.Info,
+                "widget",
+                "projection refreshed articles=" + articles.size + " feeds=" + widgetData.feeds.size + " icons=" + icons.size,
+            )
         }
     }
 
