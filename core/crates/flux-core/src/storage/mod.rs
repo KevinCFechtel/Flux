@@ -29,7 +29,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 21;
+const SCHEMA_VERSION: i64 = 22;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -4213,6 +4213,15 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; PRAGMA user_version=21;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 22 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        // Candidate IDs are also platform notification identifiers. SQLite may reuse an
+        // INTEGER PRIMARY KEY after acknowledgement deletes the row, causing a later Android
+        // notification to replace an older visible notification. AUTOINCREMENT preserves
+        // monotonic candidate identity for the lifetime of this database.
+        tx.execute_batch("CREATE TABLE system_notification_candidates_v22 (id INTEGER PRIMARY KEY AUTOINCREMENT, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); INSERT INTO system_notification_candidates_v22(id,feed_id,feed_title) SELECT id,feed_id,feed_title FROM system_notification_candidates; CREATE TABLE notification_candidate_articles_v22 (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates_v22(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); INSERT INTO notification_candidate_articles_v22(candidate_id,article_id) SELECT candidate_id,article_id FROM notification_candidate_articles; DROP TABLE notification_candidate_articles; DROP TABLE system_notification_candidates; ALTER TABLE system_notification_candidates_v22 RENAME TO system_notification_candidates; ALTER TABLE notification_candidate_articles_v22 RENAME TO notification_candidate_articles; PRAGMA user_version=22;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -5471,7 +5480,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -5495,7 +5504,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -5518,7 +5527,33 @@ mod tests {
     }
 
     #[test]
-    fn schema_21_database_reopens_after_migration() {
+    fn v21_migration_makes_notification_candidate_ids_autoincrement() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+
+        {
+            let store = Store::open(&data, &cache, &media).unwrap();
+            let connection = store.connection.lock().unwrap();
+            connection.execute_batch("DROP TABLE notification_candidate_articles; DROP TABLE system_notification_candidates; CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); PRAGMA user_version=21;").unwrap();
+        }
+
+        let migrated = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(migrated.schema_version().unwrap(), SCHEMA_VERSION);
+        let sql: String = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='system_notification_candidates'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(sql.contains("AUTOINCREMENT"));
+    }
+
+    #[test]
+    fn schema_22_database_reopens_after_migration() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
 
@@ -5628,6 +5663,55 @@ mod tests {
             .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].new_count, 1);
+    }
+
+    #[test]
+    fn system_notification_candidate_ids_are_not_reused_after_acknowledgement() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category { id: 1, title: "Category".into() }];
+        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let article = |id| Article {
+            id,
+            feed_id: 2,
+            title: format!("Article {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: format!("2026-03-0{id}T00:00:00Z"),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            reading_time_minutes: 0,
+            preview: String::new(),
+            image_url: None,
+        };
+
+        store.reconcile(&categories, &feeds, &[article(1)]).unwrap();
+        store.set_feed_system_notifications_enabled(2, true).unwrap();
+
+        let first_stats = store
+            .reconcile(&categories, &feeds, &[article(1), article(2)])
+            .unwrap();
+        let first = store
+            .prepare_system_notification_candidates(&first_stats.new_article_ids_by_feed)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        store.acknowledge_system_notification(first.candidate_id).unwrap();
+
+        let second_stats = store
+            .reconcile(&categories, &feeds, &[article(1), article(2), article(3)])
+            .unwrap();
+        let second = store
+            .prepare_system_notification_candidates(&second_stats.new_article_ids_by_feed)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        assert!(second.candidate_id > first.candidate_id);
     }
 
     #[test]
@@ -5831,7 +5915,7 @@ mod tests {
         drop(store);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(
             store.import_legacy_feed_open_in_miniflux(2).unwrap(),
             LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
@@ -5864,7 +5948,7 @@ mod tests {
             drop(store);
 
             let store = Store::open(&data, &cache, &media).unwrap();
-            assert_eq!(store.schema_version().unwrap(), 21);
+            assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
             {
                 let connection = store.connection.lock().unwrap();
                 for key in [
@@ -5903,7 +5987,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         {
             let connection = store.connection.lock().unwrap();
             for key in [
@@ -6007,7 +6091,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -6058,7 +6142,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -6326,7 +6410,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -6367,7 +6451,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -6406,7 +6490,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -6665,7 +6749,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
