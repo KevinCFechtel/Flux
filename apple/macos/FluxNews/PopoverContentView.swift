@@ -995,36 +995,34 @@ private struct ArticleItem: View {
                 .buttonStyle(.plain)
 
                 if hasAvailableThumbnail {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Button { onSelect(); store.open(article) } label: {
-                            ThumbnailSlot(
-                                article: article,
-                                store: store,
-                                width: 112,
-                                height: 84,
-                                cornerRadius: 9
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        quickActions
-                            .opacity(hovered ? 1 : 0)
-                            .allowsHitTesting(hovered)
+                    Button { onSelect(); store.open(article) } label: {
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: 112,
+                            height: 84,
+                            cornerRadius: 9
+                        )
                     }
-                    .frame(width: 112, alignment: .trailing)
-                } else {
-                    quickActions
-                        .opacity(hovered ? 1 : 0)
-                        .allowsHitTesting(hovered)
+                    .buttonStyle(.plain)
                 }
             }
 
-            if !article.preview.isEmpty {
-                Text(article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(store.articlePreviewLines.rawValue)
-                    .multilineTextAlignment(.leading)
+            HStack(alignment: .top, spacing: 10) {
+                if !article.preview.isEmpty {
+                    Text(article.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(store.articlePreviewLines.rawValue)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
+                }
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
             }
 
             audioActions
