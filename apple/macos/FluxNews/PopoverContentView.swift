@@ -1472,24 +1472,39 @@ struct FeedIconSlot: View {
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case account
-    case syncStorage
+    case articles
+    case navigation
     case media
-    case reading
+    case backgroundSync
     case systemNotifications
     case general
-    case data
+    case configurationBackup
 
     var id: Self { self }
 
     var title: LocalizedStringResource {
         switch self {
         case .account: "Account"
-        case .syncStorage: "Sync & Storage"
-        case .media: "Media / Listening List"
-        case .reading: "Reading"
+        case .articles: "Articles"
+        case .navigation: "Navigation"
+        case .media: "Media"
+        case .backgroundSync: "Background Sync"
         case .systemNotifications: "System Notifications"
         case .general: "General"
-        case .data: "Data & Backup"
+        case .configurationBackup: "Configuration Backup"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .account: "person.crop.circle"
+        case .articles: "doc.text"
+        case .navigation: "sidebar.leading"
+        case .media: "headphones"
+        case .backgroundSync: "arrow.triangle.2.circlepath"
+        case .systemNotifications: "bell"
+        case .general: "gearshape"
+        case .configurationBackup: "externaldrive.badge.timemachine"
         }
     }
 }
@@ -1613,17 +1628,29 @@ struct SettingsView: View {
         switch section {
         case .account:
             AccountSettingsView(server: $server, key: $key, customHeaders: $customHeaders, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
-        case .syncStorage:
-            SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
+        case .articles:
+            MacOSArticlesSettingsView(
+                store: store,
+                scrollover: $scrollover,
+                retention: retention,
+                deliveryMode: deliveryMode,
+                detailCharacterLimit: detailCharacterLimit
+            )
+        case .navigation:
+            MacOSNavigationSettingsView(store: store)
         case .media:
             MediaSettingsView(store: store, autoDownloadListeningList: autoDownloadListeningList, deleteAfterPlayback: deleteAfterPlayback, removeCompletedListeningList: removeCompletedListeningList)
-        case .reading:
-            ReadingSettingsView(store: store, scrollover: $scrollover, detailCharacterLimit: detailCharacterLimit)
+        case .backgroundSync:
+            MacOSBackgroundSyncSettingsView(
+                store: store,
+                syncOnStart: $syncOnStart,
+                backgroundSyncEnabled: backgroundSyncEnabled
+            )
         case .systemNotifications:
             SystemNotificationsSettingsView(store: store)
         case .general:
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
-        case .data:
+        case .configurationBackup:
             DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
         }
     }
@@ -1801,7 +1828,7 @@ private struct DataBackupSettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Configuration Backup") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Backups are password encrypted.")
+                    Text("Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Configuration backups are password encrypted.")
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Export Configuration Backup...") { export() }
@@ -1851,7 +1878,7 @@ private struct SettingsSidebar: View {
         List {
             ForEach(SettingsSection.allCases) { section in
                 Button { selection = section } label: {
-                    Text(section.title)
+                    Label(section.title, systemImage: section.systemImage)
                         .foregroundStyle(section == selection ? .white : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -1991,100 +2018,34 @@ private struct AccountSettingsView: View {
     }
 }
 
-private struct SyncStorageSettingsView: View {
-    @ObservedObject var store: BrowserStore
-    @Binding var syncOnStart: Bool
-    let retention: Binding<ReadArticleRetention>
-    let deliveryMode: Binding<DeliveryMode>
-    let backgroundSyncEnabled: Binding<Bool>
-
-    var body: some View {
-        Form {
-            Toggle("Background Sync", isOn: backgroundSyncEnabled)
-                .disabled(store.coreSettings == nil)
-            Toggle("Sync on Start", isOn: $syncOnStart)
-            Picker("Mutation Delivery", selection: deliveryMode) {
-                Text("Deferred").tag(DeliveryMode.deferred)
-                Text("Live").tag(DeliveryMode.live)
-            }
-            .disabled(store.coreSettings == nil)
-            Picker("Retention", selection: retention) {
-                Text("30 days").tag(ReadArticleRetention.days30)
-                Text("60 days").tag(ReadArticleRetention.days60)
-                Text("90 days").tag(ReadArticleRetention.days90)
-                Text("180 days").tag(ReadArticleRetention.days180)
-                Text("365 days").tag(ReadArticleRetention.days365)
-            }
-            .disabled(store.coreSettings == nil)
-        }
-        .formStyle(.grouped)
-    }
-}
-
-private struct ReadingSettingsView: View {
+private struct MacOSArticlesSettingsView: View {
     @ObservedObject var store: BrowserStore
     @Binding var scrollover: Bool
+    let retention: Binding<ReadArticleRetention>
+    let deliveryMode: Binding<DeliveryMode>
     let detailCharacterLimit: Binding<UInt32>
 
     var body: some View {
         Form {
-            Picker("Startup Scope", selection: Binding(get: { store.startupScope }, set: { store.setStartupScope($0) })) {
-                Text("All News").tag(StartupScopePreference.allNews)
-                Text("Starred").tag(StartupScopePreference.starred)
-                Text("Category").tag(StartupScopePreference.category)
-                Text("Feed").tag(StartupScopePreference.feed)
+            Picker("Open article", selection: Binding(get: { store.clickOnNews }, set: store.setClickOnNews)) {
+                Text("Original link").tag(ClickOnNews.openLink)
+                Text("Reader").tag(ClickOnNews.openDetailView)
             }
-            if store.startupScope == .category {
-                Picker("Startup Category", selection: Binding(get: { store.startupCategoryID }, set: { store.setStartupCategoryID($0) })) {
-                    ForEach(store.catalog.categories, id: \.id) { category in Text(category.title).tag(Optional(category.id)) }
-                }
-                .disabled(store.catalog.categories.isEmpty)
-            }
-            if store.startupScope == .feed {
-                Picker("Startup Feed", selection: Binding(get: { store.startupFeedID }, set: { store.setStartupFeedID($0) })) {
-                    ForEach(store.catalog.feeds, id: \.id) { feed in Text(feed.title).tag(Optional(feed.id)) }
-                }
-                .disabled(store.catalog.feeds.isEmpty)
-            }
-            Picker("Article Presentation", selection: Binding(get: { store.articlePresentationMode }, set: { store.setArticlePresentationMode($0) })) {
+            Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
                 ForEach(ArticlePresentationMode.allCases, id: \.self) { mode in
                     Text(LocalizedStringKey(mode.displayNameKey)).tag(mode)
                 }
             }
-            Text(articlePresentationDescription)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
+            Picker("Preview lines", selection: Binding(get: { store.articlePreviewLines }, set: store.setArticlePreviewLines)) {
                 Text("2 lines").tag(ArticlePreviewLines.compact)
                 Text("3 lines").tag(ArticlePreviewLines.standard)
                 Text("5 lines").tag(ArticlePreviewLines.extended)
             }
+            Toggle("Show article count", isOn: Binding(get: { store.showArticleCount }, set: store.setShowArticleCount))
+            Toggle("Show relative publication time", isOn: Binding(get: { store.showRelativePublicationTime }, set: store.setShowRelativePublicationTime))
+            Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
             Toggle(
-                "Show article count",
-                isOn: Binding(
-                    get: { store.showArticleCount },
-                    set: { store.setShowArticleCount($0) }
-                )
-            )
-            Toggle(
-                "Show relative publication time",
-                isOn: Binding(
-                    get: { store.showRelativePublicationTime },
-                    set: { store.setShowRelativePublicationTime($0) }
-                )
-            )
-            Picker("Click on News", selection: Binding(get: { store.clickOnNews }, set: { store.setClickOnNews($0) })) {
-                Text("Open Link").tag(ClickOnNews.openLink)
-                Text("Open Detail View").tag(ClickOnNews.openDetailView)
-            }
-            Picker("Reader Detail Limit", selection: detailCharacterLimit) {
-                Text("5,000 characters").tag(UInt32(5_000))
-                Text("10,000 characters").tag(UInt32(10_000))
-                Text("20,000 characters").tag(UInt32(20_000))
-            }
-            .disabled(store.coreSettings == nil)
-            Toggle(
-                "Mark articles as read when scrolling past",
+                "Mark read on scrollover",
                 isOn: Binding(
                     get: { store.markReadOnScrolloverEnabled },
                     set: { enabled in
@@ -2093,21 +2054,114 @@ private struct ReadingSettingsView: View {
                     }
                 )
             )
-            Toggle("Remove article from list when marked read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: { store.setRemoveArticlesWhenMarkedRead($0) }))
-            Toggle("Hide Empty Feeds / Categories", isOn: Binding(get: { store.hideEmptyNavigationEntries }, set: { store.setHideEmptyNavigationEntries($0) }))
+
+            Section {
+                Picker("Keep read articles", selection: retention) {
+                    Text("30 days").tag(ReadArticleRetention.days30)
+                    Text("60 days").tag(ReadArticleRetention.days60)
+                    Text("90 days").tag(ReadArticleRetention.days90)
+                    Text("180 days").tag(ReadArticleRetention.days180)
+                    Text("365 days").tag(ReadArticleRetention.days365)
+                }
+                Picker("Reader detail limit", selection: detailCharacterLimit) {
+                    Text("5,000 characters").tag(UInt32(5_000))
+                    Text("10,000 characters").tag(UInt32(10_000))
+                    Text("20,000 characters").tag(UInt32(20_000))
+                }
+            } header: {
+                Text("Storage & Reader")
+            } footer: {
+                Text("Read article retention controls how long synchronized read items remain in local history. The Reader detail limit controls how much article text the Core keeps when a feed uses truncated Reader content.")
+            }
+            .disabled(store.coreSettings == nil)
+
+            Section {
+                Picker(
+                    "Sync article changes",
+                    selection: deliveryMode
+                ) {
+                    Text("Deferred").tag(DeliveryMode.deferred)
+                    Text("Immediately").tag(DeliveryMode.live)
+                }
+                .disabled(store.coreSettings == nil)
+            } footer: {
+                Text("Immediate delivery saves read/unread and star changes locally first and then sends them to Miniflux. Failed delivery remains pending for a later retry.")
+            }
         }
         .formStyle(.grouped)
     }
+}
 
-    private var articlePresentationDescription: String {
-        switch store.articlePresentationMode {
-        case .visual:
-            String(localized: "Image-forward presentation with a large article image.")
-        case .visualCompact:
-            String(localized: "Compact visual presentation with a 4:3 thumbnail beside the headline.")
-        case .compact:
-            String(localized: "Text-focused presentation with higher information density.")
+private struct MacOSNavigationSettingsView: View {
+    @ObservedObject var store: BrowserStore
+
+    var body: some View {
+        Form {
+            Toggle(
+                "Hide empty feeds",
+                isOn: Binding(
+                    get: { store.hideEmptyNavigationEntries },
+                    set: store.setHideEmptyNavigationEntries
+                )
+            )
+            Picker(
+                "Startup scope",
+                selection: Binding(get: { store.startupScope }, set: store.setStartupScope)
+            ) {
+                Text("All News").tag(StartupScopePreference.allNews)
+                Text("Starred").tag(StartupScopePreference.starred)
+                Text("Category").tag(StartupScopePreference.category)
+                Text("Feed").tag(StartupScopePreference.feed)
+            }
+            if store.startupScope == .category {
+                Picker(
+                    "Startup category",
+                    selection: Binding(
+                        get: { store.startupCategoryID },
+                        set: store.setStartupCategoryID
+                    )
+                ) {
+                    ForEach(store.catalog.categories, id: \.id) { category in
+                        Text(category.title).tag(Optional(category.id))
+                    }
+                }
+                .disabled(store.catalog.categories.isEmpty)
+            }
+            if store.startupScope == .feed {
+                Picker(
+                    "Startup feed",
+                    selection: Binding(
+                        get: { store.startupFeedID },
+                        set: store.setStartupFeedID
+                    )
+                ) {
+                    ForEach(store.catalog.feeds, id: \.id) { feed in
+                        Text(feed.title).tag(Optional(feed.id))
+                    }
+                }
+                .disabled(store.catalog.feeds.isEmpty)
+            }
         }
+        .formStyle(.grouped)
+    }
+}
+
+private struct MacOSBackgroundSyncSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    @Binding var syncOnStart: Bool
+    let backgroundSyncEnabled: Binding<Bool>
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Background Sync", isOn: backgroundSyncEnabled)
+                    .disabled(store.coreSettings == nil)
+                Toggle("Sync on Start", isOn: $syncOnStart)
+            } footer: {
+                Text("When enabled, FluxNews may refresh news in the background and when you return to the app. Manual Sync remains available at all times.")
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -2119,13 +2173,13 @@ private struct MediaSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Media / Listening List") {
-                Toggle("Automatically download items added to Listening List", isOn: autoDownloadListeningList)
+            Section("Listening List") {
+                Toggle("Automatically download Listening List audio", isOn: autoDownloadListeningList)
                 Text("Downloads audio automatically when an item is added to Listening List.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Toggle("Delete download after playback", isOn: deleteAfterPlayback)
+                Toggle("Delete download after playback completes", isOn: deleteAfterPlayback)
                 Text("Removes the local download after playback is completed. The item remains in Listening List.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2269,7 +2323,7 @@ private struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Toggle("Launch automatically at login", isOn: $launchAtLogin)
-            Picker("Global Shortcut", selection: $globalShortcut) {
+            Picker("Global shortcut", selection: $globalShortcut) {
                 ForEach(GlobalShortcutChoice.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             if let registrationError {
