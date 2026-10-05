@@ -2,12 +2,7 @@ import CoreGraphics
 import Foundation
 
 struct ScrolloverExposureTracker {
-    private struct Exposure {
-        var wasVisible = false
-        var processedFrame: CGRect
-        var currentFrame: CGRect
-    }
-
+    private struct Exposure { var visibleSince: TimeInterval?; var qualified = false; var processedFrame: CGRect; var currentFrame: CGRect }
     private var exposures: [Int64: Exposure] = [:]
     private var emittedIDs = Set<Int64>()
 
@@ -20,21 +15,25 @@ struct ScrolloverExposureTracker {
         exposures = exposures.filter { unread.contains($0.key) }
         emittedIDs = emittedIDs.intersection(unread)
         for (id, frame) in frames where unread.contains(id) {
-            var exposure = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame)
-            exposure.processedFrame = frame
-            exposure.currentFrame = frame
-            exposures[id] = exposure
+            guard var e = exposures[id] else { continue }
+            e.processedFrame = frame
+            e.currentFrame = frame
+            exposures[id] = e
         }
     }
 
-    mutating func observe(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now _: TimeInterval) {
+    mutating func observe(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval) {
         for (id, frame) in frames where unread.contains(id) {
-            var exposure = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame)
-            if frame.intersects(viewport) {
-                exposure.wasVisible = true
+            var e = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame)
+            let visible = frame.intersection(viewport).height / max(1, frame.height)
+            if visible >= 0.6 {
+                e.visibleSince = e.visibleSince ?? now
+                e.qualified = e.qualified || now - (e.visibleSince ?? now) >= 0.7
+            } else if !e.qualified {
+                e.visibleSince = nil
             }
-            exposure.currentFrame = frame
-            exposures[id] = exposure
+            e.currentFrame = frame
+            exposures[id] = e
         }
         exposures = exposures.filter { unread.contains($0.key) }
         emittedIDs = emittedIDs.intersection(unread)
@@ -47,43 +46,49 @@ struct ScrolloverExposureTracker {
             return []
         }
 
+        // Reversal changes the relevant crossing segment, but not exposure qualification.
         if offsetDelta <= 0 {
             observe(frames: frames, viewport: viewport, unread: unread, now: now)
-            for id in Array(exposures.keys) {
-                if var exposure = exposures[id], let frame = frames[id] {
-                    exposure.processedFrame = frame
-                    exposure.currentFrame = frame
-                    exposures[id] = exposure
-                }
-            }
+            rebase(frames: frames, unread: unread)
             return []
         }
 
-        // A normal forward scroll marks an unread article once it has actually
-        // been visible and then leaves the viewport through its top edge.
-        // There is deliberately no dwell-time or visibility-percentage gate:
-        // those timing-dependent gates made slow desktop scrolling unreliable.
-        let ids = exposures.compactMap { id, exposure -> Int64? in
-            guard !emittedIDs.contains(id),
-                  exposure.wasVisible,
-                  unread.contains(id),
-                  let frame = frames[id] else { return nil }
-            let crossedTop = exposure.processedFrame.maxY > viewport.minY
-                && frame.maxY <= viewport.minY
-            return crossedTop ? id : nil
+        let ids = exposures.compactMap { id, e -> Int64? in
+            guard !emittedIDs.contains(id), e.qualified, unread.contains(id), let frame = frames[id] else { return nil }
+            let crossed = e.processedFrame.maxY > viewport.minY && frame.maxY <= viewport.minY
+            return crossed ? id : nil
         }.sorted()
         emittedIDs.formUnion(ids)
 
         observe(frames: frames, viewport: viewport, unread: unread, now: now)
         for id in Array(exposures.keys) {
-            if var exposure = exposures[id] {
-                exposure.processedFrame = exposure.currentFrame
-                exposures[id] = exposure
+            if var e = exposures[id] {
+                e.processedFrame = e.currentFrame
+                exposures[id] = e
             }
         }
         return ids
     }
 }
+
+#if DEBUG
+struct ScrolloverExposureDiagnostic: Sendable {
+    let id: Int64
+    let visibleSince: TimeInterval?
+    let qualified: Bool
+    let processedFrame: CGRect
+    let currentFrame: CGRect
+}
+
+extension ScrolloverExposureTracker {
+    // Read-only diagnostic state for native runtime investigation.
+    func diagnosticExposures() -> [ScrolloverExposureDiagnostic] {
+        exposures.map {
+            ScrolloverExposureDiagnostic(id: $0.key, visibleSince: $0.value.visibleSince, qualified: $0.value.qualified, processedFrame: $0.value.processedFrame, currentFrame: $0.value.currentFrame)
+        }
+    }
+}
+#endif
 
 enum SnapshotRefreshPolicy {
     enum Action: Equatable { case replace, preserve, signalNewData }
