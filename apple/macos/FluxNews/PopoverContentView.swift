@@ -88,9 +88,8 @@ private struct ArticlePane: View {
     let layoutChanged: (Bool) -> Void
     let showSettings: () -> Void
     let dismiss: () -> Void
-    @State private var tracker = ScrolloverExposureTracker()
-    @State private var frames: [Int64: CGRect] = [:]
-    @State private var viewport = CGRect.zero
+    @State private var visibleArticleIDs = Set<Int64>()
+    @State private var scrollDirection: CGFloat = 0
     @State private var trackerRevision: UInt64
     @State private var selectedID: Int64?
     @State private var hoveredID: Int64?
@@ -148,7 +147,8 @@ private struct ArticlePane: View {
             }
         }
         .onChange(of: store.listPresentationRevision) { _, revision in
-            tracker.reset()
+            visibleArticleIDs.removeAll()
+            scrollDirection = 0
             trackerRevision = revision
             selectedID = nil
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
@@ -158,11 +158,13 @@ private struct ArticlePane: View {
         .onChange(of: selectedID) { _, articleID in
             store.selectArticleAudioActions(for: articleID)
         }
-        .onChange(of: store.popoverVisible) { _, _ in tracker.reset() }
+        .onChange(of: store.popoverVisible) { _, _ in
+            visibleArticleIDs.removeAll()
+            scrollDirection = 0
+        }
         .onChange(of: store.articles.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
         }
-        .onReceive(timer) { _ in observe() }
         .alert("Replace Playing Audio?", isPresented: Binding(get: { pendingAudioReplacement != nil }, set: { if !$0 { pendingAudioReplacement = nil } })) {
             Button("Cancel", role: .cancel) { pendingAudioReplacement = nil }
             Button("Replace", role: .destructive) {
@@ -260,10 +262,15 @@ private struct ArticlePane: View {
                                 }
                             }
                         }
+                        .scrollTargetLayout()
                     }
                     .scrollPosition($scrollPosition)
-                    .coordinateSpace(name: ArticleScrollSpace.name)
-                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in scrollChanged(new - old) }
+                    .onScrollTargetVisibilityChange(idType: Int64.self) { ids in
+                        visibleArticlesChanged(Set(ids))
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                        scrollChanged(new - old)
+                    }
                     .onScrollPhaseChange { previous, phase in
                         if !isUserScrollPhase(previous), isUserScrollPhase(phase) {
                             store.beginScrolloverUndoBatch()
@@ -276,21 +283,16 @@ private struct ArticlePane: View {
                     }
                     .onChange(of: store.snapshotResetRevision) { _, revision in
                         NativeLog.snapshot.debug("snapshot reset requested revision=\(revision, privacy: .public)")
-                        tracker.reset()
+                        visibleArticleIDs.removeAll()
+                        scrollDirection = 0
                         suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
                         scrollPosition.scrollTo(edge: .top)
                         NativeLog.snapshot.debug("snapshot reset completed revision=\(revision, privacy: .public)")
                     }
                     .background { KeyboardCommandObserver { command in handle(command, proxy: proxy) } }
-                    .onAppear { viewport = CGRect(origin: .zero, size: geometry.size); observe() }
-                    .onChange(of: geometry.size) { _, size in
-                        viewport = CGRect(origin: .zero, size: size)
-                        tracker.reset()
-                    }
-                    .onPreferenceChange(ArticleFrameKey.self) { newFrames in
-                        frames = newFrames
-                        if !userScrolling { tracker.rebase(frames: newFrames, unread: unreadIDs) }
-                        observe()
+                    .onChange(of: geometry.size) { _, _ in
+                        visibleArticleIDs.removeAll()
+                        scrollDirection = 0
                     }
                 }
             }
@@ -328,31 +330,42 @@ private struct ArticlePane: View {
         else { withAnimation(.easeInOut(duration: PopoverLayout.animation)) { sidebarVisible.toggle() } }
         layoutChanged(sidebarVisible)
     }
-    private func observe() {
-        guard !store.isSearchActive, store.popoverVisible, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, !viewport.isEmpty else { return }
-        tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
-    }
     private func scrollChanged(_ delta: CGFloat) {
         guard userScrolling else {
-            tracker.rebase(frames: frames, unread: unreadIDs)
-            observe()
+            scrollDirection = 0
             return
         }
         store.noteMeaningfulInteraction()
-        guard !store.isSearchActive,
+        scrollDirection = delta
+    }
+
+    private func visibleArticlesChanged(_ newVisibleIDs: Set<Int64>) {
+        defer { visibleArticleIDs = newVisibleIDs }
+
+        guard userScrolling,
+              scrollDirection > 0,
+              !store.isSearchActive,
+              store.popoverVisible,
               store.markReadOnScrolloverEnabled,
               ProcessInfo.processInfo.systemUptime >= suppressUntil,
-              trackerRevision == store.listPresentationRevision else { return }
-        let ids = tracker.process(
-            frames: frames,
-            viewport: viewport,
-            unread: unreadIDs,
-            now: Date.timeIntervalSinceReferenceDate,
-            offsetDelta: delta,
-            userInitiated: true
-        )
+              trackerRevision == store.listPresentationRevision,
+              !visibleArticleIDs.isEmpty,
+              !newVisibleIDs.isEmpty else { return }
+
+        let order = Dictionary(uniqueKeysWithValues: store.articles.enumerated().map { ($0.element.id, $0.offset) })
+        guard let firstVisibleIndex = newVisibleIDs.compactMap({ order[$0] }).min() else { return }
+
+        let ids = visibleArticleIDs
+            .subtracting(newVisibleIDs)
+            .filter { id in
+                guard unreadIDs.contains(id), let index = order[id] else { return false }
+                return index < firstVisibleIndex
+            }
+            .sorted { (order[$0] ?? .max) < (order[$1] ?? .max) }
+
         if !ids.isEmpty { store.flushScrollover(ids) }
     }
+
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
         switch command {
         case .moveUp: move(-1, proxy)
