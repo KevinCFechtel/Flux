@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private let store = BrowserStore()
     private let popover = NSPopover()
     private var statusItem: NSStatusItem!
+    private var statusItemLengthFrozen = false
     private var countObservation: AnyCancellable?
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
@@ -63,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self.show()
             self.store.selectNotificationFeed(feedID)
         }
-        statusItem = NSStatusBar.system.statusItem(withLength: 72)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = Bundle.main.url(forResource: "FluxNewsTemplate", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
             button.image?.size = NSSize(width: 18, height: 18)
@@ -75,9 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             button.action = #selector(togglePopover)
         }
         countObservation = store.$unreadTotal.combineLatest(store.$hasPendingNewData).sink { [weak self] unreadTotal, hasPendingNewData in
-            guard let button = self?.statusItem.button else { return }
-            button.title = StatusItemPresentation.title(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData)
-            button.setAccessibilityValue(StatusItemPresentation.accessibilityValue(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData))
+            self?.updateStatusItem(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData)
         }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) }, widgetAction: { [weak self] action in self?.store.handleWidgetAction(action); self?.show() })
@@ -107,9 +106,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         for url in urls { _ = AppRouter.shared.handle(url: url) }
     }
     @objc private func togglePopover() { if popover.isShown || fallbackPanel?.isVisible == true { dismiss() } else { show() } }
-    func popoverWillShow(_ notification: Notification) { store.popoverVisible = true; popover.contentSize = size(sidebarVisible: sidebarVisible) }
-    func popoverDidClose(_ notification: Notification) { store.popoverVisible = false; store.syncIfStale() }
-    func windowWillClose(_ notification: Notification) { guard notification.object as? NSPanel === fallbackPanel else { return }; store.popoverVisible = false; store.syncIfStale() }
+    func popoverWillShow(_ notification: Notification) {
+        statusItemLengthFrozen = true
+        store.popoverVisible = true
+        popover.contentSize = size(sidebarVisible: sidebarVisible)
+    }
+    func popoverDidClose(_ notification: Notification) {
+        store.popoverVisible = false
+        statusItemLengthFrozen = false
+        applyStatusItemLength()
+        store.syncIfStale()
+    }
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSPanel === fallbackPanel else { return }
+        store.popoverVisible = false
+        statusItemLengthFrozen = false
+        applyStatusItemLength()
+        store.syncIfStale()
+    }
     func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
         guard userActivity.activityType == CSSearchableItemActionType,
               let identifier = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
@@ -118,13 +132,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         return true
     }
     private func host() -> NSHostingController<PopoverContentView> { NSHostingController(rootView: PopoverContentView(store: store, playbackState: playbackPresentationState, playbackCoordinator: playbackCoordinator, transferState: transferPresentationState, layoutChanged: { [weak self] visible in self?.resize(sidebarVisible: visible) }, dismiss: { [weak self] in self?.dismiss() })) }
-    private func show() { NSApplication.shared.activate(ignoringOtherApps: true); if let button = usableButton() { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); popover.contentViewController?.view.window?.makeKey() } else { showFallback() } }
+    private func show() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        statusItemLengthFrozen = true
+        if let button = usableButton() {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        } else {
+            showFallback()
+        }
+    }
     private func detailScreen() -> NSScreen? { popover.contentViewController?.view.window?.screen ?? fallbackPanel?.screen ?? statusItem.button?.window?.screen }
     private func usableButton() -> NSStatusBarButton? { guard let button = statusItem.button, let window = button.window, let screen = window.screen else { return nil }; return screen.frame.intersects(window.convertToScreen(button.convert(button.bounds, to: nil))) ? button : nil }
     private func dismiss() { if popover.isShown { popover.performClose(nil) }; fallbackPanel?.close() }
-    private func showFallback() { let panel = fallbackPanel ?? makeFallback(); fallbackPanel = panel; panel.setContentSize(size(sidebarVisible: sidebarVisible)); store.popoverVisible = true; panel.center(); panel.makeKeyAndOrderFront(nil) }
+    private func showFallback() {
+        statusItemLengthFrozen = true
+        let panel = fallbackPanel ?? makeFallback()
+        fallbackPanel = panel
+        panel.setContentSize(size(sidebarVisible: sidebarVisible))
+        store.popoverVisible = true
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+    }
     private func makeFallback() -> NSPanel { let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size(sidebarVisible: sidebarVisible)), styleMask: [.titled, .closable, .utilityWindow], backing: .buffered, defer: false); panel.title = "FluxNews"; panel.isFloatingPanel = true; panel.level = .floating; panel.collectionBehavior = [.moveToActiveSpace, .transient]; panel.isReleasedWhenClosed = false; panel.delegate = self; panel.contentViewController = host(); return panel }
     private func resize(sidebarVisible: Bool) { self.sidebarVisible = sidebarVisible; let newSize = size(sidebarVisible: sidebarVisible); guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { popover.contentSize = newSize; fallbackPanel?.setContentSize(newSize); return }; if popover.isShown { NSAnimationContext.runAnimationGroup { $0.duration = PopoverLayout.animation; $0.allowsImplicitAnimation = true; popover.contentSize = newSize } } else { fallbackPanel?.setContentSize(newSize) } }
+    private func updateStatusItem(unreadTotal: UInt64, hasPendingNewData: Bool) {
+        guard let button = statusItem.button else { return }
+        button.title = StatusItemPresentation.title(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData)
+        button.setAccessibilityValue(StatusItemPresentation.accessibilityValue(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData))
+        applyStatusItemLength()
+    }
+
+    private func applyStatusItemLength() {
+        guard !statusItemLengthFrozen, let button = statusItem.button else { return }
+        // Keep the item compact for short counts, but retain a small native hit-target
+        // margin around the icon/title combination. intrinsicContentSize reflects
+        // the current title even while an explicit NSStatusItem length is in use.
+        statusItem.length = max(28, ceil(button.intrinsicContentSize.width + 4))
+    }
+
     private func size(sidebarVisible: Bool) -> NSSize {
         let visibleHeight = statusItem.button?.window?.screen?.visibleFrame.height
             ?? NSScreen.main?.visibleFrame.height
