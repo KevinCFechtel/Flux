@@ -938,7 +938,7 @@ private struct ArticleItem: View {
             selected: selected,
             hovered: hovered,
             onHoverChanged: updateHover,
-            menu: actionMenu
+            menu: { actionMenu }
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -993,7 +993,7 @@ private struct ArticleItem: View {
             selected: selected,
             hovered: hovered,
             onHoverChanged: updateHover,
-            menu: actionMenu
+            menu: { actionMenu }
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
