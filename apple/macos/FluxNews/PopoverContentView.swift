@@ -1355,24 +1355,55 @@ private struct ThumbnailSlot: View {
 
 struct FeedIconSlot: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     let feedID: Int64
     @ObservedObject var store: BrowserStore
+    var size: CGFloat = 16
+
     var body: some View {
         let dark = colorScheme == .dark
         let key = "\(feedID)-\(dark ? "dark" : "normal")"
+
         Group {
-            if let data = store.feedIcons[key], let image = NSImage(data: data) {
-                Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+            if let image = store.feedIcons[key] {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
             } else {
-                Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.secondary)
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor)
+                    Text(fallbackLetter)
+                        .font(.system(size: max(8, size * 0.52), weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: size, height: size)
+        .clipShape(Circle())
         .accessibilityLabel("Feed icon")
-        .onAppear { store.requestFeedIcon(feedID, darkAppearance: dark) }
-        .onChange(of: colorScheme) { _, appearance in
-            store.requestFeedIcon(feedID, darkAppearance: appearance == .dark)
+        .onAppear {
+            store.requestFeedIcon(
+                feedID,
+                darkAppearance: dark,
+                displayScale: displayScale
+            )
         }
+        .onChange(of: colorScheme) { _, appearance in
+            store.requestFeedIcon(
+                feedID,
+                darkAppearance: appearance == .dark,
+                displayScale: displayScale
+            )
+        }
+    }
+
+    private var fallbackLetter: String {
+        let title = store.feedTitle(feedID: feedID)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.first.map { String($0).uppercased() } ?? "•"
     }
 }
 
