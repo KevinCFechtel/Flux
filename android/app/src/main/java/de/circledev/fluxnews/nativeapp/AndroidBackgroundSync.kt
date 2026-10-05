@@ -71,13 +71,29 @@ internal class AndroidBackgroundSync(
                     }
                 ) {
                     is SyncOutcome.Completed -> {
+                        val metadata = outcome.metadata
+                        diagnostics.record(
+                            AndroidAppLogLevel.Info,
+                            "background-sync",
+                            "resume completed new=" + metadata.newArticles +
+                                " updated=" + metadata.updatedArticles +
+                                " feed_counts=" + metadata.newArticlesByFeed.joinToString(prefix = "[", postfix = "]") { it.feedId.toString() + ":" + it.count } +
+                                " candidates=" + metadata.systemNotificationCandidates.size,
+                        )
                         if (!cancellation.isCancelled() && coreRuntime.activeSessionGeneration() == generation) {
-                            postSyncEffects.handle(generation, outcome.metadata)
+                            postSyncEffects.handle(generation, metadata)
                         }
                     }
-                    is SyncOutcome.Cancelled -> Unit
+                    is SyncOutcome.Cancelled -> {
+                        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "resume cancelled")
+                    }
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                diagnostics.record(
+                    AndroidAppLogLevel.Warning,
+                    "background-sync",
+                    "resume failed type=" + error.javaClass.simpleName + " message=" + error.message.orEmpty(),
+                )
                 // Resume is an opportunistic fallback. Normal foreground data remains available.
             } finally {
                 synchronized(resumeLock) {
@@ -111,44 +127,95 @@ internal class AndroidBackgroundSync(
 internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as FluxApplication
-        val state = app.accountBootstrap.restoreStoredAccount()
-        if (state !is AndroidAccountBootstrap.State.Ready) return Result.success()
+        val diagnostics = app.diagnostics
+        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker started attempt=" + runAttemptCount)
 
-        val generation = app.coreRuntime.activeSessionGeneration() ?: return Result.retry()
+        val state = app.accountBootstrap.restoreStoredAccount()
+        if (state !is AndroidAccountBootstrap.State.Ready) {
+            diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker finished no_account")
+            return Result.success()
+        }
+
+        val generation = app.coreRuntime.activeSessionGeneration()
+        if (generation == null) {
+            diagnostics.record(AndroidAppLogLevel.Warning, "background-sync", "worker retry no_active_session")
+            return Result.retry()
+        }
+
         val enabled = runCatching {
             app.coreRuntime.localForGeneration(generation) { it.coreSettings().backgroundSyncEnabled }
-        }.getOrElse { return Result.retry() }
+        }.getOrElse { error ->
+            diagnostics.record(
+                AndroidAppLogLevel.Warning,
+                "background-sync",
+                "worker retry setting_read_failed type=" + error.javaClass.simpleName + " message=" + error.message.orEmpty(),
+            )
+            return Result.retry()
+        }
         if (!enabled) {
+            diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker disabled cancelling_periodic_work")
             WorkManager.getInstance(applicationContext).cancelUniqueWork(AndroidBackgroundSync.WORK_NAME)
             return Result.success()
         }
 
         val cancellation = SyncCancellation()
         return try {
+            diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "core background sync starting")
             when (
                 val outcome = app.coreRuntime.remoteForGeneration(generation) {
                     it.syncCancellable(SyncReason.BACKGROUND, cancellation)
                 }
             ) {
                 is SyncOutcome.Completed -> {
+                    val metadata = outcome.metadata
+                    diagnostics.record(
+                        AndroidAppLogLevel.Info,
+                        "background-sync",
+                        "core background sync completed new=" + metadata.newArticles +
+                            " updated=" + metadata.updatedArticles +
+                            " feed_counts=" + metadata.newArticlesByFeed.joinToString(prefix = "[", postfix = "]") { it.feedId.toString() + ":" + it.count } +
+                            " candidates=" + metadata.systemNotificationCandidates.joinToString(prefix = "[", postfix = "]") { it.candidateId.toString() + ":" + it.feedId + ":" + it.newCount },
+                    )
                     if (cancellation.isCancelled() || app.coreRuntime.activeSessionGeneration() != generation) {
+                        diagnostics.record(
+                            AndroidAppLogLevel.Warning,
+                            "background-sync",
+                            "post-sync skipped cancelled=" + cancellation.isCancelled() +
+                                " session_changed=" + (app.coreRuntime.activeSessionGeneration() != generation),
+                        )
                         Result.success()
                     } else {
-                        app.postSyncEffects.handle(generation, outcome.metadata)
+                        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "post-sync starting")
+                        app.postSyncEffects.handle(generation, metadata)
+                        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "post-sync completed worker_success")
                         Result.success()
                     }
                 }
-                is SyncOutcome.Cancelled -> Result.success()
+                is SyncOutcome.Cancelled -> {
+                    diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "core background sync cancelled")
+                    Result.success()
+                }
             }
         } catch (cancelled: CancellationException) {
             cancellation.cancel()
+            diagnostics.record(AndroidAppLogLevel.Warning, "background-sync", "worker coroutine cancelled")
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            diagnostics.record(
+                AndroidAppLogLevel.Warning,
+                "background-sync",
+                "worker retry type=" + error.javaClass.simpleName + " message=" + error.message.orEmpty(),
+            )
             Result.retry()
         } finally {
-            // WorkManager cancels CoroutineWorker by cancelling its coroutine. Mirror that cancellation
-            // into the Core handle before leaving the worker so native sync can stop promptly as well.
-            if (isStopped) cancellation.cancel()
+            if (isStopped) {
+                cancellation.cancel()
+                diagnostics.record(
+                    AndroidAppLogLevel.Warning,
+                    "background-sync",
+                    "worker stopped stop_reason=" + stopReason,
+                )
+            }
         }
     }
 }
