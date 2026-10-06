@@ -817,14 +817,32 @@ private fun NewsRootContent(
         }
 
         if (bottomActionsVisible) {
-            AndroidArticleListBottomDock(
-                coordinator = mediaPlaybackCoordinator,
-                onOpenPlayer = { nowPlayingPresented = true },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
+            if (miniPlayerVisible) {
+                AndroidArticleListBottomDock(
+                    coordinator = mediaPlaybackCoordinator,
+                    onOpenPlayer = { nowPlayingPresented = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    AndroidArticleActionCapsule(
+                        selection = selection,
+                        resolvedActions = resolvedActions,
+                        syncState = syncState,
+                        syncSuccessVisible = syncSuccessVisible,
+                        actionsEnabled = !markReadRunning,
+                        scale = actionCapsuleScale,
+                        onRequestManualSync = {
+                            syncCoordinator.requestSync(SyncReason.MANUAL)
+                        },
+                        onCancelManualSync = syncCoordinator::cancelManualSync,
+                        onSelectionChanged = onSelectionChanged,
+                        onAction = ::executeArticleListAction,
+                        embeddedInDock = true,
+                    )
+                }
+            } else {
                 AndroidArticleActionCapsule(
                     selection = selection,
                     resolvedActions = resolvedActions,
@@ -838,7 +856,10 @@ private fun NewsRootContent(
                     onCancelManualSync = syncCoordinator::cancelManualSync,
                     onSelectionChanged = onSelectionChanged,
                     onAction = ::executeArticleListAction,
-                    embeddedInDock = true,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(bottom = 12.dp),
                 )
             }
         }
