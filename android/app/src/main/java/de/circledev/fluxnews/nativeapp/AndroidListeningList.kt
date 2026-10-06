@@ -84,7 +84,9 @@ internal class AndroidListeningListStore(
     }
 
     suspend fun removeFromListeningList(articleId: Long): Result<Unit> =
-        mutate { core -> core.removeFromListeningList(articleId = articleId) }
+        mutate(reconcileTransfers = true) { core ->
+            core.removeFromListeningList(articleId = articleId)
+        }
 
     suspend fun requestDownload(enclosureId: Long): Result<Unit> =
         mutate(reconcileTransfers = true) { core ->
