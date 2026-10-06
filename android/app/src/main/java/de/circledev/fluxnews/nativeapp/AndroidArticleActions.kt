@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,12 +28,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -62,6 +65,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.DownloadState
 
 internal enum class AndroidSaveToServiceOutcome {
     Saved,
@@ -177,6 +181,47 @@ internal object AndroidArticleActionPolicy {
         AndroidArticleContextAction.Share -> "Share"
         AndroidArticleContextAction.SaveToService -> "Save to third-party service"
     }
+}
+
+internal fun androidMediaDownloadActionLabel(state: DownloadState?): String = when (state) {
+    null, DownloadState.NOT_DOWNLOADED -> "Download"
+    DownloadState.REQUESTED -> "Cancel download"
+    DownloadState.DOWNLOADED -> "Delete download"
+    DownloadState.FAILED -> "Retry download"
+    DownloadState.DELETE_REQUESTED -> "Deleting…"
+}
+
+@Composable
+internal fun AndroidArticleDownloadChooserDialog(
+    state: AndroidArticleMediaActionState,
+    onSelect: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose audio") },
+        text = {
+            Column {
+                state.audioEnclosures.forEachIndexed { index, enclosure ->
+                    val download = state.downloads[enclosure.id]
+                    TextButton(
+                        onClick = {
+                            if (download?.state != DownloadState.DELETE_REQUESTED) {
+                                onSelect(enclosure.id)
+                            }
+                        },
+                        enabled = download?.state != DownloadState.DELETE_REQUESTED,
+                    ) {
+                        val type = enclosure.mimeType.ifBlank { "Audio " + (index + 1) }
+                        Text(type + " · " + androidMediaDownloadActionLabel(download?.state))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
 }
 
 internal object AndroidWebRoutingPolicy {
