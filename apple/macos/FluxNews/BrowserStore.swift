@@ -498,75 +498,79 @@ final class BrowserStore: ObservableObject {
     func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool, displayScale: CGFloat = 2) {
         let key = "\(feedID)-\(darkAppearance ? "dark" : "normal")"
         guard feedIconRequests.begin(key, cached: feedIcons[key] != nil), let core else { return }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            do {
-                let variant: FeedIconVariant = darkAppearance ? .dark : .normal
-                let icon = try core.feedIcon(feedId: feedID, variant: variant)
-                let prepared = icon.flatMap {
-                    MacOSFeedIconImagePreparation.prepare(
-                        data: Data($0.pngData),
-                        displayScale: displayScale
+        let variant: FeedIconVariant = darkAppearance ? .dark : .normal
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.feedIcon(feedId: feedID, variant: variant) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(icon):
+                let prepared = await Task.detached(priority: .userInitiated) {
+                    icon.flatMap {
+                        MacOSFeedIconImagePreparation.prepare(
+                            data: Data($0.pngData),
+                            displayScale: displayScale
+                        )
+                    }
+                }.value
+                if let prepared {
+                    self.feedIcons[key] = NSImage(
+                        cgImage: prepared.image,
+                        size: NSSize(
+                            width: MacOSFeedIconImagePreparation.displaySidePoints,
+                            height: MacOSFeedIconImagePreparation.displaySidePoints
+                        )
                     )
                 }
-                await MainActor.run {
-                    guard let store = store.value else { return }
-                    if let prepared {
-                        store.feedIcons[key] = NSImage(
-                            cgImage: prepared.image,
-                            size: NSSize(
-                                width: MacOSFeedIconImagePreparation.displaySidePoints,
-                                height: MacOSFeedIconImagePreparation.displaySidePoints
-                            )
-                        )
-                        NativeLog.feedIcon.debug("feed icon available feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
-                    } else {
-                        NativeLog.feedIcon.debug("feed icon unavailable feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
-                    }
-                    store.feedIconRequests.complete(key)
-                }
-            } catch {
-                await MainActor.run {
-                    store.value?.feedIconRequests.complete(key)
-                    NativeLog.feedIcon.debug("feed icon request failed feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
-                }
+                self.feedIconRequests.complete(key)
+            case .failure:
+                self.feedIconRequests.complete(key)
             }
         }
     }
+
     func articleThumbnailKey(_ article: ArticleSummary) -> String { "\(article.id)-\(article.imageUrl ?? "")" }
+
     func requestArticleThumbnail(_ article: ArticleSummary) {
         guard let imageURL = article.imageUrl else { return }
         let key = articleThumbnailKey(article)
-        guard !unavailableArticleThumbnails.contains(key), articleThumbnailRequests.begin(key, cached: articleThumbnails[key] != nil), let core else { return }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            do {
-                let result = try core.articleThumbnail(articleId: article.id, imageUrl: imageURL)
-                let image: NSImage? = if case let .available(pngData) = result { NSImage(data: Data(pngData)) } else { nil }
-                await MainActor.run {
-                    switch result {
-                    case .available:
-                        if let image { store.value?.articleThumbnails[key] = image }
-                        store.value?.articleThumbnailRequests.complete(key)
-                    case .unavailable:
-                        store.value?.unavailableArticleThumbnails.insert(key)
-                        store.value?.articleThumbnailRequests.complete(key)
-                    }
+        guard !unavailableArticleThumbnails.contains(key),
+              articleThumbnailRequests.begin(key, cached: articleThumbnails[key] != nil),
+              let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.articleThumbnail(articleId: article.id, imageUrl: imageURL) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(thumbnailResult):
+                switch thumbnailResult {
+                case let .available(pngData):
+                    let image = await Task.detached(priority: .userInitiated) {
+                        NSImage(data: Data(pngData))
+                    }.value
+                    if let image { self.articleThumbnails[key] = image }
+                case .unavailable:
+                    self.unavailableArticleThumbnails.insert(key)
                 }
-            } catch {
-                // Optional thumbnails fail silently and remain retryable on a later presentation.
-                _ = await MainActor.run {
-                    store.value?.unavailableArticleThumbnails.insert(key)
-                    store.value?.articleThumbnailRequests.complete(key)
-                }
+            case .failure:
+                self.unavailableArticleThumbnails.insert(key)
             }
+            self.articleThumbnailRequests.complete(key)
         }
     }
+
     func retryUnavailableArticleThumbnail(_ article: ArticleSummary) {
         let key = articleThumbnailKey(article)
         guard unavailableArticleThumbnails.contains(key) else { return }
         unavailableArticleThumbnails.remove(key)
     }
+
     var isSearchActive: Bool { scope == .search }
     var canLoadMoreSearchResults: Bool { Int64(articles.count) < searchTotal }
     func select(_ scope: BrowserScope) {
@@ -613,33 +617,37 @@ final class BrowserStore: ObservableObject {
         resetPresentation()
     }
     func submitSearch() {
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchText = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         searchGeneration &+= 1
         let generation = searchGeneration
-        guard !query.isEmpty else { clearSearch(); return }
+        guard !searchText.isEmpty else { clearSearch(); return }
         guard let core else { return }
+        let pageSize = searchPageSize
         articles = []
         selectionTotal = 0
         searchTotal = 0
         hasSearched = true
         isSearching = true
         errorMessage = nil
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.searchArticles(request: SearchArticlesRequest(query: query, offset: 0, limit: store.value?.searchPageSize ?? 50)) }
-            await MainActor.run {
-                guard let store = store.value, store.scope == .search, store.searchGeneration == generation else { return }
-                store.isSearching = false
-                switch result {
-                case let .success(page):
-                    store.articles = page.articles
-                    store.searchTotal = page.total
-                    store.loadArticleAudioActions(for: page.articles.map(\.id))
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.searchArticles(request: SearchArticlesRequest(query: searchText, offset: 0, limit: pageSize)) }
+            ) else { return }
+            guard let self, self.core === core, self.scope == .search, self.searchGeneration == generation else { return }
+            self.isSearching = false
+            switch result {
+            case let .success(page):
+                self.articles = page.articles
+                self.searchTotal = page.total
+                self.loadArticleAudioActions(for: page.articles.map(\.id))
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func clearSearch() {
         searchGeneration &+= 1
         searchQuery = ""
@@ -653,27 +661,31 @@ final class BrowserStore: ObservableObject {
     func loadMoreSearchResults() {
         guard scope == .search, hasSearched, !isSearching, canLoadMoreSearchResults, let core else { return }
         let generation = searchGeneration
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchText = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let offset = Int64(articles.count)
+        let pageSize = searchPageSize
         isSearching = true
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.searchArticles(request: SearchArticlesRequest(query: query, offset: offset, limit: store.value?.searchPageSize ?? 50)) }
-            await MainActor.run {
-                guard let store = store.value, store.scope == .search, store.searchGeneration == generation else { return }
-                store.isSearching = false
-                switch result {
-                case let .success(page):
-                    let existing = Set(store.articles.map(\.id))
-                    let appended = page.articles.filter { !existing.contains($0.id) }
-                    store.articles.append(contentsOf: appended)
-                    store.searchTotal = page.total
-                    store.loadArticleAudioActions(for: appended.map(\.id))
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.searchArticles(request: SearchArticlesRequest(query: searchText, offset: offset, limit: pageSize)) }
+            ) else { return }
+            guard let self, self.core === core, self.scope == .search, self.searchGeneration == generation else { return }
+            self.isSearching = false
+            switch result {
+            case let .success(page):
+                let existing = Set(self.articles.map(\.id))
+                let appended = page.articles.filter { !existing.contains($0.id) }
+                self.articles.append(contentsOf: appended)
+                self.searchTotal = page.total
+                self.loadArticleAudioActions(for: appended.map(\.id))
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func route(to route: NavigationRoute) {
         startupRouteState.markExplicitRoute()
         switch route {
@@ -703,34 +715,36 @@ final class BrowserStore: ObservableObject {
     func applyNewData() { reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: true) }
     func requestMediaTransferReconciliation() { onMediaTransferRequested?() }
     func sync(reason: SyncReason = .manual) {
-        guard let core else { return }
-        guard !isLoading else {
+        guard let core, !isLoading else {
             if reason == .periodic { NativeLog.sync.debug("periodic sync skipped because sync is already in flight") }
             return
         }
         isLoading = true
         if reason != .manual { lastAutomaticSyncAttempt = .now }
         if reason == .periodic { NativeLog.sync.notice("periodic sync triggered") }
-        let store = WeakBrowserStore(self)
-        Task.detached { [core, store] in
-            do {
-                let result = try core.sync(reason: reason)
-                await MainActor.run {
-                    guard let store = store.value else { return }
-                    NativeLog.sync.debug("sync completed; reconciling native media work")
-                    store.requestMediaTransferReconciliation()
-                }
-                await SystemNotificationManager.shared.deliver(result.systemNotificationCandidates, core: core)
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.sync(reason: reason) }
+            ) else {
+                if let self, self.core === core { self.isLoading = false }
+                return
             }
-            catch {
+            guard let self, self.core === core else { return }
+            self.isLoading = false
+            switch result {
+            case let .success(syncResult):
+                NativeLog.sync.debug("sync completed; reconciling native media work")
+                self.requestMediaTransferReconciliation()
+                await SystemNotificationManager.shared.deliver(syncResult.systemNotificationCandidates, core: core)
+            case let .failure(error):
                 NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .public)")
-                await MainActor.run {
-                    store.value?.isLoading = false
-                    store.value?.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func syncIfStale(reason: SyncReason = .periodic) {
         if lastAutomaticSyncAttempt.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: reason) }
     }
