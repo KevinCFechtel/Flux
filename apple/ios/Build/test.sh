@@ -32,10 +32,14 @@ fi
 
 "${REPOSITORY_DIR}/apple/Build/build-uniffi.sh"
 
-xcodebuild \
+# The simulator test gate validates compilation and tests only. Signed device
+# artifacts belong to build-app.sh/archive.sh/export-testflight.sh.
+FLUX_UNIFFI_PREPARED=1 xcodebuild \
   -project "${PROJECT}" \
   -scheme FluxNews \
   -configuration Debug \
   -destination "${DESTINATION}" \
   -derivedDataPath "${DERIVED_DATA}" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
   test
