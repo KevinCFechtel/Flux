@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         val syncCoordinator = application.syncCoordinator
         val timelineStore = application.timelineStore
         val searchStore = application.searchStore
+        val listeningListStore = application.listeningListStore
+        val mediaPlaybackCoordinator = application.mediaPlaybackCoordinator
         val readerStore = application.readerStore
         val articleOpenResolver = application.articleOpenResolver
         val navigationPreferences = application.navigationPreferences
@@ -104,6 +106,8 @@ class MainActivity : ComponentActivity() {
                         syncCoordinator,
                         timelineStore,
                         searchStore,
+                        listeningListStore,
+                        mediaPlaybackCoordinator,
                         readerStore,
                         articleOpenResolver,
                         navigationPreferences,
@@ -125,6 +129,8 @@ private fun FluxNewsApp(
     syncCoordinator: AndroidSyncCoordinator,
     timelineStore: AndroidArticleTimelineStore,
     searchStore: AndroidSearchStore,
+    listeningListStore: AndroidListeningListStore,
+    mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator,
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
@@ -171,6 +177,8 @@ private fun FluxNewsApp(
                 syncCoordinator = syncCoordinator,
                 timelineStore = timelineStore,
                 searchStore = searchStore,
+                listeningListStore = listeningListStore,
+                mediaPlaybackCoordinator = mediaPlaybackCoordinator,
                 readerStore = readerStore,
                 articleOpenResolver = articleOpenResolver,
                 navigationPreferences = navigationPreferences,
