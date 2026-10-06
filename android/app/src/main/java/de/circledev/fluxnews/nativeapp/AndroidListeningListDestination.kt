@@ -295,7 +295,8 @@ private fun AndroidListeningListRow(
         ?: item.audioEnclosures.firstOrNull { it.enclosure.id == item.activeEnclosureId }
         ?: item.audioEnclosures.firstOrNull()
     val selectedId = selected?.enclosure?.id
-    val isNowPlaying = nowPlayingEnclosure != null
+    val isNowPlaying = nowPlayingEnclosure != null &&
+        playback.status != AndroidMediaPlaybackPresentationStatus.Stopped
     val isPlaying = isNowPlaying &&
         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
 
