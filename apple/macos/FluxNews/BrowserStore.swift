@@ -1865,12 +1865,99 @@ final class BrowserStore: ObservableObject {
         NSWorkspace.shared.open(url)
     }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
-    func feedPreferences(feedID: Int64) throws -> FeedPreferences { guard let core else { throw NSError(domain: "FluxNews", code: 1) }; return try core.feedPreferences(feedId: feedID) }
-    func feedTitle(feedID: Int64) -> String { catalog.feeds.first(where: { $0.id == feedID })?.title ?? "" }
-    func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
-    func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
-    func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
-    func setFeedAutoDownloadAudio(feedID: Int64, enabled: Bool) throws { try core?.setFeedAutoDownloadAudio(feedId: feedID, enabled: enabled) }
+    func loadFeedPreferences(
+        feedID: Int64,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1)))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.feedPreferences(feedId: feedID) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            completion(result)
+        }
+    }
+
+    private func updateFeedPreferences(
+        feedID: Int64,
+        change: @escaping @Sendable (Flux) throws -> Void,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1)))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    try change(core)
+                    return try core.feedPreferences(feedId: feedID)
+                }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            completion(result)
+        }
+    }
+
+    func feedTitle(feedID: Int64) -> String {
+        catalog.feeds.first(where: { $0.id == feedID })?.title ?? ""
+    }
+
+    func setFeedDetailRendering(
+        feedID: Int64,
+        mode: DetailRenderingMode,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: { try $0.setFeedDetailRendering(feedId: feedID, mode: mode) },
+            completion: completion
+        )
+    }
+
+    func setFeedTruncateDetail(
+        feedID: Int64,
+        enabled: Bool,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: { try $0.setFeedTruncateDetail(feedId: feedID, enabled: enabled) },
+            completion: completion
+        )
+    }
+
+    func setFeedOpenInMiniflux(
+        feedID: Int64,
+        enabled: Bool,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: { try $0.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) },
+            completion: completion
+        )
+    }
+
+    func setFeedAutoDownloadAudio(
+        feedID: Int64,
+        enabled: Bool,
+        completion: @escaping (Result<FeedPreferences, Error>) -> Void
+    ) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: { try $0.setFeedAutoDownloadAudio(feedId: feedID, enabled: enabled) },
+            completion: completion
+        )
+    }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
     func showActionConfirmation(_ message: String) {
         actionConfirmation = message
