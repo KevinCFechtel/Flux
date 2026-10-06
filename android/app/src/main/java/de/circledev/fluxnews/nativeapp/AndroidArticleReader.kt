@@ -428,9 +428,9 @@ private fun ReaderHeader(
 }
 
 @Composable
-private fun AndroidReaderDocumentContent(
+internal fun AndroidReaderDocumentContent(
     document: ReaderDocument,
-    onOpenOriginal: () -> Unit,
+    onOpenOriginal: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -453,8 +453,10 @@ private fun AndroidReaderDocumentContent(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onOpenOriginal) {
-                    Text("Open original")
+                if (onOpenOriginal != null) {
+                    TextButton(onClick = onOpenOriginal) {
+                        Text("Open original")
+                    }
                 }
             }
         }
