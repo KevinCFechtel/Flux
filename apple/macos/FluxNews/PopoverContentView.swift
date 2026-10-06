@@ -1578,7 +1578,7 @@ struct SettingsView: View {
                 switch flow {
                 case let .export(url):
                     do {
-                        try store.exportConfigurationBackup(password: password).write(to: url, options: .atomic)
+                        try await store.exportConfigurationBackup(password: password).write(to: url, options: .atomic)
                         store.showActionConfirmation("Configuration backup exported")
                         return .success()
                     } catch {
