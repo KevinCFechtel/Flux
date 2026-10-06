@@ -520,6 +520,7 @@
 				ALWAYS_USE_SEPARATE_HEADERMAPS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -552,6 +553,7 @@
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
 				SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h";
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -563,6 +565,7 @@
 				ALWAYS_USE_SEPARATE_HEADERMAPS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -590,6 +593,7 @@
 				PRODUCT_NAME = FluxNews;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
 				SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h";
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -607,6 +611,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
 				PRODUCT_NAME = FluxNewsTests;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
 			};
@@ -625,6 +630,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
 				PRODUCT_NAME = FluxNewsTests;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
 			};
@@ -648,6 +654,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.FluxNewsWidgets;
 				PRODUCT_NAME = FluxNewsWidgets;
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -666,6 +673,7 @@
 				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.FluxNewsWidgets;
 				PRODUCT_NAME = FluxNewsWidgets;
+				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
