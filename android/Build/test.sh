@@ -10,4 +10,6 @@ GRADLEW="${ANDROID_DIR}/gradlew"
   exit 1
 }
 
-exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" testDevelopmentDebugUnitTest lintDevelopmentDebug assembleDevelopmentDebug
+# The test gate validates compilation, unit tests, and lint only. APK/AAB
+# artifacts belong to build-app.sh and its signing-specific variants.
+exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" testDevelopmentDebugUnitTest lintDevelopmentDebug
