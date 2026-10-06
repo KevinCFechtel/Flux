@@ -185,7 +185,14 @@ internal class AndroidMediaTransferCoordinator(
         mutableProgress.value = mutableProgress.value - enclosureId
     }
 
-    internal fun signalWorkChanged() {
+    suspend fun reconcileAndSignal(
+        sessionGeneration: Long? = coreRuntime.activeSessionGeneration(),
+    ) {
+        reconcile(sessionGeneration)
+        signalCoreMediaChanged()
+    }
+
+    internal fun signalCoreMediaChanged() {
         mutableRevision.value = mutableRevision.value + 1L
     }
 
@@ -408,7 +415,7 @@ internal class AndroidMediaDownloadWorker(
                 )
             }
         }
-        if (result.isSuccess) application.mediaTransferCoordinator.signalWorkChanged()
+        if (result.isSuccess) application.mediaTransferCoordinator.signalCoreMediaChanged()
     }
 
     private suspend fun reportFailure(generation: Long, kind: DownloadFailureKind) {
@@ -418,7 +425,7 @@ internal class AndroidMediaDownloadWorker(
                 core.downloadFailed(enclosureId = enclosureId, failureKind = kind)
             }
         }
-        if (result.isSuccess) application.mediaTransferCoordinator.signalWorkChanged()
+        if (result.isSuccess) application.mediaTransferCoordinator.signalCoreMediaChanged()
     }
 
     private fun foregroundInfo(work: MediaTransferWork): ForegroundInfo {
@@ -483,7 +490,7 @@ internal class AndroidMediaDeletionWorker(
             application.coreRuntime.localForGeneration(generation) { core ->
                 core.downloadDeleted(enclosureId = enclosureId)
             }
-            application.mediaTransferCoordinator.signalWorkChanged()
+            application.mediaTransferCoordinator.signalCoreMediaChanged()
             Result.success()
         }.getOrElse { Result.retry() }
     }
