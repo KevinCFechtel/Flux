@@ -35,6 +35,9 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             mediaRoot = storagePaths.media,
             scope = applicationScope,
             diagnostics = diagnostics,
+            onCoreMediaMutation = { generation ->
+                mediaTransferCoordinator.reconcileAndSignal(generation)
+            },
         )
     }
     internal val mediaTransferCoordinator: AndroidMediaTransferCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
