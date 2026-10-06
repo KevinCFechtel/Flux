@@ -1017,7 +1017,10 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - Media3 1.11.1 provides the native ExoPlayer/MediaSession baseline;
 - `AndroidMediaPlaybackService` is the single long-lived playback container, configured for spoken media, Android audio focus and becoming-noisy handling;
 - the service is registered as a media-playback foreground service so later E6 background playback and E7 system/Android Auto integration build on the same player rather than introducing a temporary Activity-owned runtime;
-- Listening List presentation, productive Core playback preparation/control and the physical background-transfer executor remain subsequent E6 slices.
+- productive playback now resolves Core `PlaybackPreparation`, prefers a validated local media reference under the configured media root, falls back to HTTP(S), restores in-progress position and projects chapters/artwork source;
+- Play/Pause/Stop, seek, ±30-second skip, 0.5x–3.0x playback rate, 20-second Core checkpoints, duration observation, natural completion/restart and the 30–180 minute sleep timer are implemented in the process-scoped playback coordinator;
+- the playback coordinator controls the service through a Media3 `MediaController`, preserving the single-player service boundary needed by E7;
+- Listening List presentation and the physical background-transfer executor remain subsequent E6 slices.
 
 E6 consumes the frozen Phase B media domain.
 
