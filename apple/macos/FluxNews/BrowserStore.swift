@@ -355,7 +355,11 @@ final class BrowserStore: ObservableObject {
             coreSettings = settings
             eventSubscription = subscription
             NativeLog.app.notice("core configured")
-            resetPresentation()
+            if previousCore != nil {
+                invalidateLocalPresentation()
+            } else {
+                resetPresentation()
+            }
             reloadNavigationAndCounts()
             refreshWidgetSnapshot()
             consumePendingWidgetActions()
@@ -624,6 +628,7 @@ final class BrowserStore: ObservableObject {
         let variant: FeedIconVariant = darkAppearance ? .dark : .normal
         let coordinator = coreSessionExecutionCoordinator
         Task { [weak self, core, coordinator] in
+            defer { self?.feedIconRequests.complete(key) }
             guard let result = await coordinator.blockingResult(
                 for: core,
                 { try core.feedIcon(feedId: feedID, variant: variant) }
@@ -639,6 +644,7 @@ final class BrowserStore: ObservableObject {
                         )
                     }
                 }.value
+                guard self.core === core else { return }
                 if let prepared {
                     self.feedIcons[key] = NSImage(
                         cgImage: prepared.image,
@@ -648,9 +654,8 @@ final class BrowserStore: ObservableObject {
                         )
                     )
                 }
-                self.feedIconRequests.complete(key)
             case .failure:
-                self.feedIconRequests.complete(key)
+                break
             }
         }
     }
@@ -665,6 +670,7 @@ final class BrowserStore: ObservableObject {
               let core else { return }
         let coordinator = coreSessionExecutionCoordinator
         Task { [weak self, core, coordinator] in
+            defer { self?.articleThumbnailRequests.complete(key) }
             guard let result = await coordinator.blockingResult(
                 for: core,
                 { try core.articleThumbnail(articleId: article.id, imageUrl: imageURL) }
@@ -677,6 +683,7 @@ final class BrowserStore: ObservableObject {
                     let image = await Task.detached(priority: .userInitiated) {
                         NSImage(data: Data(pngData))
                     }.value
+                    guard self.core === core else { return }
                     if let image { self.articleThumbnails[key] = image }
                 case .unavailable:
                     self.unavailableArticleThumbnails.insert(key)
@@ -684,7 +691,6 @@ final class BrowserStore: ObservableObject {
             case .failure:
                 self.unavailableArticleThumbnails.insert(key)
             }
-            self.articleThumbnailRequests.complete(key)
         }
     }
 
@@ -1720,7 +1726,9 @@ final class BrowserStore: ObservableObject {
         categorySidebarCounts = [:]
         feedSidebarCounts = [:]
         feedIcons = [:]
+        feedIconRequests = FeedIconRequestState()
         articleThumbnails = [:]
+        articleThumbnailRequests = ArticleThumbnailRequestState()
         unavailableArticleThumbnails = []
         pendingNewData = PendingNewData()
         publishPendingNewData()
