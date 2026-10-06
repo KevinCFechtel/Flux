@@ -166,6 +166,79 @@ class AndroidAccountBootstrapTest {
         assertTrue(result is AndroidAccountBootstrap.ActivationResult.Rejected)
     }
 
+
+    @Test
+    fun mediaLifecycleWrapsAccountReplacement() = withPaths { paths ->
+        val calls = mutableListOf<String>()
+        var stored: StoredAccountCredentials? = credentials("old", "old-token")
+        val lifecycle = recordingLifecycle(calls)
+        val bootstrap = AndroidAccountBootstrap(
+            credentialReader = { stored },
+            credentialWriter = { stored = it },
+            hasActiveSession = { true },
+            sessionOpener = {},
+            sessionReplacer = { calls += "replace" },
+            accountValidator = { _, _, _ -> AccountValidationResult("https://new.example", "2.2.0") },
+            lifecycleParticipant = lifecycle,
+            storagePaths = paths,
+            testOnly = Unit,
+        )
+
+        val result = runBlocking {
+            bootstrap.activateAccount("https://new.example", "new-token", emptyList())
+        }
+
+        assertTrue(result is AndroidAccountBootstrap.ActivationResult.Activated)
+        assertEquals(
+            listOf(
+                "prepare:AccountReplacement",
+                "replace",
+                "resume:AccountReplacement",
+            ),
+            calls,
+        )
+    }
+
+    @Test
+    fun mediaLifecycleWrapsLocalStateRebuildAndResumesOnFailure() = withPaths { paths ->
+        val calls = mutableListOf<String>()
+        val bootstrap = AndroidAccountBootstrap(
+            credentialReader = { credentials("old", "old-token") },
+            hasActiveSession = { true },
+            sessionOpener = {},
+            localStateRebuilder = {
+                calls += "rebuild"
+                error("rebuild failed")
+            },
+            lifecycleParticipant = recordingLifecycle(calls),
+            storagePaths = paths,
+            testOnly = Unit,
+        )
+
+        val result = runBlocking { bootstrap.rebuildLocalState() }
+
+        assertEquals(AndroidAccountBootstrap.LocalStateRebuildState.Failed, result)
+        assertEquals(
+            listOf(
+                "prepare:LocalStateRebuild",
+                "rebuild",
+                "resume:LocalStateRebuild",
+            ),
+            calls,
+        )
+    }
+
+    private fun recordingLifecycle(calls: MutableList<String>) =
+        object : AndroidCoreLifecycleParticipant {
+            override suspend fun prepareForCoreLifecycleChange(change: AndroidCoreLifecycleChange) {
+                calls += "prepare:${change.name}"
+            }
+
+            override suspend fun resumeAfterCoreLifecycleChange(change: AndroidCoreLifecycleChange) {
+                calls += "resume:${change.name}"
+            }
+        }
+
     private fun bootstrap(
         paths: AndroidStoragePaths,
         credentialReader: () -> StoredAccountCredentials?,
