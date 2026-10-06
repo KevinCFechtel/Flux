@@ -1033,7 +1033,6 @@ final class BrowserStore: ObservableObject {
     }
     private func handleSyncCompleted(_ metadata: SyncCompleted) {
         refreshListeningListIfVisible()
-        reloadLiveUnreadTotal()
         if metadata.reason == .background || metadata.reason == .periodic {
             pendingNewData.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
             publishPendingNewData()
@@ -1056,30 +1055,6 @@ final class BrowserStore: ObservableObject {
             break
         }
     }
-    private func reloadLiveUnreadTotal() {
-        guard let core else { return }
-        let coordinator = coreSessionExecutionCoordinator
-        Task { [weak self, core, coordinator] in
-            guard let result = await coordinator.responsiveResult(
-                for: core,
-                {
-                    try core.countArticles(
-                        query: ArticleQuery(
-                            scope: .all,
-                            readFilter: .unread,
-                            starredFilter: .all,
-                            sort: .newestFirst,
-                            limit: 0,
-                            cursor: nil
-                        )
-                    )
-                }
-            ) else { return }
-            guard let self, self.core === core else { return }
-            if case let .success(total) = result { self.unreadTotal = total }
-        }
-    }
-
     private func acknowledgePendingNewDataForCurrentScope() {
         switch scope {
         case .all:
