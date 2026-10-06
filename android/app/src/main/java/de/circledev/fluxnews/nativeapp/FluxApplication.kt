@@ -84,8 +84,12 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSyncCoordinator(coreRuntime, postSyncEffects)
     }
-    internal val timelineStore: AndroidArticleTimelineStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticleTimelineStore(coreRuntime) }
-    internal val searchStore: AndroidSearchStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidSearchStore(coreRuntime) }
+    internal val timelineStore: AndroidArticleTimelineStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidArticleTimelineStore(coreRuntime, mediaTransferCoordinator)
+    }
+    internal val searchStore: AndroidSearchStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidSearchStore(coreRuntime, mediaTransferCoordinator)
+    }
     internal val listeningListStore: AndroidListeningListStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidListeningListStore(coreRuntime, mediaTransferCoordinator)
     }
