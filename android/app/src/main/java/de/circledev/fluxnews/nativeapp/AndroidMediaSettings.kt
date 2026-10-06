@@ -84,6 +84,6 @@ internal class AndroidMediaSettings(
     private suspend fun mutate(operation: (uniffi.flux_uniffi.Flux) -> Unit): Result<Unit> =
         runCatching {
             coreRuntime.local { core -> operation(core) }
-            transferCoordinator?.reconcile()
+            transferCoordinator?.reconcileAndSignal()
         }
 }
