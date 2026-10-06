@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.MediaArtworkSource
 import uniffi.flux_uniffi.MediaChapter
 import uniffi.flux_uniffi.ReaderDocument
@@ -74,11 +75,41 @@ import uniffi.flux_uniffi.ReaderDocument
 @Composable
 internal fun AndroidMediaPlayerSheet(
     coordinator: AndroidMediaPlaybackCoordinator,
+    previewItem: ListeningListItem? = null,
     onDismiss: () -> Unit,
 ) {
     val playback by coordinator.state.collectAsState()
     val sleepTimer by coordinator.sleepTimer.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val previewEnclosure = remember(previewItem, playback.enclosureId) {
+        previewItem?.let { item ->
+            item.activeEnclosureId
+                ?.let { activeId ->
+                    item.audioEnclosures.firstOrNull { it.enclosure.id == activeId }
+                }
+                ?: item.audioEnclosures.firstOrNull()
+        }
+    }
+    val isPreviewingInactiveItem =
+        previewEnclosure != null && previewEnclosure.enclosure.id != playback.enclosureId
+    val displayedEnclosureId =
+        if (isPreviewingInactiveItem) previewEnclosure?.enclosure?.id else playback.enclosureId
+    val displayedArticleId =
+        if (isPreviewingInactiveItem) previewItem?.articleId else playback.articleId
+    val displayedTitle =
+        if (isPreviewingInactiveItem) previewItem?.title else playback.articleTitle
+    val displayedFeedTitle =
+        if (isPreviewingInactiveItem) previewItem?.feedTitle else playback.feedTitle
+    val displayedPositionMs =
+        if (isPreviewingInactiveItem) previewEnclosure?.playbackState?.positionMs?.toLong() ?: 0L
+        else playback.positionMs
+    val displayedDurationMs =
+        if (isPreviewingInactiveItem) {
+            previewEnclosure?.durationMs?.toLong()
+                ?: previewEnclosure?.playbackState?.durationMs?.toLong()
+        } else {
+            playback.durationMs
+        }
     var rateMenuOpen by remember { mutableStateOf(false) }
     var sleepMenuOpen by remember { mutableStateOf(false) }
     var overflowOpen by remember { mutableStateOf(false) }
@@ -88,26 +119,50 @@ internal fun AndroidMediaPlayerSheet(
     var showNotesError by remember { mutableStateOf<String?>(null) }
     var showNotesDocument by remember { mutableStateOf<ReaderDocument?>(null) }
     var seeking by remember { mutableStateOf(false) }
-    var seekValue by remember(playback.enclosureId) {
-        mutableFloatStateOf(playback.positionMs.toFloat())
+    var seekValue by remember(displayedEnclosureId) {
+        mutableFloatStateOf(displayedPositionMs.toFloat())
     }
 
-    LaunchedEffect(playback.positionMs, seeking) {
-        if (!seeking) seekValue = playback.positionMs.toFloat()
+    LaunchedEffect(displayedPositionMs, seeking) {
+        if (!seeking) seekValue = displayedPositionMs.toFloat()
     }
-    LaunchedEffect(playback.articleId) {
+    LaunchedEffect(displayedArticleId) {
         showNotesExpanded = false
         showNotesLoading = false
         showNotesError = null
         showNotesDocument = null
     }
 
+    val displayedArtworkSource by produceState<MediaArtworkSource?>(
+        initialValue = if (isPreviewingInactiveItem) null else playback.artworkSource,
+        key1 = displayedEnclosureId,
+        key2 = isPreviewingInactiveItem,
+        key3 = playback.artworkSource,
+    ) {
+        value = if (isPreviewingInactiveItem) {
+            displayedEnclosureId?.let { coordinator.artworkSource(it) }
+        } else {
+            playback.artworkSource
+        }
+    }
+    val displayedChapters by produceState(
+        initialValue = if (isPreviewingInactiveItem) emptyList() else playback.chapters,
+        key1 = displayedEnclosureId,
+        key2 = isPreviewingInactiveItem,
+        key3 = playback.chapters,
+    ) {
+        value = if (isPreviewingInactiveItem) {
+            displayedEnclosureId?.let { coordinator.chapters(it) }.orEmpty()
+        } else {
+            playback.chapters
+        }
+    }
     val artworkModel by produceState<Any?>(
         initialValue = null,
-        key1 = playback.artworkSource,
-        key2 = playback.enclosureId,
+        key1 = displayedArtworkSource,
+        key2 = displayedEnclosureId,
     ) {
-        value = when (val source = playback.artworkSource) {
+        value = when (val source = displayedArtworkSource) {
             is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
             is MediaArtworkSource.RemoteUrl -> source.url.takeIf(AndroidArticleActionPolicy::validWebUrl)
             null -> null
@@ -125,7 +180,8 @@ internal fun AndroidMediaPlayerSheet(
         ) {
             Column(Modifier.fillMaxSize()) {
                 AndroidMediaPlayerTopBar(
-                    completed = playback.status == AndroidMediaPlaybackPresentationStatus.Completed,
+                    completed = !isPreviewingInactiveItem &&
+                        playback.status == AndroidMediaPlaybackPresentationStatus.Completed,
                     onRestart = {
                         playback.enclosureId?.let { id ->
                             scope.launch { coordinator.restart(id) }
@@ -153,7 +209,8 @@ internal fun AndroidMediaPlayerSheet(
                         ) {
                             AndroidMediaArtwork(
                                 model = artworkModel,
-                                loading = playback.isLoading || playback.isBuffering,
+                                loading = !isPreviewingInactiveItem &&
+                                    (playback.isLoading || playback.isBuffering),
                                 modifier = Modifier
                                     .weight(0.9f)
                                     .widthIn(max = 360.dp),
@@ -161,6 +218,14 @@ internal fun AndroidMediaPlayerSheet(
                             AndroidMediaPlayerControls(
                                 coordinator = coordinator,
                                 playback = playback,
+                                previewingInactiveItem = isPreviewingInactiveItem,
+                                displayedEnclosureId = displayedEnclosureId,
+                                displayedArticleId = displayedArticleId,
+                                displayedTitle = displayedTitle,
+                                displayedFeedTitle = displayedFeedTitle,
+                                displayedPositionMs = displayedPositionMs,
+                                displayedDurationMs = displayedDurationMs,
+                                displayedChapters = displayedChapters,
                                 sleepTimer = sleepTimer,
                                 seeking = seeking,
                                 seekValue = seekValue,
@@ -186,7 +251,7 @@ internal fun AndroidMediaPlayerSheet(
                                 onShowNotesExpandedChange = { expanded ->
                                     showNotesExpanded = expanded
                                     if (expanded && showNotesDocument == null && !showNotesLoading) {
-                                        playback.articleId?.let { articleId ->
+                                        displayedArticleId?.let { articleId ->
                                             showNotesLoading = true
                                             showNotesError = null
                                             scope.launch {
@@ -205,7 +270,7 @@ internal fun AndroidMediaPlayerSheet(
                                     }
                                 },
                                 onRetryShowNotes = {
-                                    playback.articleId?.let { articleId ->
+                                    displayedArticleId?.let { articleId ->
                                         showNotesLoading = true
                                         showNotesError = null
                                         scope.launch {
@@ -235,12 +300,21 @@ internal fun AndroidMediaPlayerSheet(
                         ) {
                             AndroidMediaArtwork(
                                 model = artworkModel,
-                                loading = playback.isLoading || playback.isBuffering,
+                                loading = !isPreviewingInactiveItem &&
+                                    (playback.isLoading || playback.isBuffering),
                                 modifier = Modifier.widthIn(max = 300.dp),
                             )
                             AndroidMediaPlayerControls(
                                 coordinator = coordinator,
                                 playback = playback,
+                                previewingInactiveItem = isPreviewingInactiveItem,
+                                displayedEnclosureId = displayedEnclosureId,
+                                displayedArticleId = displayedArticleId,
+                                displayedTitle = displayedTitle,
+                                displayedFeedTitle = displayedFeedTitle,
+                                displayedPositionMs = displayedPositionMs,
+                                displayedDurationMs = displayedDurationMs,
+                                displayedChapters = displayedChapters,
                                 sleepTimer = sleepTimer,
                                 seeking = seeking,
                                 seekValue = seekValue,
@@ -266,7 +340,7 @@ internal fun AndroidMediaPlayerSheet(
                                 onShowNotesExpandedChange = { expanded ->
                                     showNotesExpanded = expanded
                                     if (expanded && showNotesDocument == null && !showNotesLoading) {
-                                        playback.articleId?.let { articleId ->
+                                        displayedArticleId?.let { articleId ->
                                             showNotesLoading = true
                                             showNotesError = null
                                             scope.launch {
@@ -285,7 +359,7 @@ internal fun AndroidMediaPlayerSheet(
                                     }
                                 },
                                 onRetryShowNotes = {
-                                    playback.articleId?.let { articleId ->
+                                    displayedArticleId?.let { articleId ->
                                         showNotesLoading = true
                                         showNotesError = null
                                         scope.launch {
@@ -364,6 +438,14 @@ private fun AndroidMediaPlayerTopBar(
 private fun AndroidMediaPlayerControls(
     coordinator: AndroidMediaPlaybackCoordinator,
     playback: AndroidMediaPlaybackState,
+    previewingInactiveItem: Boolean,
+    displayedEnclosureId: Long?,
+    displayedArticleId: Long?,
+    displayedTitle: String?,
+    displayedFeedTitle: String?,
+    displayedPositionMs: Long,
+    displayedDurationMs: Long?,
+    displayedChapters: List<MediaChapter>,
     sleepTimer: AndroidMediaSleepTimerState,
     seeking: Boolean,
     seekValue: Float,
@@ -396,14 +478,14 @@ private fun AndroidMediaPlayerControls(
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Text(
-                playback.articleTitle?.ifBlank { "Audio" } ?: "Audio",
+                displayedTitle?.ifBlank { "Audio" } ?: "Audio",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            playback.feedTitle?.takeIf { it.isNotBlank() }?.let { feed ->
+            displayedFeedTitle?.takeIf { it.isNotBlank() }?.let { feed ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -423,7 +505,7 @@ private fun AndroidMediaPlayerControls(
             }
         }
 
-        playback.durationMs?.takeIf { it > 0L }?.let { duration ->
+        displayedDurationMs?.takeIf { it > 0L }?.let { duration ->
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -439,7 +521,7 @@ private fun AndroidMediaPlayerControls(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        androidPlayerTime(if (seeking) seekValue.toLong() else playback.positionMs),
+                        androidPlayerTime(if (seeking) seekValue.toLong() else displayedPositionMs),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -454,11 +536,16 @@ private fun AndroidMediaPlayerControls(
 
         AndroidMediaTransportControls(
             playback = playback,
+            previewingInactiveItem = previewingInactiveItem,
+            hasDisplayedEnclosure = displayedEnclosureId != null,
             onBack = { scope.launch { coordinator.skipBackward30Seconds() } },
             onPlayPause = {
-                playback.enclosureId?.let { id ->
+                displayedEnclosureId?.let { id ->
                     scope.launch {
-                        if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                        if (
+                            !previewingInactiveItem &&
+                            playback.status == AndroidMediaPlaybackPresentationStatus.Playing
+                        ) {
                             coordinator.pause()
                         } else {
                             coordinator.play(id)
@@ -477,6 +564,7 @@ private fun AndroidMediaPlayerControls(
             Box(modifier = Modifier.weight(1f)) {
                 OutlinedButton(
                     onClick = { onRateMenuChange(true) },
+                    enabled = !previewingInactiveItem,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(
@@ -506,6 +594,7 @@ private fun AndroidMediaPlayerControls(
             Box(modifier = Modifier.weight(1f)) {
                 OutlinedButton(
                     onClick = { onSleepMenuChange(true) },
+                    enabled = !previewingInactiveItem,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(
@@ -551,17 +640,21 @@ private fun AndroidMediaPlayerControls(
             }
         }
 
-        if (playback.chapters.isNotEmpty()) {
+        if (displayedChapters.isNotEmpty()) {
             AndroidMediaChapterSection(
-                chapters = playback.chapters,
-                positionMs = playback.positionMs,
+                chapters = displayedChapters,
+                positionMs = displayedPositionMs,
                 expanded = chaptersExpanded,
                 onToggle = { onChaptersExpandedChange(!chaptersExpanded) },
-                onSelect = { start -> scope.launch { coordinator.seekTo(start) } },
+                onSelect = { start ->
+                    if (!previewingInactiveItem) {
+                        scope.launch { coordinator.seekTo(start) }
+                    }
+                },
             )
         }
 
-        playback.articleId?.let {
+        displayedArticleId?.let {
             AndroidMediaShowNotesSection(
                 expanded = showNotesExpanded,
                 loading = showNotesLoading,
@@ -572,7 +665,7 @@ private fun AndroidMediaPlayerControls(
             )
         }
 
-        playback.errorMessage?.let { error ->
+        if (!previewingInactiveItem) playback.errorMessage?.let { error ->
             Text(
                 error,
                 color = MaterialTheme.colorScheme.error,
@@ -586,6 +679,8 @@ private fun AndroidMediaPlayerControls(
 @Composable
 private fun AndroidMediaTransportControls(
     playback: AndroidMediaPlaybackState,
+    previewingInactiveItem: Boolean,
+    hasDisplayedEnclosure: Boolean,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     onForward: () -> Unit,
@@ -596,7 +691,10 @@ private fun AndroidMediaTransportControls(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack, enabled = playback.enclosureId != null) {
+        IconButton(
+            onClick = onBack,
+            enabled = hasDisplayedEnclosure && !previewingInactiveItem,
+        ) {
             Icon(
                 Icons.Rounded.Replay30,
                 contentDescription = "Back 30 seconds",
@@ -608,7 +706,7 @@ private fun AndroidMediaTransportControls(
             modifier = Modifier.size(76.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (playback.isLoading || playback.isBuffering) {
+            if (!previewingInactiveItem && (playback.isLoading || playback.isBuffering)) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(72.dp),
                     strokeWidth = 3.dp,
@@ -616,17 +714,21 @@ private fun AndroidMediaTransportControls(
             }
             FilledIconButton(
                 onClick = onPlayPause,
-                enabled = playback.enclosureId != null,
+                enabled = hasDisplayedEnclosure,
                 modifier = Modifier.size(58.dp),
                 shape = CircleShape,
             ) {
                 Icon(
-                    if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                    if (
+                        !previewingInactiveItem &&
+                        playback.status == AndroidMediaPlaybackPresentationStatus.Playing
+                    ) {
                         Icons.Rounded.Pause
                     } else {
                         Icons.Rounded.PlayArrow
                     },
                     contentDescription = if (
+                        !previewingInactiveItem &&
                         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
                     ) {
                         "Pause"
@@ -638,7 +740,10 @@ private fun AndroidMediaTransportControls(
             }
         }
 
-        IconButton(onClick = onForward, enabled = playback.enclosureId != null) {
+        IconButton(
+            onClick = onForward,
+            enabled = hasDisplayedEnclosure && !previewingInactiveItem,
+        ) {
             Icon(
                 Icons.Rounded.Forward30,
                 contentDescription = "Forward 30 seconds",
@@ -646,7 +751,10 @@ private fun AndroidMediaTransportControls(
             )
         }
 
-        IconButton(onClick = onStop, enabled = playback.enclosureId != null) {
+        IconButton(
+            onClick = onStop,
+            enabled = hasDisplayedEnclosure && !previewingInactiveItem,
+        ) {
             Icon(
                 Icons.Rounded.Stop,
                 contentDescription = "Stop",
