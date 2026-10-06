@@ -325,7 +325,7 @@ internal fun AndroidArticleSwipeContainer(
     val scope = rememberCoroutineScope()
     val currentOnSwipeAction by rememberUpdatedState(onSwipeAction)
     val currentOnOpen by rememberUpdatedState(onOpen)
-    val leading = remember(configuration, article, hasAudio) {
+    val leading = remember(configuration, article, hasAudio, mediaActionsEnabled) {
         AndroidArticleActionPolicy.resolveSwipeSide(
             configuration = configuration,
             side = AndroidArticleSwipeSide.Leading,
@@ -334,12 +334,13 @@ internal fun AndroidArticleSwipeContainer(
             mediaActionsEnabled = mediaActionsEnabled,
         )
     }
-    val trailing = remember(configuration, article, hasAudio) {
+    val trailing = remember(configuration, article, hasAudio, mediaActionsEnabled) {
         AndroidArticleActionPolicy.resolveSwipeSide(
             configuration = configuration,
             side = AndroidArticleSwipeSide.Trailing,
             article = article,
             hasAudio = hasAudio,
+            mediaActionsEnabled = mediaActionsEnabled,
         )
     }
     val currentLeading by rememberUpdatedState(leading)
