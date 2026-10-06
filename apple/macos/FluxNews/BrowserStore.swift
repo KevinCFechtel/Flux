@@ -1468,20 +1468,47 @@ final class BrowserStore: ObservableObject {
     func setShowRelativePublicationTime(_ enabled: Bool) { showRelativePublicationTime = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.showRelativePublicationTime") }
     func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
-    func exportConfigurationBackup(password: String) throws -> Data {
+    func exportConfigurationBackup(password: String) async throws -> Data {
         guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
-        guard let credentials = try CredentialStore.load() else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
-        let snapshot = try core.configurationSnapshot()
-        let payload = try JSONEncoder().encode(nativeBackupSettings(customHeaders: credentials.resolvedCustomHeaders))
+        guard let credentials = try CredentialStore.load() else {
+            throw ConfigurationBackupPresentationError.noConfiguredAccount
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        guard let snapshotResult = await coordinator.responsiveResult(
+            for: core,
+            { try core.configurationSnapshot() }
+        ) else {
+            throw CancellationError()
+        }
+        let snapshot: ConfigurationSnapshot
+        switch snapshotResult {
+        case let .success(value):
+            snapshot = value
+        case let .failure(error):
+            throw error
+        }
+
+        let payload = try JSONEncoder().encode(
+            nativeBackupSettings(customHeaders: credentials.resolvedCustomHeaders)
+        )
         let input = ConfigBackupInput(
             platform: .macos,
-            account: BackupAccount(installationBase: snapshot.installationBase, apiKey: credentials.apiKey),
+            account: BackupAccount(
+                installationBase: snapshot.installationBase,
+                apiKey: credentials.apiKey
+            ),
             coreSettings: snapshot.coreSettings,
             feedPreferences: snapshot.feedPreferences,
-            platformSettings: PlatformSettingsPayload(schemaVersion: MacOSBackupSettingsV1.version, dataJson: String(decoding: payload, as: UTF8.self))
+            platformSettings: PlatformSettingsPayload(
+                schemaVersion: MacOSBackupSettingsV1.version,
+                dataJson: String(decoding: payload, as: UTF8.self)
+            )
         )
-        return Data(try exportConfigBackup(input: input, password: password))
+        return try await Task.detached(priority: .userInitiated) {
+            Data(try exportConfigBackup(input: input, password: password))
+        }.value
     }
+
     func importConfigurationBackup(bytes: Data, password: String) async throws -> BackupImportOutcome {
         let restored = try await Task.detached(priority: .userInitiated) {
             try parseConfigBackup(bytes: bytes, password: password, expectedPlatform: .macos)
@@ -1489,79 +1516,191 @@ final class BrowserStore: ObservableObject {
         guard restored.platformSettings.schemaVersion == MacOSBackupSettingsV1.version else {
             throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
         }
-        let native = try JSONDecoder().decode(MacOSBackupSettingsV1.self, from: Data(restored.platformSettings.dataJson.utf8))
+        let native = try JSONDecoder().decode(
+            MacOSBackupSettingsV1.self,
+            from: Data(restored.platformSettings.dataJson.utf8)
+        )
         guard native.version == MacOSBackupSettingsV1.version else {
             throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
         }
         guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
-        let previousSnapshot = try core.configurationSnapshot()
+
+        let coordinator = coreSessionExecutionCoordinator
+        guard let previousSnapshotResult = await coordinator.responsiveResult(
+            for: core,
+            { try core.configurationSnapshot() }
+        ) else {
+            throw CancellationError()
+        }
+        let previousSnapshot: ConfigurationSnapshot
+        switch previousSnapshotResult {
+        case let .success(value):
+            previousSnapshot = value
+        case let .failure(error):
+            throw error
+        }
+
         let previousCredentials = try CredentialStore.load()
-        let previousNative = nativeBackupSettings(customHeaders: previousCredentials?.resolvedCustomHeaders ?? [])
+        let previousNative = nativeBackupSettings(
+            customHeaders: previousCredentials?.resolvedCustomHeaders ?? []
+        )
+
+        await coordinator.quiesce()
+        guard let replaceResult = await coordinator.exclusiveBlockingResult(
+            for: core,
+            {
+                try core.replaceConfiguration(
+                    installationBase: restored.account.installationBase,
+                    coreSettings: restored.coreSettings,
+                    feedPreferences: restored.feedPreferences
+                )
+            }
+        ) else {
+            coordinator.resume(core)
+            throw CancellationError()
+        }
+
+        if case let .failure(error) = replaceResult {
+            coordinator.resume(core)
+            throw error
+        }
+
         do {
             invalidateWidgetSnapshot()
-            try core.replaceConfiguration(installationBase: restored.account.installationBase, coreSettings: restored.coreSettings, feedPreferences: restored.feedPreferences)
             let customHeaders = native.customHeaders ?? []
-            try CredentialStore.save(MinifluxCredentials(server: restored.account.installationBase, apiKey: restored.account.apiKey, customHeaders: customHeaders))
-            guard configure(server: restored.account.installationBase, apiKey: restored.account.apiKey, customHeaders: customHeaders, refreshVersion: false, startSync: false) else {
+            try CredentialStore.save(
+                MinifluxCredentials(
+                    server: restored.account.installationBase,
+                    apiKey: restored.account.apiKey,
+                    customHeaders: customHeaders
+                )
+            )
+            try applyNativeBackupSettings(native)
+            guard await configure(
+                server: restored.account.installationBase,
+                apiKey: restored.account.apiKey,
+                customHeaders: customHeaders,
+                refreshVersion: false,
+                startSync: false
+            ) else {
                 throw ConfigurationBackupPresentationError.coreInitialization
             }
-            try applyNativeBackupSettings(native)
         } catch {
-            try? core.replaceConfiguration(installationBase: previousSnapshot.installationBase, coreSettings: previousSnapshot.coreSettings, feedPreferences: previousSnapshot.feedPreferences)
+            // If configure activated a replacement Core, return admission to the
+            // original Core before restoring its previous durable configuration.
+            if self.core !== core {
+                await coordinator.quiesce()
+                coordinator.deactivate()
+                coordinator.activate(core)
+            }
+            if !coordinator.isQuiescing {
+                await coordinator.quiesce()
+            }
+            _ = await coordinator.exclusiveBlockingResult(
+                for: core,
+                {
+                    try core.replaceConfiguration(
+                        installationBase: previousSnapshot.installationBase,
+                        coreSettings: previousSnapshot.coreSettings,
+                        feedPreferences: previousSnapshot.feedPreferences
+                    )
+                }
+            )
+            coordinator.resume(core)
+            self.core = core
             try? restoreCredentials(previousCredentials)
-            _ = configure(server: previousSnapshot.installationBase, apiKey: previousCredentials?.apiKey ?? "", customHeaders: previousCredentials?.resolvedCustomHeaders ?? [], refreshVersion: false, startSync: false)
             try? applyNativeBackupSettings(previousNative)
             throw error
         }
+
         invalidateLocalPresentation()
         return await syncAfterImport()
     }
+
     func rebuildLocalState() {
         guard let core, !isLoading else { return }
         invalidateWidgetSnapshot()
         isLoading = true
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.rebuildLocalState() }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                store.invalidateLocalPresentation()
-                store.isLoading = false
-                switch result {
-                case .success: store.showActionConfirmation(String(localized: "Local state rebuilt"))
-                case .failure: store.errorMessage = String(localized: "Local state was cleared, but synchronization could not be completed.")
-                }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            await coordinator.quiesce()
+            guard let result = await coordinator.exclusiveBlockingResult(
+                for: core,
+                { try core.rebuildLocalState() }
+            ) else {
+                coordinator.resume(core)
+                if let self, self.core === core { self.isLoading = false }
+                return
+            }
+            coordinator.resume(core)
+            guard let self, self.core === core else { return }
+            self.invalidateLocalPresentation()
+            self.isLoading = false
+            switch result {
+            case .success:
+                self.showActionConfirmation(String(localized: "Local state rebuilt"))
+            case .failure:
+                self.errorMessage = String(
+                    localized: "Local state was cleared, but synchronization could not be completed."
+                )
             }
         }
     }
+
     func resetFluxNews() {
         guard let core else { return }
-        do {
-            try core.resetCoreState()
-            try CredentialStore.remove()
-            try CredentialStore.setLaunchAtLogin(false)
-            resetNativeSettings()
-            eventSubscription = nil
-            self.core = nil
-            configuredServer = nil
-            minifluxVersion = nil
-            coreSettings = nil
-            deactivatePeriodicSyncScheduling()
-            invalidateWidgetSnapshot()
-            invalidateLocalPresentation()
-            showActionConfirmation(String(localized: "FluxNews was reset"))
-            settingsVisible = true
-        } catch {
-            errorMessage = String(localized: "FluxNews could not be fully reset.")
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            await coordinator.quiesce()
+            guard let result = await coordinator.exclusiveBlockingResult(
+                for: core,
+                { try core.resetCoreState() }
+            ) else {
+                coordinator.resume(core)
+                return
+            }
+            guard let self else { return }
+            switch result {
+            case .success:
+                coordinator.deactivate()
+                do {
+                    try CredentialStore.remove()
+                    try CredentialStore.setLaunchAtLogin(false)
+                    self.resetNativeSettings()
+                    self.eventSubscription = nil
+                    self.core = nil
+                    self.configuredServer = nil
+                    self.minifluxVersion = nil
+                    self.coreSettings = nil
+                    self.isLoading = false
+                    self.deactivatePeriodicSyncScheduling()
+                    self.invalidateWidgetSnapshot()
+                    self.invalidateLocalPresentation()
+                    self.showActionConfirmation(String(localized: "FluxNews was reset"))
+                    self.settingsVisible = true
+                } catch {
+                    self.errorMessage = String(localized: "FluxNews could not be fully reset.")
+                }
+            case .failure:
+                coordinator.resume(core)
+                self.errorMessage = String(localized: "FluxNews could not be fully reset.")
+            }
         }
     }
+
     var onInvalidateContent: (() -> Void)?
+
     private func syncAfterImport() async -> BackupImportOutcome {
         guard let core else { return .synchronizationFailed }
         isLoading = true
-        let result = await Task.detached {
-            Result { try core.sync(reason: .manual) }
-        }.value
+        let coordinator = coreSessionExecutionCoordinator
+        guard let result = await coordinator.blockingResult(
+            for: core,
+            { try core.sync(reason: .manual) }
+        ) else {
+            isLoading = false
+            return .synchronizationFailed
+        }
         isLoading = false
         switch result {
         case .success:
@@ -1570,6 +1709,7 @@ final class BrowserStore: ObservableObject {
             return .synchronizationFailed
         }
     }
+
     private func invalidateLocalPresentation() {
         articles = []
         catalog = NavigationCatalog(categories: [], feeds: [])
