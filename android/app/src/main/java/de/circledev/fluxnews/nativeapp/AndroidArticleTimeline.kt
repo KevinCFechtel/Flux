@@ -1869,6 +1869,9 @@ internal fun AndroidArticleTimeline(
         preferencesFlow.collect { value = it }
     }
     val loadedArticlePreferences = articlePreferences ?: return
+    var pendingDownloadChoice by remember {
+        mutableStateOf<AndroidArticleMediaActionState?>(null)
+    }
     val errorMessage = state.errorMessage
     val pendingNewDataForCurrentScope = store.hasPendingNewDataForScope(
         scope = selection.scope,
@@ -1951,7 +1954,17 @@ internal fun AndroidArticleTimeline(
                 val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
                 store.requestSetListeningList(article.id, !current)
             }
-            AndroidArticleSwipeAction.DownloadAudio -> Unit
+            AndroidArticleSwipeAction.DownloadAudio -> {
+                val mediaState = state.mediaActionStates[article.id] ?: return
+                when (mediaState.audioEnclosures.size) {
+                    0 -> Unit
+                    1 -> store.requestToggleDownload(
+                        article.id,
+                        mediaState.audioEnclosures.first().id,
+                    )
+                    else -> pendingDownloadChoice = mediaState
+                }
+            }
         }
     }
 
@@ -2227,6 +2240,21 @@ internal fun AndroidArticleTimeline(
                 bottom = bottomOverlayPadding + (if (supplementalOverlayVisible) 88.dp else 20.dp),
             ),
     )
+
+    pendingDownloadChoice?.let { mediaState ->
+        AndroidArticleDownloadChooserDialog(
+            state = mediaState,
+            onSelect = { enclosureId ->
+                val articleId = mediaState.audioEnclosures
+                    .firstOrNull { it.id == enclosureId }
+                    ?.articleId
+                    ?: return@AndroidArticleDownloadChooserDialog
+                store.requestToggleDownload(articleId, enclosureId)
+                pendingDownloadChoice = null
+            },
+            onDismiss = { pendingDownloadChoice = null },
+        )
+    }
 
     if (undoState.visible) {
         Snackbar(
