@@ -335,7 +335,7 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
 
     func artwork(reference: String) async -> Data? {
         guard let core, let result = await coreSessionExecutionCoordinator.responsiveResult(for: core, { try core.mediaArtwork(reference: reference) }) else { return nil }
-        switch result { case let .success(bytes): return bytes.map(Data.init); case .failure: return nil }
+        switch result { case let .success(bytes): return bytes.map { Data($0) }; case .failure: return nil }
     }
 
     func checkpoint(enclosureID: Int64, positionMs: UInt64, durationMs: UInt64?) async {
