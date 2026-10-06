@@ -152,8 +152,8 @@
 		B56 /* MediaRemoteControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemoteControlCoordinator.swift; sourceTree = "<group>"; };
 		B60 /* MacOSPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSPresentation.swift; sourceTree = "<group>"; };
 		B61 /* ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderPresentation.swift; path = ../../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
-		B62 /* AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreExecution.swift; path = ../../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
-		B63 /* AppleCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreSessionExecutionCoordinator.swift; path = ../../shared/FluxApple/AppleCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
+		B62 /* AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreExecution.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
+		B63 /* AppleCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreSessionExecutionCoordinator.swift; path = ../shared/FluxApple/AppleCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
 		D6M2 /* MediaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaPresentation.swift; path = ../../shared/FluxApple/MediaPresentation.swift; sourceTree = "<group>"; };
 		D6M4 /* MediaTransferFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaTransferFileLayout.swift; path = ../../shared/FluxApple/MediaTransferFileLayout.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
