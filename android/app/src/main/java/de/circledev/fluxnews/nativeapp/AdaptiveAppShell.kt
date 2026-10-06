@@ -130,6 +130,7 @@ internal fun AdaptiveAppShell(
     searchStore: AndroidSearchStore,
     listeningListStore: AndroidListeningListStore,
     mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator,
+    mediaTransferCoordinator: AndroidMediaTransferCoordinator,
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
@@ -299,6 +300,7 @@ internal fun AdaptiveAppShell(
             AndroidListeningListDestination(
                 store = listeningListStore,
                 playbackCoordinator = mediaPlaybackCoordinator,
+                transferCoordinator = mediaTransferCoordinator,
                 sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
             )
