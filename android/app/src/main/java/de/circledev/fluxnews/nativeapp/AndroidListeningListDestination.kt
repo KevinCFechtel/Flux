@@ -54,6 +54,7 @@ internal fun AndroidListeningListDestination(
     val coroutineScope = rememberCoroutineScope()
     var feedMenuOpen by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var playerPresented by remember { mutableStateOf(false) }
 
     LaunchedEffect(sessionGeneration) {
         store.activateSession(sessionGeneration)
@@ -144,6 +145,7 @@ internal fun AndroidListeningListDestination(
                     onForward30 = {
                         coroutineScope.launch { playbackCoordinator.skipForward30Seconds() }
                     },
+                    onOpenPlayer = { playerPresented = true },
                 )
             }
         },
@@ -208,6 +210,15 @@ internal fun AndroidListeningListDestination(
                             onPause = {
                                 coroutineScope.launch { playbackCoordinator.pause() }
                             },
+                            onOpenPlayer = { enclosureId ->
+                                coroutineScope.launch {
+                                    runCatching {
+                                        playbackCoordinator.prepare(enclosureId)
+                                    }.onSuccess {
+                                        playerPresented = true
+                                    }
+                                }
+                            },
                             onRemove = {
                                 coroutineScope.launch {
                                     store.removeFromListeningList(item.articleId)
@@ -231,6 +242,13 @@ internal fun AndroidListeningListDestination(
             }
         }
     }
+
+    if (playerPresented && playback.enclosureId != null) {
+        AndroidMediaPlayerSheet(
+            coordinator = playbackCoordinator,
+            onDismiss = { playerPresented = false },
+        )
+    }
 }
 
 @Composable
@@ -240,6 +258,7 @@ private fun AndroidListeningListRow(
     transferProgress: Map<Long, AndroidMediaTransferProgress>,
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
+    onOpenPlayer: (Long) -> Unit,
     onRemove: () -> Unit,
     onRequestDownload: (Long) -> Unit,
     onCancelDownload: (Long) -> Unit,
@@ -322,6 +341,11 @@ private fun AndroidListeningListRow(
                         },
                     ) {
                         Text(if (isPlaying) "Pause" else "Play")
+                    }
+                    OutlinedButton(
+                        onClick = { onOpenPlayer(selectedId) },
+                    ) {
+                        Text("Player")
                     }
                 }
                 if (item.audioEnclosures.size > 1) {
@@ -425,6 +449,7 @@ private fun AndroidListeningListMiniPlayer(
     onPlayPause: () -> Unit,
     onBack30: () -> Unit,
     onForward30: () -> Unit,
+    onOpenPlayer: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Column(
@@ -433,12 +458,18 @@ private fun AndroidListeningListMiniPlayer(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                playback.articleTitle.orEmpty(),
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            TextButton(
+                onClick = onOpenPlayer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    playback.articleTitle.orEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
