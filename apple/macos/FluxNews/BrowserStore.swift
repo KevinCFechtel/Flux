@@ -871,10 +871,12 @@ final class BrowserStore: ObservableObject {
         if reason != .manual { lastAutomaticSyncAttempt = .now }
         if reason == .periodic { NativeLog.sync.notice("periodic sync triggered") }
         let coordinator = coreSessionExecutionCoordinator
-        Task { [weak self, core, coordinator] in
-            guard let result = await coordinator.blockingResult(
+        let cancellation = SyncCancellation()
+        Task { [weak self, core, coordinator, cancellation] in
+            guard let result = await coordinator.blockingCancellableResult(
                 for: core,
-                { try core.sync(reason: reason) }
+                onCancel: { cancellation.cancel() },
+                { try core.syncCancellable(reason: reason, cancellation: cancellation) }
             ) else {
                 if let self, self.core === core { self.isLoading = false }
                 return
