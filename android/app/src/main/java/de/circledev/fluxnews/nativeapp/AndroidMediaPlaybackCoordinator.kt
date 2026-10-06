@@ -57,6 +57,75 @@ internal data class AndroidMediaPlaybackState(
     val errorMessage: String? = null,
 )
 
+
+internal data class AndroidMediaSleepTimerState(
+    val enabled: Boolean = false,
+    val intervalMinutes: Int = 30,
+    val remainingSeconds: Int? = null,
+)
+
+internal class AndroidMediaSleepTimer(
+    private val scope: CoroutineScope,
+    private val onFire: suspend () -> Unit,
+) {
+    companion object {
+        val SupportedIntervalsMinutes = (30..180 step 15).toList()
+    }
+
+    private val mutableState =
+        kotlinx.coroutines.flow.MutableStateFlow(AndroidMediaSleepTimerState())
+    val state: kotlinx.coroutines.flow.StateFlow<AndroidMediaSleepTimerState> = mutableState
+
+    private var timerJob: Job? = null
+
+    fun setEnabled(enabled: Boolean) {
+        if (enabled) start(mutableState.value.intervalMinutes) else disable()
+    }
+
+    fun setInterval(minutes: Int) {
+        if (minutes !in SupportedIntervalsMinutes) return
+        if (mutableState.value.enabled) {
+            start(minutes)
+        } else {
+            mutableState.value = mutableState.value.copy(intervalMinutes = minutes)
+        }
+    }
+
+    fun disable() {
+        timerJob?.cancel()
+        timerJob = null
+        mutableState.value = mutableState.value.copy(
+            enabled = false,
+            remainingSeconds = null,
+        )
+    }
+
+    private fun start(minutes: Int) {
+        timerJob?.cancel()
+        mutableState.value = AndroidMediaSleepTimerState(
+            enabled = true,
+            intervalMinutes = minutes,
+            remainingSeconds = minutes * 60,
+        )
+        timerJob = scope.launch {
+            var remaining = minutes * 60
+            while (remaining > 0) {
+                delay(1_000L)
+                remaining -= 1
+                mutableState.value = mutableState.value.copy(
+                    remainingSeconds = remaining.coerceAtLeast(0),
+                )
+            }
+            timerJob = null
+            mutableState.value = mutableState.value.copy(
+                enabled = false,
+                remainingSeconds = null,
+            )
+            onFire()
+        }
+    }
+}
+
 internal sealed interface AndroidResolvedPlaybackSource {
     data class Local(val file: File) : AndroidResolvedPlaybackSource
     data class Remote(val url: String) : AndroidResolvedPlaybackSource
@@ -110,6 +179,8 @@ internal class AndroidMediaPlaybackCoordinator(
 
     private val mutableState = kotlinx.coroutines.flow.MutableStateFlow(AndroidMediaPlaybackState())
     val state: kotlinx.coroutines.flow.StateFlow<AndroidMediaPlaybackState> = mutableState
+
+    val sleepTimer = AndroidMediaSleepTimer(scope) { pause() }
 
     @Volatile
     private var controller: MediaController? = null
@@ -401,6 +472,7 @@ internal class AndroidMediaPlaybackCoordinator(
     }
 
     suspend fun clearForCoreLifecycle() {
+        sleepTimer.disable()
         stopRuntimeJobs()
         val mediaController = controller
         if (mediaController != null) {
