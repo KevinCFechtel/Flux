@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -210,15 +209,16 @@ internal fun AndroidMediaPlayerSheet(
                         }
                         Button(
                             onClick = {
-                                val enclosureId = playback.enclosureId ?: return@Button
-                                scope.launch {
-                                    if (
-                                        playback.status ==
-                                        AndroidMediaPlaybackPresentationStatus.Playing
-                                    ) {
-                                        coordinator.pause()
-                                    } else {
-                                        coordinator.play(enclosureId)
+                                playback.enclosureId?.let { enclosureId ->
+                                    scope.launch {
+                                        if (
+                                            playback.status ==
+                                            AndroidMediaPlaybackPresentationStatus.Playing
+                                        ) {
+                                            coordinator.pause()
+                                        } else {
+                                            coordinator.play(enclosureId)
+                                        }
                                     }
                                 }
                             },
@@ -341,8 +341,9 @@ internal fun AndroidMediaPlayerSheet(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                val enclosureId = playback.enclosureId ?: return@OutlinedButton
-                                scope.launch { coordinator.restart(enclosureId) }
+                                playback.enclosureId?.let { enclosureId ->
+                                    scope.launch { coordinator.restart(enclosureId) }
+                                }
                             },
                         ) {
                             Text("Restart")
