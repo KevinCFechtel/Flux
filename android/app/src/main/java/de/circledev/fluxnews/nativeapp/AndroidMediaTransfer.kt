@@ -23,6 +23,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -72,6 +74,17 @@ internal object AndroidMediaTransferFileLayout {
     }
 }
 
+internal data class AndroidMediaTransferProgress(
+    val enclosureId: Long,
+    val bytesDownloaded: Long,
+    val totalBytes: Long?,
+) {
+    val fraction: Float?
+        get() = totalBytes
+            ?.takeIf { it > 0L }
+            ?.let { (bytesDownloaded.toFloat() / it.toFloat()).coerceIn(0f, 1f) }
+}
+
 internal class AndroidMediaTransferCoordinator(
     context: Context,
     private val coreRuntime: AndroidCoreRuntime,
@@ -80,6 +93,9 @@ internal class AndroidMediaTransferCoordinator(
 ) : AndroidPostSyncEffect {
     private val applicationContext = context.applicationContext
     private val workManager = WorkManager.getInstance(applicationContext)
+    private val mutableProgress =
+        MutableStateFlow<Map<Long, AndroidMediaTransferProgress>>(emptyMap())
+    val progress = mutableProgress.asStateFlow()
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
         reconcile(sessionGeneration)
@@ -150,6 +166,21 @@ internal class AndroidMediaTransferCoordinator(
     fun cancelAllScheduledWork() {
         workManager.cancelAllWorkByTag(TRANSFER_TAG)
         workManager.cancelAllWorkByTag(DELETION_TAG)
+        mutableProgress.value = emptyMap()
+    }
+
+    internal fun updateProgress(enclosureId: Long, bytesDownloaded: Long, totalBytes: Long?) {
+        val progress = AndroidMediaTransferProgress(
+            enclosureId = enclosureId,
+            bytesDownloaded = bytesDownloaded.coerceAtLeast(0L),
+            totalBytes = totalBytes?.takeIf { it > 0L },
+        )
+        mutableProgress.value = mutableProgress.value + (enclosureId to progress)
+    }
+
+    internal fun clearProgress(enclosureId: Long) {
+        if (enclosureId !in mutableProgress.value) return
+        mutableProgress.value = mutableProgress.value - enclosureId
     }
 
     private suspend fun cancelStaleWork(
@@ -215,6 +246,7 @@ internal class AndroidMediaDownloadWorker(
         if (!networkPolicyAllows(generation)) return Result.retry()
 
         setForeground(foregroundInfo(work))
+        application.mediaTransferCoordinator.updateProgress(enclosureId, 0L, null)
         val reference = AndroidMediaTransferFileLayout.reference(
             work.enclosureId,
             work.url,
@@ -229,6 +261,7 @@ internal class AndroidMediaDownloadWorker(
 
         if (destination.isFile && destination.length() > 0L) {
             reportFinished(generation, reference, destination.length())
+            application.mediaTransferCoordinator.clearProgress(enclosureId)
             return Result.success()
         }
 
@@ -259,10 +292,35 @@ internal class AndroidMediaDownloadWorker(
                     reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
                     return Result.success()
                 }
+                val totalBytes = body.contentLength().takeIf { it > 0L }
+                application.mediaTransferCoordinator.updateProgress(
+                    enclosureId,
+                    0L,
+                    totalBytes,
+                )
                 withContext(Dispatchers.IO) {
                     body.byteStream().use { input ->
                         FileOutputStream(temporary).use { output ->
-                            input.copyTo(output)
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var downloaded = 0L
+                            var lastReported = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                if (
+                                    downloaded - lastReported >= 256L * 1024L ||
+                                    totalBytes != null && downloaded >= totalBytes
+                                ) {
+                                    application.mediaTransferCoordinator.updateProgress(
+                                        enclosureId,
+                                        downloaded,
+                                        totalBytes,
+                                    )
+                                    lastReported = downloaded
+                                }
+                            }
                             output.fd.sync()
                         }
                     }
@@ -285,12 +343,15 @@ internal class AndroidMediaDownloadWorker(
             }
             if (currentWork(generation) == null) {
                 destination.delete()
+                application.mediaTransferCoordinator.clearProgress(enclosureId)
                 return Result.success()
             }
             reportFinished(generation, reference, destination.length())
+            application.mediaTransferCoordinator.clearProgress(enclosureId)
             return Result.success()
         } catch (cancelled: CancellationException) {
             temporary.delete()
+            application.mediaTransferCoordinator.clearProgress(enclosureId)
             throw cancelled
         } catch (failure: Throwable) {
             temporary.delete()
@@ -300,6 +361,7 @@ internal class AndroidMediaDownloadWorker(
                 else -> DownloadFailureKind.UNKNOWN
             }
             reportFailure(generation, kind)
+            application.mediaTransferCoordinator.clearProgress(enclosureId)
             return Result.success()
         }
     }
