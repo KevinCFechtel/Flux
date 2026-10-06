@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
@@ -23,7 +22,6 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material3.Button
@@ -46,24 +44,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DownloadState
 import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.ListeningListSort
-import uniffi.flux_uniffi.MediaArtworkSource
 import uniffi.flux_uniffi.PlaybackStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,7 +74,7 @@ internal fun AndroidListeningListDestination(
     val coroutineScope = rememberCoroutineScope()
     var feedMenuOpen by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
-    var playerPresented by remember { mutableStateOf(false) }
+    var playerArticleId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(sessionGeneration) {
         store.activateSession(sessionGeneration)
@@ -163,17 +156,6 @@ internal fun AndroidListeningListDestination(
                 },
             )
         },
-        bottomBar = {
-            if (playback.enclosureId != null &&
-                playback.status != AndroidMediaPlaybackPresentationStatus.Stopped
-            ) {
-                AndroidListeningListMiniPlayer(
-                    playback = playback,
-                    coordinator = playbackCoordinator,
-                    onOpenPlayer = { playerPresented = true },
-                )
-            }
-        },
     ) { padding ->
         when {
             state.isLoading && state.items.isEmpty() -> Box(
@@ -253,11 +235,8 @@ internal fun AndroidListeningListDestination(
                         onPause = {
                             coroutineScope.launch { playbackCoordinator.pause() }
                         },
-                        onOpenPlayer = { enclosureId ->
-                            coroutineScope.launch {
-                                runCatching { playbackCoordinator.prepare(enclosureId) }
-                                    .onSuccess { playerPresented = true }
-                            }
+                        onOpenPlayer = {
+                            playerArticleId = item.articleId
                         },
                         onRemove = {
                             coroutineScope.launch {
@@ -283,12 +262,15 @@ internal fun AndroidListeningListDestination(
         }
     }
 
-    if (playerPresented && playback.enclosureId != null) {
-        AndroidMediaPlayerSheet(
-            coordinator = playbackCoordinator,
-            onDismiss = { playerPresented = false },
-        )
-    }
+    playerArticleId
+        ?.let { articleId -> state.items.firstOrNull { it.articleId == articleId } }
+        ?.let { item ->
+            AndroidMediaPlayerSheet(
+                coordinator = playbackCoordinator,
+                previewItem = item,
+                onDismiss = { playerArticleId = null },
+            )
+        }
 }
 
 @Composable
@@ -298,7 +280,7 @@ private fun AndroidListeningListRow(
     transferProgress: Map<Long, AndroidMediaTransferProgress>,
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
-    onOpenPlayer: (Long) -> Unit,
+    onOpenPlayer: () -> Unit,
     onRemove: () -> Unit,
     onRequestDownload: (Long) -> Unit,
     onCancelDownload: (Long) -> Unit,
@@ -306,20 +288,21 @@ private fun AndroidListeningListRow(
     onDeleteDownload: (Long) -> Unit,
 ) {
     var actionsOpen by remember { mutableStateOf(false) }
-    val selected = item.audioEnclosures.firstOrNull {
-        it.enclosure.id == item.activeEnclosureId
-    } ?: item.audioEnclosures.firstOrNull()
+    val nowPlayingEnclosure = playback.enclosureId?.let { loadedId ->
+        item.audioEnclosures.firstOrNull { it.enclosure.id == loadedId }
+    }
+    val selected = nowPlayingEnclosure
+        ?: item.audioEnclosures.firstOrNull { it.enclosure.id == item.activeEnclosureId }
+        ?: item.audioEnclosures.firstOrNull()
     val selectedId = selected?.enclosure?.id
-    val isPlaying = selectedId != null &&
-        playback.enclosureId == selectedId &&
+    val isNowPlaying = nowPlayingEnclosure != null
+    val isPlaying = isNowPlaying &&
         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = selectedId != null) {
-                selectedId?.let(onOpenPlayer)
-            }
+            .clickable(enabled = selectedId != null, onClick = onOpenPlayer)
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -345,6 +328,14 @@ private fun AndroidListeningListRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (isNowPlaying) {
+                    Text(
+                        "Now Playing",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
 
             Box {
@@ -671,159 +662,6 @@ private fun AndroidMediaMetric(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-@Composable
-private fun AndroidListeningListMiniPlayer(
-    playback: AndroidMediaPlaybackState,
-    coordinator: AndroidMediaPlaybackCoordinator,
-    onOpenPlayer: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val artworkModel by produceState<Any?>(
-        initialValue = null,
-        key1 = playback.artworkSource,
-        key2 = playback.enclosureId,
-    ) {
-        value = when (val source = playback.artworkSource) {
-            is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
-            is MediaArtworkSource.RemoteUrl ->
-                source.url.takeIf(AndroidArticleActionPolicy::validWebUrl)
-            null -> null
-        }
-    }
-
-    Surface(
-        tonalElevation = 4.dp,
-        shadowElevation = 8.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable(onClick = onOpenPlayer),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(9.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (artworkModel != null) {
-                            AsyncImage(
-                                model = artworkModel,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            Surface(
-                                modifier = Modifier.fillMaxSize(),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Rounded.Headphones,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            playback.articleTitle?.ifBlank { "Audio" } ?: "Audio",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        playback.feedTitle?.takeIf { it.isNotBlank() }?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-
-                IconButton(
-                    onClick = {
-                        scope.launch { coordinator.skipBackward30Seconds() }
-                    },
-                ) {
-                    Icon(
-                        Icons.Rounded.Replay30,
-                        contentDescription = "Back 30 seconds",
-                    )
-                }
-
-                FilledIconButton(
-                    onClick = {
-                        playback.enclosureId?.let { id ->
-                            scope.launch {
-                                if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                                    coordinator.pause()
-                                } else {
-                                    coordinator.play(id)
-                                }
-                            }
-                        }
-                    },
-                ) {
-                    Icon(
-                        if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                            Icons.Rounded.Pause
-                        } else {
-                            Icons.Rounded.PlayArrow
-                        },
-                        contentDescription = if (
-                            playback.status == AndroidMediaPlaybackPresentationStatus.Playing
-                        ) {
-                            "Pause"
-                        } else {
-                            "Play"
-                        },
-                    )
-                }
-            }
-
-            playback.durationMs?.takeIf { it > 0L }?.let { duration ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    LinearProgressIndicator(
-                        progress = {
-                            (playback.positionMs.toFloat() / duration.toFloat())
-                                .coerceIn(0f, 1f)
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        androidMediaTime(playback.positionMs) + " / " + androidMediaTime(duration),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
     }
 }
 
