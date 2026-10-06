@@ -113,9 +113,8 @@ internal object AndroidArticleActionPolicy {
 
         AndroidArticleSwipeAction.Comments -> validWebUrl(article.commentsUrl)
 
-        AndroidArticleSwipeAction.ListeningList,
-        AndroidArticleSwipeAction.DownloadAudio,
-        -> mediaActionsEnabled && hasAudio
+        AndroidArticleSwipeAction.ListeningList -> mediaActionsEnabled && hasAudio
+        AndroidArticleSwipeAction.DownloadAudio -> false
     }
 
     fun resolveSwipeSide(
@@ -313,6 +312,7 @@ internal fun AndroidArticleSwipeContainer(
     article: ArticleSummary,
     hasAudio: Boolean,
     configuration: AndroidArticleSwipeConfiguration,
+    mediaActionsEnabled: Boolean = false,
     rowWidth: Dp,
     onOpen: () -> Unit = {},
     onSwipeAction: (AndroidArticleSwipeAction) -> Unit,
@@ -331,6 +331,7 @@ internal fun AndroidArticleSwipeContainer(
             side = AndroidArticleSwipeSide.Leading,
             article = article,
             hasAudio = hasAudio,
+            mediaActionsEnabled = mediaActionsEnabled,
         )
     }
     val trailing = remember(configuration, article, hasAudio) {
