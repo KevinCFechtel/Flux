@@ -172,6 +172,7 @@ internal class AndroidMediaPlaybackCoordinator(
     mediaRoot: File,
     private val scope: CoroutineScope,
     private val diagnostics: AndroidAppDiagnostics,
+    private val onCoreMediaMutation: suspend (Long) -> Unit = {},
     private val checkpointIntervalMs: Long = 20_000L,
 ) {
     private val applicationContext = context.applicationContext
@@ -468,6 +469,9 @@ internal class AndroidMediaPlaybackCoordinator(
         coreRuntime.localForGeneration(generation) { core ->
             core.restartPlayback(enclosureId = enclosureId)
         }
+        if (coreRuntime.activeSessionGeneration() == generation) {
+            runCatching { onCoreMediaMutation(generation) }
+        }
         prepare(enclosureId)
         if (wasPlaying || wasCompleted) play(enclosureId)
     }
@@ -660,6 +664,8 @@ internal class AndroidMediaPlaybackCoordinator(
                         ?.toULong(),
                 )
             }
+            if (coreRuntime.activeSessionGeneration() != generation) return
+            runCatching { onCoreMediaMutation(generation) }
             completionSent = true
             preparedStatus = PlaybackStatus.COMPLETED
             mutableState.value = mutableState.value.copy(
