@@ -401,6 +401,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
     private val mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit,
     private val transferReconciler: suspend (Long) -> Unit,
+    private val transferRevision: StateFlow<Long>?,
     private val activeSessionGeneration: () -> Long?,
     private val monotonicMillis: () -> Long,
 ) {
@@ -518,6 +519,7 @@ internal class AndroidArticleTimelineStore private constructor(
         transferReconciler = { generation ->
             transferCoordinator?.reconcile(generation)
         },
+        transferRevision = transferCoordinator?.revision,
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         monotonicMillis = SystemClock::elapsedRealtime,
     )
@@ -548,6 +550,7 @@ internal class AndroidArticleTimelineStore private constructor(
         listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit = { _, _, _ -> },
         transferReconciler: suspend (Long) -> Unit = { _ -> },
+        transferRevision: StateFlow<Long>? = null,
         monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -566,6 +569,7 @@ internal class AndroidArticleTimelineStore private constructor(
         listeningListWriter,
         mediaDownloadWriter,
         transferReconciler,
+        transferRevision,
         activeSessionGeneration,
         monotonicMillis,
     )
@@ -603,6 +607,13 @@ internal class AndroidArticleTimelineStore private constructor(
     private var requestGeneration = 0L
 
     init {
+        transferRevision?.let { revisions ->
+            explicitActionScope.launch {
+                revisions.collect {
+                    refreshVisibleMediaActions()
+                }
+            }
+        }
         scrolloverMutationScope.launch {
             for (request in scrolloverMutationRequests) {
                 when (request) {
@@ -1011,8 +1022,10 @@ internal class AndroidArticleTimelineStore private constructor(
                 val refreshed = runCatching {
                     mediaActionStatesLoader(listOf(articleId))[articleId]
                 }.getOrNull()
+                if (activeSessionGeneration() != generation) return@launch
                 if (refreshed != null) {
                     mutableState.update { state ->
+                        if (state.sessionGeneration != generation) return@update state
                         state.copy(
                             mediaActionStates = state.mediaActionStates + (articleId to refreshed),
                             audioArticleIds = if (refreshed.hasAudio) {
@@ -1803,6 +1816,29 @@ internal class AndroidArticleTimelineStore private constructor(
         if (current.isStarred == starred) return false
         state.value = current.copy(isStarred = starred, revision = current.revision + 1L)
         return true
+    }
+
+    private suspend fun refreshVisibleMediaActions() {
+        val current = mutableState.value
+        val sessionGeneration = current.sessionGeneration ?: return
+        if (activeSessionGeneration() != sessionGeneration || current.articles.isEmpty()) return
+        val generation = current.queryGeneration
+        val refreshed = runCatching {
+            mediaActionStatesLoader(current.articles.map { it.id })
+        }.getOrNull() ?: return
+        if (activeSessionGeneration() != sessionGeneration) return
+        mutableState.update { state ->
+            if (
+                state.sessionGeneration != sessionGeneration ||
+                state.queryGeneration != generation
+            ) {
+                return@update state
+            }
+            state.copy(
+                mediaActionStates = refreshed,
+                audioArticleIds = refreshed.filterValues { it.hasAudio }.keys,
+            )
+        }
     }
 
     private suspend fun loadMediaActionStates(articleIds: List<Long>): Map<Long, AndroidArticleMediaActionState> =
