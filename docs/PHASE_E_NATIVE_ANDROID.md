@@ -1029,7 +1029,10 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - Listening List download/cancel/retry/delete controls are productive, including transient byte/total progress from the native worker runtime;
 - Timeline and Search now retain the batched Core enclosure/download projection and expose article-level Download Audio as Download/Cancel/Retry/Delete semantics; multiple audio enclosures use one native chooser rather than per-row Core queries;
 - worker completion/failure/deletion publishes only an in-memory revision signal so Timeline, Search and Listening List re-read authoritative Core download state without introducing a second persisted transfer state;
-- richer player presentation (artwork, chapters, show notes, rate/sleep controls) and physical background/process-death acceptance remain subsequent E6 work.
+- the rich native Player surface is now implemented over the same service-owned Media3 player: local Core artwork bytes and remote HTTP(S) artwork, seek timeline, Play/Pause/Stop/±30 seconds, visible playback-rate and sleep-timer controls, completion Restart, active-chapter presentation/navigation and expandable Show Notes;
+- Show Notes reuse `readerDocument(articleId:)` and the existing Android Reader renderer; the Player does not fetch or render article HTML through a parallel path;
+- opening Player from a Listening List row prepares the selected enclosure without auto-starting playback, while the compact mini-player opens the same rich surface for the active item;
+- physical background/process-death acceptance and final E6 real-device refinement remain subsequent E6 work.
 
 E6 consumes the frozen Phase B media domain.
 
