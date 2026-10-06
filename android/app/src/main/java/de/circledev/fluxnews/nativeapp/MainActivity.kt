@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
         val searchStore = application.searchStore
         val listeningListStore = application.listeningListStore
         val mediaPlaybackCoordinator = application.mediaPlaybackCoordinator
+        val mediaTransferCoordinator = application.mediaTransferCoordinator
         val readerStore = application.readerStore
         val articleOpenResolver = application.articleOpenResolver
         val navigationPreferences = application.navigationPreferences
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
                         searchStore,
                         listeningListStore,
                         mediaPlaybackCoordinator,
+                        mediaTransferCoordinator,
                         readerStore,
                         articleOpenResolver,
                         navigationPreferences,
@@ -131,6 +133,7 @@ private fun FluxNewsApp(
     searchStore: AndroidSearchStore,
     listeningListStore: AndroidListeningListStore,
     mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator,
+    mediaTransferCoordinator: AndroidMediaTransferCoordinator,
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
@@ -145,7 +148,7 @@ private fun FluxNewsApp(
     LaunchedEffect(readyState?.serverUrl) {
         if (readyState != null) {
             backgroundSync.reconcileFromCore()
-            (LocalContext.current.applicationContext as FluxApplication).mediaTransferCoordinator.reconcile()
+            mediaTransferCoordinator.reconcile()
         }
     }
     fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) { bootstrapState = ready; syncCoordinator.requestSync(SyncReason.APP_START) }
