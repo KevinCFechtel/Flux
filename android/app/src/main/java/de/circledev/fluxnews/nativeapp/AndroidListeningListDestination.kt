@@ -44,11 +44,13 @@ import uniffi.flux_uniffi.PlaybackStatus
 internal fun AndroidListeningListDestination(
     store: AndroidListeningListStore,
     playbackCoordinator: AndroidMediaPlaybackCoordinator,
+    transferCoordinator: AndroidMediaTransferCoordinator,
     sessionGeneration: Long?,
     onBack: () -> Unit,
 ) {
     val state by store.state.collectAsState()
     val playback by playbackCoordinator.state.collectAsState()
+    val transferProgress by transferCoordinator.progress.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var feedMenuOpen by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -193,6 +195,7 @@ internal fun AndroidListeningListDestination(
                         AndroidListeningListRow(
                             item = item,
                             playback = playback,
+                            transferProgress = transferProgress,
                             onPlay = { enclosureId ->
                                 coroutineScope.launch { playbackCoordinator.play(enclosureId) }
                             },
@@ -228,6 +231,7 @@ internal fun AndroidListeningListDestination(
 private fun AndroidListeningListRow(
     item: ListeningListItem,
     playback: AndroidMediaPlaybackState,
+    transferProgress: Map<Long, AndroidMediaTransferProgress>,
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
     onRemove: () -> Unit,
@@ -270,6 +274,34 @@ private fun AndroidListeningListRow(
                 progress.durationMs?.toLong(),
                 progress.status,
             )
+        }
+
+        selectedId?.let { enclosureId ->
+            transferProgress[enclosureId]?.let { progress ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    progress.fraction?.let { fraction ->
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } ?: LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        buildString {
+                            append("Downloading")
+                            append(" · ")
+                            append(androidMediaBytes(progress.bytesDownloaded))
+                            progress.totalBytes?.let { total ->
+                                append(" / ")
+                                append(androidMediaBytes(total))
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         Row(
@@ -418,6 +450,16 @@ private fun AndroidListeningListMiniPlayer(
                 TextButton(onClick = onForward30) { Text("+30s") }
             }
         }
+    }
+}
+
+private fun androidMediaBytes(bytes: Long): String {
+    val safe = bytes.coerceAtLeast(0L).toDouble()
+    return when {
+        safe >= 1024.0 * 1024.0 * 1024.0 -> "%.1f GB".format(safe / (1024.0 * 1024.0 * 1024.0))
+        safe >= 1024.0 * 1024.0 -> "%.1f MB".format(safe / (1024.0 * 1024.0))
+        safe >= 1024.0 -> "%.1f KB".format(safe / 1024.0)
+        else -> safe.toLong().toString() + " B"
     }
 }
 
