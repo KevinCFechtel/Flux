@@ -1,21 +1,22 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.content.Context
+import android.os.Build
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.work.Constraints
-import androidx.work.CoroutineWorker
+import androidx.work.Worker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import uniffi.flux_uniffi.SyncCancellation
 import uniffi.flux_uniffi.SyncOutcome
 import uniffi.flux_uniffi.SyncReason
@@ -124,22 +125,30 @@ internal class AndroidBackgroundSync(
     companion object { internal const val WORK_NAME = "flux-background-sync" }
 }
 
-internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
+internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerParameters) : Worker(appContext, params) {
+    @Volatile
+    private var activeCancellation: SyncCancellation? = null
+
+    override fun doWork(): Result = runBlocking {
         val app = applicationContext as FluxApplication
         val diagnostics = app.diagnostics
-        diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker started attempt=" + runAttemptCount)
+        diagnostics.record(
+            AndroidAppLogLevel.Info,
+            "background-sync",
+            "worker started attempt=" + runAttemptCount +
+                " previous_stop_reason=" + stopReasonForDiagnostics(),
+        )
 
         val state = app.accountBootstrap.restoreStoredAccount()
         if (state !is AndroidAccountBootstrap.State.Ready) {
             diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker finished no_account")
-            return Result.success()
+            return@runBlocking Result.success()
         }
 
         val generation = app.coreRuntime.activeSessionGeneration()
         if (generation == null) {
             diagnostics.record(AndroidAppLogLevel.Warning, "background-sync", "worker retry no_active_session")
-            return Result.retry()
+            return@runBlocking Result.retry()
         }
 
         val enabled = runCatching {
@@ -150,16 +159,17 @@ internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerPa
                 "background-sync",
                 "worker retry setting_read_failed type=" + error.javaClass.simpleName + " message=" + error.message.orEmpty(),
             )
-            return Result.retry()
+            return@runBlocking Result.retry()
         }
         if (!enabled) {
             diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "worker disabled cancelling_periodic_work")
             WorkManager.getInstance(applicationContext).cancelUniqueWork(AndroidBackgroundSync.WORK_NAME)
-            return Result.success()
+            return@runBlocking Result.success()
         }
 
         val cancellation = SyncCancellation()
-        return try {
+        activeCancellation = cancellation
+        try {
             diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "core background sync starting")
             when (
                 val outcome = app.coreRuntime.remoteForGeneration(generation) {
@@ -193,13 +203,9 @@ internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerPa
                 }
                 is SyncOutcome.Cancelled -> {
                     diagnostics.record(AndroidAppLogLevel.Info, "background-sync", "core background sync cancelled")
-                    Result.success()
+                    Result.retry()
                 }
             }
-        } catch (cancelled: CancellationException) {
-            cancellation.cancel()
-            diagnostics.record(AndroidAppLogLevel.Warning, "background-sync", "worker coroutine cancelled")
-            throw cancelled
         } catch (error: Exception) {
             diagnostics.record(
                 AndroidAppLogLevel.Warning,
@@ -208,14 +214,21 @@ internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerPa
             )
             Result.retry()
         } finally {
-            if (isStopped) {
-                cancellation.cancel()
-                diagnostics.record(
-                    AndroidAppLogLevel.Warning,
-                    "background-sync",
-                    "worker stopped stop_reason=" + stopReason,
-                )
-            }
+            if (activeCancellation === cancellation) activeCancellation = null
         }
     }
+
+    override fun onStopped() {
+        activeCancellation?.cancel()
+        val app = applicationContext as FluxApplication
+        app.diagnostics.record(
+            AndroidAppLogLevel.Warning,
+            "background-sync",
+            "worker stopped stop_reason=" + stopReasonForDiagnostics(),
+        )
+        super.onStopped()
+    }
+
+    private fun stopReasonForDiagnostics(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) stopReason.toString() else "unavailable_api_" + Build.VERSION.SDK_INT
 }
