@@ -21,12 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Article
+import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Headphones
-import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -93,7 +93,7 @@ internal fun AndroidMediaPlayerSheet(
     val isPreviewingInactiveItem =
         previewEnclosure != null && previewEnclosure.enclosure.id != playback.enclosureId
     val displayedEnclosureId =
-        if (isPreviewingInactiveItem) previewEnclosure?.enclosure?.id else playback.enclosureId
+        if (isPreviewingInactiveItem) previewEnclosure.enclosure.id else playback.enclosureId
     val displayedArticleId =
         if (isPreviewingInactiveItem) previewItem?.articleId else playback.articleId
     val displayedTitle =
@@ -101,12 +101,12 @@ internal fun AndroidMediaPlayerSheet(
     val displayedFeedTitle =
         if (isPreviewingInactiveItem) previewItem?.feedTitle else playback.feedTitle
     val displayedPositionMs =
-        if (isPreviewingInactiveItem) previewEnclosure?.playbackState?.positionMs?.toLong() ?: 0L
+        if (isPreviewingInactiveItem) previewEnclosure.playbackState.positionMs.toLong()
         else playback.positionMs
     val displayedDurationMs =
         if (isPreviewingInactiveItem) {
-            previewEnclosure?.durationMs?.toLong()
-                ?: previewEnclosure?.playbackState?.durationMs?.toLong()
+            previewEnclosure.durationMs?.toLong()
+                ?: previewEnclosure.playbackState.durationMs?.toLong()
         } else {
             playback.durationMs
         }
@@ -836,7 +836,7 @@ private fun AndroidMediaChapterSection(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Icon(
-                    Icons.Rounded.List,
+                    Icons.AutoMirrored.Rounded.List,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -917,7 +917,7 @@ private fun AndroidMediaShowNotesSection(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Icon(
-                    Icons.Rounded.Article,
+                    Icons.AutoMirrored.Rounded.Article,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )
