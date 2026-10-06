@@ -884,11 +884,17 @@ final class BrowserStore: ObservableObject {
             guard let self, self.core === core else { return }
             self.isLoading = false
             switch result {
-            case let .success(syncResult):
-                NativeLog.sync.debug("sync completed; reconciling native media work")
-                self.requestMediaTransferReconciliation()
-                await SystemNotificationManager.shared.deliver(syncResult.systemNotificationCandidates, core: core, coordinator: coordinator)
+            case let .success(outcome):
+                switch outcome {
+                case let .completed(metadata):
+                    NativeLog.sync.debug("sync completed; reconciling native media work")
+                    self.requestMediaTransferReconciliation()
+                    await SystemNotificationManager.shared.deliver(metadata.systemNotificationCandidates, core: core, coordinator: coordinator)
+                case .cancelled:
+                    NativeLog.sync.debug("sync cancelled reason=\(String(describing: reason), privacy: .public)")
+                }
             case let .failure(error):
+                if cancellation.isCancelled() || error is CancellationError { return }
                 NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .public)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
