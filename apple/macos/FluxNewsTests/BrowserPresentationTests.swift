@@ -3,6 +3,27 @@ import XCTest
 
 @MainActor
 final class BrowserPresentationTests: XCTestCase {
+    func testBrowserStoreUsesSharedAppleCoreExecutionBoundary() throws {
+        let macosDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: macosDirectory.appendingPathComponent("FluxNews/BrowserStore.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("AppleCoreSessionExecutionCoordinator()"))
+        XCTAssertTrue(source.contains("navigationProjection(countMode:"))
+        XCTAssertFalse(source.contains("fatalError(\"Scope has no article query\")"))
+        XCTAssertFalse(source.contains("store.value?.searchPageSize"))
+
+        // The only detached work left in BrowserStore is CPU-only native work:
+        // feed-icon preparation, thumbnail decoding, backup encryption and backup parsing.
+        XCTAssertEqual(source.components(separatedBy: "Task.detached").count - 1, 4)
+        XCTAssertTrue(source.contains("exportConfigBackup(input: input, password: password)"))
+        XCTAssertTrue(source.contains("parseConfigBackup(bytes: bytes, password: password"))
+    }
+
     func testStartupScopeResolvesKnownTargets() {
         XCTAssertEqual(StartupScopeResolver.resolve(.allNews, categoryID: nil, feedID: nil, categoryIDs: [7], feedIDs: [42]), .all)
         XCTAssertEqual(StartupScopeResolver.resolve(.starred, categoryID: nil, feedID: nil, categoryIDs: [7], feedIDs: [42]), .starred)
