@@ -605,7 +605,8 @@ private fun contextActionIcon(
 ): Int = when (action) {
     AndroidArticleContextAction.ReadUnread ->
         if (article.isRead) R.drawable.ic_mark_unread else R.drawable.ic_mark_read
-    AndroidArticleContextAction.StarUnstar -> R.drawable.ic_star
+    AndroidArticleContextAction.StarUnstar ->
+        if (article.isStarred) R.drawable.ic_unstar else R.drawable.ic_star
     AndroidArticleContextAction.OpenOriginal,
     AndroidArticleContextAction.OpenMiniflux,
     -> R.drawable.ic_open_external
@@ -718,12 +719,17 @@ private fun swipeActionColors(action: AndroidArticleSwipeAction): AndroidSwipeAc
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
         )
-        AndroidArticleSwipeAction.SaveToService,
-        AndroidArticleSwipeAction.ListeningList,
-        AndroidArticleSwipeAction.DownloadAudio,
-        -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.surface,
-            MaterialTheme.colorScheme.onSurface,
+        AndroidArticleSwipeAction.SaveToService -> AndroidSwipeActionColors(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+        )
+        AndroidArticleSwipeAction.ListeningList -> AndroidSwipeActionColors(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+        AndroidArticleSwipeAction.DownloadAudio -> AndroidSwipeActionColors(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 
@@ -733,7 +739,8 @@ private fun swipeActionIcon(
 ): Int = when (action) {
     AndroidArticleSwipeAction.ReadUnread ->
         if (article.isRead) R.drawable.ic_mark_unread else R.drawable.ic_mark_read
-    AndroidArticleSwipeAction.StarUnstar -> R.drawable.ic_star
+    AndroidArticleSwipeAction.StarUnstar ->
+        if (article.isStarred) R.drawable.ic_unstar else R.drawable.ic_star
     AndroidArticleSwipeAction.OpenOriginal,
     AndroidArticleSwipeAction.OpenMiniflux,
     -> R.drawable.ic_open_external
