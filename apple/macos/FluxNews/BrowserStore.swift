@@ -269,7 +269,14 @@ final class BrowserStore: ObservableObject {
         do {
             guard let credentials = try CredentialStore.load() else { settingsVisible = true; return }
             NativeLog.keychain.notice("stored Miniflux credentials loaded")
-            configure(server: credentials.server, apiKey: credentials.apiKey, customHeaders: credentials.resolvedCustomHeaders)
+            Task { [weak self] in
+                guard let self else { return }
+                _ = await self.configure(
+                    server: credentials.server,
+                    apiKey: credentials.apiKey,
+                    customHeaders: credentials.resolvedCustomHeaders
+                )
+            }
         } catch {
             NativeLog.keychain.error("credential lookup failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = NativeErrorPresentation.message(for: error)
@@ -278,15 +285,70 @@ final class BrowserStore: ObservableObject {
     }
 
     @discardableResult
-    func configure(server: String, apiKey: String, customHeaders: [CustomHTTPHeader] = [], refreshVersion: Bool = true, startSync: Bool = true) -> Bool {
+    func configure(
+        server: String,
+        apiKey: String,
+        customHeaders: [CustomHTTPHeader] = [],
+        refreshVersion: Bool = true,
+        startSync: Bool = true
+    ) async -> Bool {
         let fm = FileManager.default
-        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
-        let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("FluxNews", isDirectory: true)
+        let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("FluxNews", isDirectory: true)
         let media = Self.mediaRootURL
-        do {
-            let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey, customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }), listener: CoreDiagnosticLogger())
-            let settings = try configuredCore.coreSettings()
-            let subscription = try configuredCore.subscribeEvents(listener: BrowserEventListener(store: self))
+        let previousCore = core
+
+        if previousCore != nil {
+            await coreSessionExecutionCoordinator.quiesce()
+        }
+
+        let headers = customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
+        let creation = await AppleCoreExecution.shared.responsiveResult {
+            try Flux.initializeWithDiagnostics(
+                config: InitializationConfig(
+                    persistentData: support.path,
+                    cache: cache.path,
+                    media: media.path,
+                    baseUrl: server,
+                    apiKey: apiKey,
+                    customHeaders: headers
+                ),
+                listener: CoreDiagnosticLogger()
+            )
+        }
+
+        let configuredCore: Flux
+        switch creation {
+        case let .success(value):
+            configuredCore = value
+        case let .failure(error):
+            if let previousCore { coreSessionExecutionCoordinator.resume(previousCore) }
+            NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = NativeErrorPresentation.message(for: error)
+            return false
+        }
+
+        if previousCore != nil { coreSessionExecutionCoordinator.deactivate() }
+        coreSessionExecutionCoordinator.activate(configuredCore)
+
+        let listener = BrowserEventListener(store: self)
+        guard let setup = await coreSessionExecutionCoordinator.responsiveResult(
+            for: configuredCore,
+            {
+                let settings = try configuredCore.coreSettings()
+                let subscription = try configuredCore.subscribeEvents(listener: listener)
+                return (settings, subscription)
+            }
+        ) else {
+            coreSessionExecutionCoordinator.deactivate()
+            if let previousCore { coreSessionExecutionCoordinator.activate(previousCore) }
+            return false
+        }
+
+        switch setup {
+        case let .success((settings, subscription)):
             core = configuredCore
             onCoreConfigured?(configuredCore)
             configuredServer = server
@@ -302,43 +364,98 @@ final class BrowserStore: ObservableObject {
             if startSync && syncOnStartEnabled { sync(reason: .appStart) }
             if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
             else { deactivatePeriodicSyncScheduling() }
-            if refreshVersion { refreshMinifluxVersion(server: server, apiKey: apiKey, customHeaders: customHeaders, for: configuredCore) }
+            if refreshVersion {
+                refreshMinifluxVersion(
+                    server: server,
+                    apiKey: apiKey,
+                    customHeaders: customHeaders,
+                    for: configuredCore
+                )
+            }
             return true
-        } catch {
-            NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
+        case let .failure(error):
+            coreSessionExecutionCoordinator.deactivate()
+            if let previousCore { coreSessionExecutionCoordinator.activate(previousCore) }
+            NativeLog.app.error("core setup failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = NativeErrorPresentation.message(for: error)
             return false
         }
     }
 
-    func saveAccount(server: String, apiKey: String, customHeaders: [CustomHTTPHeader], launchAtLogin: Bool, scrollover: Bool, syncOnStart: Bool, globalShortcut: GlobalShortcutChoice) {
+    func saveAccount(
+        server: String,
+        apiKey: String,
+        customHeaders: [CustomHTTPHeader],
+        launchAtLogin: Bool,
+        scrollover: Bool,
+        syncOnStart: Bool,
+        globalShortcut: GlobalShortcutChoice
+    ) {
         guard !isSavingAccount else { return }
         isSavingAccount = true
         accountValidationError = nil
         Task { [weak self] in
-            let validation = await Task.detached(priority: .userInitiated) {
-                Result { try validateMinifluxAccount(serverUrl: server, apiKey: apiKey, customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }) }
-            }.value
+            let validation = await AppleCoreExecution.shared.blockingResult {
+                try validateMinifluxAccount(
+                    serverUrl: server,
+                    apiKey: apiKey,
+                    customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
+                )
+            }
             guard let self else { return }
             self.isSavingAccount = false
             switch validation {
             case let .success(result):
-                self.commitValidatedAccount(result, apiKey: apiKey, customHeaders: customHeaders, launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut)
+                await self.commitValidatedAccount(
+                    result,
+                    apiKey: apiKey,
+                    customHeaders: customHeaders,
+                    launchAtLogin: launchAtLogin,
+                    scrollover: scrollover,
+                    syncOnStart: syncOnStart,
+                    globalShortcut: globalShortcut
+                )
             case let .failure(error):
-                self.accountValidationError = AccountValidationPresentation.message(for: accountValidationFailure(for: error))
+                self.accountValidationError = AccountValidationPresentation.message(
+                    for: self.accountValidationFailure(for: error)
+                )
             }
         }
     }
 
-    private func commitValidatedAccount(_ validation: AccountValidationResult, apiKey: String, customHeaders: [CustomHTTPHeader], launchAtLogin: Bool, scrollover: Bool, syncOnStart: Bool, globalShortcut: GlobalShortcutChoice) {
+    private func commitValidatedAccount(
+        _ validation: AccountValidationResult,
+        apiKey: String,
+        customHeaders: [CustomHTTPHeader],
+        launchAtLogin: Bool,
+        scrollover: Bool,
+        syncOnStart: Bool,
+        globalShortcut: GlobalShortcutChoice
+    ) async {
         do {
             let previousCredentials = try CredentialStore.load()
             invalidateWidgetSnapshot()
-            try CredentialStore.save(MinifluxCredentials(server: validation.installationBase, apiKey: apiKey, customHeaders: customHeaders))
-            guard configure(server: validation.installationBase, apiKey: apiKey, customHeaders: customHeaders, refreshVersion: false) else {
+            try CredentialStore.save(
+                MinifluxCredentials(
+                    server: validation.installationBase,
+                    apiKey: apiKey,
+                    customHeaders: customHeaders
+                )
+            )
+            guard await configure(
+                server: validation.installationBase,
+                apiKey: apiKey,
+                customHeaders: customHeaders,
+                refreshVersion: false
+            ) else {
                 do { try restoreCredentials(previousCredentials) }
-                catch { accountValidationError = String(localized: "The account could not be saved."); return }
-                accountValidationError = String(localized: "The validated account could not be configured. Your previous account is still active.")
+                catch {
+                    accountValidationError = String(localized: "The account could not be saved.")
+                    return
+                }
+                accountValidationError = String(
+                    localized: "The validated account could not be configured. Your previous account is still active."
+                )
                 return
             }
             try CredentialStore.setLaunchAtLogin(launchAtLogin)
@@ -379,11 +496,17 @@ final class BrowserStore: ObservableObject {
 
     private func refreshMinifluxVersion(server: String, apiKey: String, customHeaders: [CustomHTTPHeader], for configuredCore: Flux) {
         Task { [weak self] in
-            let validation = await Task.detached(priority: .utility) {
-                try? validateMinifluxAccount(serverUrl: server, apiKey: apiKey, customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) })
-            }.value
-            guard let self, self.core === configuredCore, let validation else { return }
-            self.minifluxVersion = validation.version
+            let result = await AppleCoreExecution.shared.blockingResult {
+                try validateMinifluxAccount(
+                    serverUrl: server,
+                    apiKey: apiKey,
+                    customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
+                )
+            }
+            guard let self, self.core === configuredCore else { return }
+            if case let .success(validation) = result {
+                self.minifluxVersion = validation.version
+            }
         }
     }
 
