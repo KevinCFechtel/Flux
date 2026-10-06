@@ -483,6 +483,7 @@ internal class AndroidSearchStore private constructor(
             }
             if (activeSessionGeneration() != generation) return@launch
             if (result.isSuccess) {
+                runCatching { transferReconciler(generation) }
                 mutableState.update { state ->
                     val current = state.mediaActionStates[articleId] ?: return@update state
                     state.copy(
