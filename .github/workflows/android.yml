@@ -14,6 +14,10 @@ on:
       - "core/**"
       - ".github/workflows/android.yml"
 
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
