@@ -22,6 +22,7 @@ class AndroidAccountBootstrap private constructor(
     private val serverVersionWriter: suspend (String, String) -> Unit,
     private val serverVersionClearer: suspend () -> Unit,
     private val widgetStateClearer: () -> Unit,
+    private val lifecycleParticipant: AndroidCoreLifecycleParticipant,
     storagePaths: AndroidStoragePaths,
 ) {
     internal constructor(
@@ -30,6 +31,7 @@ class AndroidAccountBootstrap private constructor(
         coreRuntime: AndroidCoreRuntime,
         storagePaths: AndroidStoragePaths,
         onWidgetStateCleared: () -> Unit = {},
+        lifecycleParticipant: AndroidCoreLifecycleParticipant = AndroidNoopCoreLifecycleParticipant,
     ) : this(
         credentialReader = credentialStore::read,
         credentialWriter = credentialStore::write,
@@ -63,6 +65,7 @@ class AndroidAccountBootstrap private constructor(
             AndroidWidgetProjectionStore(storagePaths.widget).clear()
             onWidgetStateCleared()
         },
+        lifecycleParticipant = lifecycleParticipant,
         storagePaths = storagePaths,
     )
 
@@ -82,6 +85,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionWriter: suspend (String, String) -> Unit = { _, _ -> },
         serverVersionClearer: suspend () -> Unit = {},
         widgetStateClearer: () -> Unit = {},
+        lifecycleParticipant: AndroidCoreLifecycleParticipant = AndroidNoopCoreLifecycleParticipant,
         storagePaths: AndroidStoragePaths,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -99,6 +103,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionWriter,
         serverVersionClearer,
         widgetStateClearer,
+        lifecycleParticipant,
         storagePaths,
     )
 
@@ -142,6 +147,7 @@ class AndroidAccountBootstrap private constructor(
                 state = State.AccountRequired
             } else {
                 sessionOpener(configFactory.create(credentials))
+                lifecycleParticipant.resumeAfterCoreLifecycleChange(AndroidCoreLifecycleChange.SessionBootstrap)
                 val version = try {
                     serverVersionReader(credentials.serverUrl)
                 } catch (_: Exception) {
@@ -225,11 +231,28 @@ class AndroidAccountBootstrap private constructor(
             return@withLock ActivationResult.Rejected("The existing account credentials could not be read.")
         }
 
+        val replacingSession = hasActiveSession()
+        val lifecycleChange = if (replacingSession) {
+            AndroidCoreLifecycleChange.AccountReplacement
+        } else {
+            AndroidCoreLifecycleChange.SessionBootstrap
+        }
+
         try {
             credentialWriter(normalized)
             try {
                 val config = configFactory.create(normalized)
-                if (hasActiveSession()) sessionReplacer(config) else sessionOpener(config)
+                if (replacingSession) {
+                    lifecycleParticipant.prepareForCoreLifecycleChange(lifecycleChange)
+                    try {
+                        sessionReplacer(config)
+                    } finally {
+                        lifecycleParticipant.resumeAfterCoreLifecycleChange(lifecycleChange)
+                    }
+                } else {
+                    sessionOpener(config)
+                    lifecycleParticipant.resumeAfterCoreLifecycleChange(lifecycleChange)
+                }
             } catch (error: Exception) {
                 if (previous != null) credentialWriter(previous) else credentialClearer()
                 throw error
@@ -260,6 +283,7 @@ class AndroidAccountBootstrap private constructor(
         }
 
         localStateRebuildState = LocalStateRebuildState.Rebuilding
+        lifecycleParticipant.prepareForCoreLifecycleChange(AndroidCoreLifecycleChange.LocalStateRebuild)
         localStateRebuildState = try {
             localStateRebuilder()
             LocalStateRebuildState.Succeeded
@@ -267,6 +291,8 @@ class AndroidAccountBootstrap private constructor(
             // Core's rebuild is destructive before the remote synchronization attempt; failure is
             // therefore surfaced exactly as on iOS rather than pretending the old state survived.
             LocalStateRebuildState.Failed
+        } finally {
+            lifecycleParticipant.resumeAfterCoreLifecycleChange(AndroidCoreLifecycleChange.LocalStateRebuild)
         }
         localStateRebuildState
     }
@@ -276,8 +302,12 @@ class AndroidAccountBootstrap private constructor(
             return@withLock RemovalResult.Rejected("Wait for the local state rebuild to finish.")
         }
 
+        val hadActiveSession = hasActiveSession()
+        if (hadActiveSession) {
+            lifecycleParticipant.prepareForCoreLifecycleChange(AndroidCoreLifecycleChange.AccountRemoval)
+        }
         try {
-            if (hasActiveSession()) {
+            if (hadActiveSession) {
                 accountStateRemover()
             }
             credentialClearer()
@@ -287,10 +317,13 @@ class AndroidAccountBootstrap private constructor(
             } catch (_: Exception) {
                 // Version metadata is non-sensitive and must not block removal of the account.
             }
-            if (hasActiveSession()) {
+            if (hadActiveSession) {
                 sessionCloser()
             }
         } catch (_: Exception) {
+            if (hasActiveSession()) {
+                lifecycleParticipant.resumeAfterCoreLifecycleChange(AndroidCoreLifecycleChange.AccountRemoval)
+            }
             return@withLock RemovalResult.Rejected("The account could not be removed.")
         }
 
