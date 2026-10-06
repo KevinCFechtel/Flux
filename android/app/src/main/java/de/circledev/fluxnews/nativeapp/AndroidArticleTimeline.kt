@@ -311,10 +311,16 @@ internal data class AndroidArticleRowPresentation(
     val revision: Long = 0L,
 )
 
+internal data class AndroidArticleMediaActionState(
+    val hasAudio: Boolean,
+    val isInListeningList: Boolean,
+)
+
 internal data class AndroidArticleTimelineContentState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
     val audioArticleIds: Set<Long> = emptySet(),
+    val mediaActionStates: Map<Long, AndroidArticleMediaActionState> = emptyMap(),
     val feedIconVariant: FeedIconVariant? = null,
     val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
     val nextCursor: ArticleCursor? = null,
@@ -334,6 +340,7 @@ internal data class AndroidArticleTimelineState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
     val audioArticleIds: Set<Long> = emptySet(),
+    val mediaActionStates: Map<Long, AndroidArticleMediaActionState> = emptyMap(),
     val feedIconVariant: FeedIconVariant? = null,
     val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
     val total: ULong? = null,
@@ -354,6 +361,7 @@ internal data class AndroidArticleTimelineState(
             selection = selection,
             articles = articles,
             audioArticleIds = audioArticleIds,
+            mediaActionStates = mediaActionStates,
             feedIconVariant = feedIconVariant,
             feedIconPngByFeedId = feedIconPngByFeedId,
             nextCursor = nextCursor,
@@ -373,7 +381,7 @@ internal data class AndroidArticleTimelineState(
  */
 internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
-    private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
+    private val mediaActionStatesLoader: suspend (List<Long>) -> Map<Long, AndroidArticleMediaActionState>,
     private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
     private val feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray>,
     private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
@@ -384,6 +392,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val scopeReadWriter: suspend (Long, List<Long>) -> Unit,
     private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
+    private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
     private val activeSessionGeneration: () -> Long?,
     private val monotonicMillis: () -> Long,
 ) {
@@ -391,17 +400,17 @@ internal class AndroidArticleTimelineStore private constructor(
         pageLoader = { query, includeTotal ->
             coreRuntime.local { core -> core.articlePage(query, includeTotal) }
         },
-        audioArticleIdsLoader = { articleIds ->
+        mediaActionStatesLoader = { articleIds ->
             if (articleIds.isEmpty()) {
-                emptySet()
+                emptyMap()
             } else {
                 coreRuntime.local { core ->
-                    core.articleAudioActionStates(articleIds)
-                        .asSequence()
-                        .filter { projection ->
-                            projection.enclosures.any { enclosure -> enclosure.mediaKind == MediaKind.AUDIO }
-                        }
-                        .mapTo(mutableSetOf()) { projection -> projection.articleId }
+                    core.articleAudioActionStates(articleIds).associate { projection ->
+                        projection.articleId to AndroidArticleMediaActionState(
+                            hasAudio = projection.enclosures.any { enclosure -> enclosure.mediaKind == MediaKind.AUDIO },
+                            isInListeningList = projection.isInListeningList,
+                        )
+                    }
                 }
             }
         },
@@ -467,6 +476,13 @@ internal class AndroidArticleTimelineStore private constructor(
                 SaveToServiceResult.NO_INTEGRATION_CONFIGURED -> AndroidSaveToServiceOutcome.NoIntegrationConfigured
             }
         },
+        listeningListWriter = { generation, articleId, enabled ->
+            coreRuntime.localForGeneration(generation) { core ->
+                if (enabled) core.addToListeningList(articleId = articleId)
+                else core.removeFromListeningList(articleId = articleId)
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         monotonicMillis = SystemClock::elapsedRealtime,
     )
@@ -475,6 +491,11 @@ internal class AndroidArticleTimelineStore private constructor(
         pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
         activeSessionGeneration: () -> Long?,
         audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
+        mediaActionStatesLoader: suspend (List<Long>) -> Map<Long, AndroidArticleMediaActionState> = { ids ->
+            audioArticleIdsLoader(ids).associateWith {
+                AndroidArticleMediaActionState(hasAudio = true, isInListeningList = false)
+            }
+        },
         selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
         feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _ -> emptyMap() },
         scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
@@ -489,11 +510,12 @@ internal class AndroidArticleTimelineStore private constructor(
         saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome = { _, _ ->
             AndroidSaveToServiceOutcome.Saved
         },
+        listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
         pageLoader,
-        audioArticleIdsLoader,
+        mediaActionStatesLoader,
         selectionCountLoader,
         feedIconLoader,
         scrolloverReadWriter,
@@ -504,6 +526,7 @@ internal class AndroidArticleTimelineStore private constructor(
         scopeReadWriter,
         minifluxEntryUrlLoader,
         saveToServiceWriter,
+        listeningListWriter,
         activeSessionGeneration,
         monotonicMillis,
     )
@@ -908,6 +931,33 @@ internal class AndroidArticleTimelineStore private constructor(
         }
     }
 
+
+    fun requestSetListeningList(articleId: Long, enabled: Boolean) {
+        val generation = activeSessionGeneration() ?: return
+        explicitActionScope.launch {
+            val result = runCatching {
+                listeningListWriter(generation, articleId, enabled)
+            }
+            if (activeSessionGeneration() != generation) return@launch
+            if (result.isSuccess) {
+                mutableState.update { state ->
+                    val current = state.mediaActionStates[articleId] ?: return@update state
+                    state.copy(
+                        mediaActionStates = state.mediaActionStates + (
+                            articleId to current.copy(isInListeningList = enabled)
+                        ),
+                    )
+                }
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+                mutableActionMessages.emit(
+                    if (enabled) "Added to Listening List." else "Removed from Listening List.",
+                )
+            } else {
+                mutableActionMessages.emit("Listening List could not be updated.")
+            }
+        }
+    }
+
     private fun consumeExpectedEvent(
         events: ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>,
         articleId: Long,
@@ -1014,7 +1064,8 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (!owns(generation, selection, sessionGeneration)) return
         val articles = page.articles.distinctBy { it.id }
-        val audioArticleIds = loadAudioArticleIds(articles.map { it.id })
+        val mediaActionStates = loadMediaActionStates(articles.map { it.id })
+        val audioArticleIds = mediaActionStates.filterValues { it.hasAudio }.keys
 
         if (!owns(generation, selection, sessionGeneration)) return
         rebuildArticleIndex(articles)
@@ -1024,6 +1075,7 @@ internal class AndroidArticleTimelineStore private constructor(
             selection = selection,
             articles = articles,
             audioArticleIds = audioArticleIds,
+            mediaActionStates = mediaActionStates,
             feedIconVariant = iconState.feedIconVariant,
             feedIconPngByFeedId = iconState.feedIconPngByFeedId,
             pendingNewFeedIds = iconState.pendingNewFeedIds,
@@ -1577,7 +1629,8 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (!owns(generation, selection, currentSessionGeneration)) return
         val appended = page.articles.filter { !articleIndexById.containsKey(it.id) }
-        val appendedAudioArticleIds = loadAudioArticleIds(appended.map { it.id })
+        val appendedMediaActionStates = loadMediaActionStates(appended.map { it.id })
+        val appendedAudioArticleIds = appendedMediaActionStates.filterValues { it.hasAudio }.keys
 
         if (!owns(generation, selection, currentSessionGeneration)) return
         val appendBase = mutableState.value
@@ -1591,6 +1644,7 @@ internal class AndroidArticleTimelineStore private constructor(
         mutableState.value = appendBase.copy(
             articles = updatedArticles,
             audioArticleIds = appendBase.audioArticleIds + appendedAudioArticleIds,
+            mediaActionStates = appendBase.mediaActionStates + appendedMediaActionStates,
             nextCursor = nextCursor,
             loadingNextPage = false,
             errorMessage = null,
@@ -1619,6 +1673,7 @@ internal class AndroidArticleTimelineStore private constructor(
         mutableState.value = state.copy(
             articles = filtered,
             audioArticleIds = state.audioArticleIds - articleId,
+            mediaActionStates = state.mediaActionStates - articleId,
         )
         rebuildArticleIndex(filtered)
         rowPresentationById.remove(articleId)
@@ -1678,11 +1733,11 @@ internal class AndroidArticleTimelineStore private constructor(
         return true
     }
 
-    private suspend fun loadAudioArticleIds(articleIds: List<Long>): Set<Long> =
+    private suspend fun loadMediaActionStates(articleIds: List<Long>): Map<Long, AndroidArticleMediaActionState> =
         try {
-            audioArticleIdsLoader(articleIds)
+            mediaActionStatesLoader(articleIds)
         } catch (_: Exception) {
-            emptySet()
+            emptyMap()
         }
 
     private fun owns(
@@ -1820,9 +1875,11 @@ internal fun AndroidArticleTimeline(
             AndroidArticleSwipeAction.SaveToService -> {
                 store.requestSaveToService(article.id)
             }
-            AndroidArticleSwipeAction.ListeningList,
-            AndroidArticleSwipeAction.DownloadAudio,
-            -> Unit
+            AndroidArticleSwipeAction.ListeningList -> {
+                val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
+                store.requestSetListeningList(article.id, !current)
+            }
+            AndroidArticleSwipeAction.DownloadAudio -> Unit
         }
     }
 
@@ -2045,6 +2102,7 @@ internal fun AndroidArticleTimeline(
                         article = presentedArticle,
                         hasAudio = hasAudio,
                         configuration = loadedArticlePreferences.swipeConfiguration,
+                        mediaActionsEnabled = true,
                         rowWidth = maxWidth,
                         onOpen = { onOpenArticle(presentedArticle) },
                         onSwipeAction = { action -> performSwipeAction(presentedArticle, action) },
