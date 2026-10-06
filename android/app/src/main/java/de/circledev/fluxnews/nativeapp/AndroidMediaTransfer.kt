@@ -256,6 +256,7 @@ internal class AndroidMediaDownloadWorker(
             AndroidMediaTransferFileLayout.destination(application.storagePaths.media, reference)
         }.getOrElse {
             reportFailure(generation, DownloadFailureKind.STORAGE)
+            application.mediaTransferCoordinator.clearProgress(enclosureId)
             return Result.success()
         }
 
@@ -268,6 +269,7 @@ internal class AndroidMediaDownloadWorker(
         destination.parentFile?.let { parent ->
             if (!parent.mkdirs() && !parent.isDirectory) {
                 reportFailure(generation, DownloadFailureKind.STORAGE)
+                application.mediaTransferCoordinator.clearProgress(enclosureId)
                 return Result.success()
             }
         }
@@ -278,6 +280,7 @@ internal class AndroidMediaDownloadWorker(
             val uri = URI(work.url)
             if (uri.scheme?.lowercase() !in setOf("http", "https")) {
                 reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
+                application.mediaTransferCoordinator.clearProgress(enclosureId)
                 return Result.success()
             }
             val response = withContext(Dispatchers.IO) {
@@ -286,10 +289,12 @@ internal class AndroidMediaDownloadWorker(
             response.use { result ->
                 if (!result.isSuccessful) {
                     reportFailure(generation, DownloadFailureKind.NETWORK)
+                    application.mediaTransferCoordinator.clearProgress(enclosureId)
                     return Result.success()
                 }
                 val body = result.body ?: run {
                     reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
+                    application.mediaTransferCoordinator.clearProgress(enclosureId)
                     return Result.success()
                 }
                 val totalBytes = body.contentLength().takeIf { it > 0L }
