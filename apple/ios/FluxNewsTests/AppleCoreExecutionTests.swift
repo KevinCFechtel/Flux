@@ -213,12 +213,15 @@ final class AppleCoreExecutionTests: XCTestCase {
         let iosDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        let sharedDirectory = iosDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("shared/FluxApple")
         let sources = try [
-            "FluxNews/NewsreaderStore.swift",
-            "FluxNews/IOSSearchStore.swift",
-            "FluxNews/CoreBootstrapper.swift",
-            "FluxNews/IOSCoreSessionExecutionCoordinator.swift"
-        ].map { try String(contentsOf: iosDirectory.appendingPathComponent($0), encoding: .utf8) }
+            iosDirectory.appendingPathComponent("FluxNews/NewsreaderStore.swift"),
+            iosDirectory.appendingPathComponent("FluxNews/IOSSearchStore.swift"),
+            iosDirectory.appendingPathComponent("FluxNews/CoreBootstrapper.swift"),
+            sharedDirectory.appendingPathComponent("AppleCoreSessionExecutionCoordinator.swift")
+        ].map { try String(contentsOf: $0, encoding: .utf8) }
 
         XCTAssertTrue(sources[0].contains("Task.detached(priority: .userInitiated)")) // CPU-only feed-icon ImageIO preparation.
         XCTAssertFalse(sources[1].contains("Task.detached"))
