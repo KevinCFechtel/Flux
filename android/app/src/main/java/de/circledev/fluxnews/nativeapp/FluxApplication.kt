@@ -28,8 +28,17 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
+    internal val mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidMediaPlaybackCoordinator(
+            context = applicationContext,
+            coreRuntime = coreRuntime,
+            mediaRoot = storagePaths.media,
+            scope = applicationScope,
+            diagnostics = diagnostics,
+        )
+    }
     internal val mediaRuntime: AndroidMediaRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidMediaRuntime(coreRuntime, diagnostics)
+        AndroidMediaRuntime(coreRuntime, diagnostics, mediaPlaybackCoordinator)
     }
     internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSystemNotificationManager(applicationContext, coreRuntime, diagnostics)
