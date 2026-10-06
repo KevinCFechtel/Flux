@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import uniffi.flux_uniffi.DownloadState
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.ListeningListSort
 import uniffi.flux_uniffi.PlaybackStatus
@@ -203,6 +204,18 @@ internal fun AndroidListeningListDestination(
                                     store.removeFromListeningList(item.articleId)
                                 }
                             },
+                            onRequestDownload = { enclosureId ->
+                                coroutineScope.launch { store.requestDownload(enclosureId) }
+                            },
+                            onCancelDownload = { enclosureId ->
+                                coroutineScope.launch { store.cancelDownload(enclosureId) }
+                            },
+                            onRetryDownload = { enclosureId ->
+                                coroutineScope.launch { store.retryDownload(enclosureId) }
+                            },
+                            onDeleteDownload = { enclosureId ->
+                                coroutineScope.launch { store.deleteDownload(enclosureId) }
+                            },
                         )
                     }
                 }
@@ -218,6 +231,10 @@ private fun AndroidListeningListRow(
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
     onRemove: () -> Unit,
+    onRequestDownload: (Long) -> Unit,
+    onCancelDownload: (Long) -> Unit,
+    onRetryDownload: (Long) -> Unit,
+    onDeleteDownload: (Long) -> Unit,
 ) {
     var enclosureMenuOpen by remember { mutableStateOf(false) }
     val selected = item.audioEnclosures.firstOrNull {
@@ -295,8 +312,43 @@ private fun AndroidListeningListRow(
                     }
                 }
             }
-            TextButton(onClick = onRemove) {
-                Text("Remove")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (selectedId != null) {
+                    val downloadState = selected.download?.state ?: DownloadState.NOT_DOWNLOADED
+                    when (downloadState) {
+                        DownloadState.NOT_DOWNLOADED -> {
+                            TextButton(onClick = { onRequestDownload(selectedId) }) {
+                                Text("Download")
+                            }
+                        }
+                        DownloadState.REQUESTED -> {
+                            TextButton(onClick = { onCancelDownload(selectedId) }) {
+                                Text("Cancel")
+                            }
+                        }
+                        DownloadState.DOWNLOADED -> {
+                            TextButton(onClick = { onDeleteDownload(selectedId) }) {
+                                Text("Delete")
+                            }
+                        }
+                        DownloadState.FAILED -> {
+                            TextButton(onClick = { onRetryDownload(selectedId) }) {
+                                Text("Retry")
+                            }
+                        }
+                        DownloadState.DELETE_REQUESTED -> {
+                            Text(
+                                "Deleting…",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = onRemove) {
+                    Text("Remove")
+                }
             }
         }
     }
