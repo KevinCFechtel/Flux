@@ -17,9 +17,8 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertFalse(source.contains("fatalError(\"Scope has no article query\")"))
         XCTAssertFalse(source.contains("store.value?.searchPageSize"))
 
-        // The only detached work left in BrowserStore is CPU-only native work:
-        // feed-icon preparation, thumbnail decoding, backup encryption and backup parsing.
-        XCTAssertEqual(source.components(separatedBy: "Task.detached").count - 1, 4)
+        // The only detached work left in BrowserStore is CPU-only image preparation.
+        XCTAssertEqual(source.components(separatedBy: "Task.detached").count - 1, 2)
         XCTAssertTrue(source.contains("exportConfigBackup(input: input, password: password)"))
         XCTAssertTrue(source.contains("parseConfigBackup(bytes: bytes, password: password"))
     }
