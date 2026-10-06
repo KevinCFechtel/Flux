@@ -514,6 +514,7 @@ private fun AndroidMediaPlayerControls(
                     value = seekValue.coerceIn(0f, duration.toFloat()),
                     onValueChange = onSeekingChange,
                     onValueChangeFinished = onSeekFinished,
+                    enabled = !previewingInactiveItem,
                     valueRange = 0f..duration.toFloat(),
                 )
                 Row(
