@@ -1058,182 +1058,211 @@ final class BrowserStore: ObservableObject {
         }
         readerDocumentRequest &+= 1
         let request = readerDocumentRequest
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result {
-                if forSearch {
-                    return try core.readerDocumentForSearch(articleId: articleID)
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                {
+                    if forSearch { return try core.readerDocumentForSearch(articleId: articleID) }
+                    return try core.readerDocument(articleId: articleID)
                 }
-                return try core.readerDocument(articleId: articleID)
-            }
-            await MainActor.run {
-                guard let store = store.value, store.readerDocumentRequest == request else { return }
-                completion(result)
-            }
+            ) else { return }
+            guard let self, self.core === core, self.readerDocumentRequest == request else { return }
+            completion(result)
         }
     }
+
     func loadArticleAudioActions(for articleID: Int64) {
         loadArticleAudioActions(for: [articleID], selectedArticleID: articleID)
     }
+
     func loadArticleAudioActions(for articleIDs: [Int64], selectedArticleID: Int64? = nil) {
         articleAudioRequestGeneration &+= 1
         let generation = articleAudioRequestGeneration
         articleAudioActionState = nil
         guard let core else { return }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result {
-                try core.articleAudioActionStates(articleIds: articleIDs).reduce(into: [Int64: ArticleAudioActionState]()) { result, state in
-                    result[state.articleId] = ArticleAudioActionState(articleID: state.articleId, enclosures: ArticleAudioActions.audioEnclosures(state.enclosures), isInListeningList: state.isInListeningList, downloads: Dictionary(uniqueKeysWithValues: state.downloads.map { ($0.enclosureId, $0) }))
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    try core.articleAudioActionStates(articleIds: articleIDs).reduce(into: [Int64: ArticleAudioActionState]()) { result, state in
+                        result[state.articleId] = ArticleAudioActionState(
+                            articleID: state.articleId,
+                            enclosures: ArticleAudioActions.audioEnclosures(state.enclosures),
+                            isInListeningList: state.isInListeningList,
+                            downloads: Dictionary(uniqueKeysWithValues: state.downloads.map { ($0.enclosureId, $0) })
+                        )
+                    }
                 }
-            }
-            await MainActor.run {
-                guard let store = store.value, store.articleAudioRequestGeneration == generation else { return }
-                switch result {
-                case let .success(states):
-                    store.articleAudioActionStates.merge(states) { _, new in new }
-                    if let selectedArticleID { store.articleAudioActionState = states[selectedArticleID] }
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+            ) else { return }
+            guard let self, self.core === core, self.articleAudioRequestGeneration == generation else { return }
+            switch result {
+            case let .success(states):
+                self.articleAudioActionStates.merge(states) { _, new in new }
+                if let selectedArticleID { self.articleAudioActionState = states[selectedArticleID] }
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func refreshArticleAudioActions() {
         guard let articleID = articleAudioActionState?.articleID else { return }
         loadArticleAudioActions(for: articleID)
     }
+
     func selectArticleAudioActions(for articleID: Int64?) {
         articleAudioActionState = articleID.flatMap { articleAudioActionStates[$0] }
     }
+
+    private func runResponsiveMutation(
+        _ operation: @escaping @Sendable (Flux) throws -> Void,
+        onSuccess: @escaping () -> Void
+    ) {
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try operation(core) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case .success: onSuccess()
+            case let .failure(error): self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     func addToListeningList(articleID: Int64) {
-        guard let core else { return }
         let generation = articleAudioRequestGeneration
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.addToListeningList(articleId: articleID) }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                switch result {
-                case .success:
-                    store.showActionConfirmation(String(localized: "Added to Listening List"))
-                    store.onMediaTransferRequested?()
-                    store.refreshListeningListIfVisible()
-                    guard store.articleAudioRequestGeneration == generation else { return }
-                    store.loadArticleAudioActions(for: articleID)
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+        runResponsiveMutation(
+            { try $0.addToListeningList(articleId: articleID) },
+            onSuccess: { [weak self] in
+                guard let self else { return }
+                self.showActionConfirmation(String(localized: "Added to Listening List"))
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                guard self.articleAudioRequestGeneration == generation else { return }
+                self.loadArticleAudioActions(for: articleID)
             }
-        }
+        )
     }
+
     func requestManualDownload(articleID: Int64, enclosureID: Int64) {
-        guard let core else { return }
         let refreshArticleActions = articleAudioActionState?.articleID == articleID
         let generation = articleAudioRequestGeneration
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.requestDownload(enclosureId: enclosureID, origin: .manual) }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                switch result {
-                case .success:
-                    store.showActionConfirmation(String(localized: "Download requested"))
-                    store.onMediaTransferRequested?()
-                    store.refreshListeningListIfVisible()
-                    if refreshArticleActions, store.articleAudioRequestGeneration == generation {
-                        store.loadArticleAudioActions(for: articleID)
-                    }
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+        runResponsiveMutation(
+            { try $0.requestDownload(enclosureId: enclosureID, origin: .manual) },
+            onSuccess: { [weak self] in
+                guard let self else { return }
+                self.showActionConfirmation(String(localized: "Download requested"))
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                if refreshArticleActions, self.articleAudioRequestGeneration == generation {
+                    self.loadArticleAudioActions(for: articleID)
                 }
             }
-        }
+        )
     }
+
     func removeFromListeningList(articleID: Int64) {
-        guard let core else { return }
         let refreshArticleActions = articleAudioActionState?.articleID == articleID
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.removeFromListeningList(articleId: articleID) }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                switch result {
-                case .success:
-                    store.showActionConfirmation(String(localized: "Removed from Listening List"))
-                    store.onMediaTransferRequested?()
-                    store.refreshListeningListIfVisible()
-                    if refreshArticleActions { store.refreshArticleAudioActions() }
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+        runResponsiveMutation(
+            { try $0.removeFromListeningList(articleId: articleID) },
+            onSuccess: { [weak self] in
+                guard let self else { return }
+                self.showActionConfirmation(String(localized: "Removed from Listening List"))
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                if refreshArticleActions { self.refreshArticleAudioActions() }
             }
-        }
+        )
     }
+
     func deleteDownload(articleID: Int64, enclosureID: Int64) {
-        guard let core else { return }
         let refreshArticleActions = articleAudioActionState?.articleID == articleID
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.requestDownloadDeletion(enclosureId: enclosureID) }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                switch result {
-                case .success:
-                    store.showActionConfirmation(String(localized: "Download deletion requested"))
-                    store.onMediaTransferRequested?()
-                    store.refreshListeningListIfVisible()
-                    if refreshArticleActions { store.refreshArticleAudioActions() }
-                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
-                }
+        runResponsiveMutation(
+            { try $0.requestDownloadDeletion(enclosureId: enclosureID) },
+            onSuccess: { [weak self] in
+                guard let self else { return }
+                self.showActionConfirmation(String(localized: "Download deletion requested"))
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                if refreshArticleActions { self.refreshArticleAudioActions() }
             }
-        }
+        )
     }
+
     func saveToService(_ article: ArticleSummary) {
         guard let core else { return }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            do {
-                let result = try core.saveToService(articleId: article.id)
-                await MainActor.run {
-                    switch result {
-                    case .saved:
-                        store.value?.showActionConfirmation(String(localized: "Saved to third-party service"))
-                    case .noIntegrationConfigured:
-                        store.value?.showActionConfirmation(String(localized: "No third-party integration is configured in Miniflux"))
-                    }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.saveToService(articleId: article.id) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(value):
+                switch value {
+                case .saved:
+                    self.showActionConfirmation(String(localized: "Saved to third-party service"))
+                case .noIntegrationConfigured:
+                    self.showActionConfirmation(String(localized: "No third-party integration is configured in Miniflux"))
                 }
-            } catch {
-                await MainActor.run { store.value?.errorMessage = NativeErrorPresentation.message(for: error) }
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
         guard let core else {
             completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
             return
         }
-        Task.detached {
-            let result = Result { try core.discoverSubscriptions(request: request) }
-            await MainActor.run { completion(result) }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.discoverSubscriptions(request: request) }
+            ) else { return }
+            completion(result)
         }
     }
+
     func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
         guard let core else {
             completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
             return
         }
-        Task.detached {
-            let result = Result { try core.createFeed(request: request) }
-            await MainActor.run { completion(result) }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.createFeed(request: request) }
+            ) else { return }
+            completion(result)
         }
     }
+
     func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
         guard let core else {
             completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
             return
         }
-        Task.detached {
-            let result = Result { try core.createCategory(title: title) }
-            await MainActor.run { completion(result) }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                { try core.createCategory(title: title) }
+            ) else { return }
+            completion(result)
         }
     }
+
     func beginScrolloverUndoBatch() {
         scrolloverUndoBatch.beginScroll()
         scrolloverRemovedArticles = [:]
