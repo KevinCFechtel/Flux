@@ -591,14 +591,33 @@ final class BrowserStore: ObservableObject {
     }
     func reloadListeningList() {
         guard let core else { return }
-        do {
-            listeningListFeeds = try core.listeningListFeeds()
-            listeningListFeedID = ListeningListPresentation.validatedFeedID(listeningListFeedID, feeds: listeningListFeeds)
-            listeningListItems = try core.listeningList(feedId: listeningListFeedID, sort: listeningListSort)
-            selectionTotal = UInt64(listeningListItems.count)
-            errorMessage = nil
-        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+        let feedID = listeningListFeedID
+        let sort = listeningListSort
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    let feeds = try core.listeningListFeeds()
+                    let validatedFeedID = ListeningListPresentation.validatedFeedID(feedID, feeds: feeds)
+                    let items = try core.listeningList(feedId: validatedFeedID, sort: sort)
+                    return (feeds, validatedFeedID, items)
+                }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success((feeds, validatedFeedID, items)):
+                self.listeningListFeeds = feeds
+                self.listeningListFeedID = validatedFeedID
+                self.listeningListItems = items
+                self.selectionTotal = UInt64(items.count)
+                self.errorMessage = nil
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
     }
+
     func refreshListeningListIfVisible() {
         guard isListeningList else { return }
         reloadListeningList()
@@ -781,13 +800,23 @@ final class BrowserStore: ObservableObject {
     func setRemoveCompletedListeningList(_ enabled: Bool) { updateCoreSettings { try $0.setRemoveCompletedListeningList(enabled: enabled) } }
     func reloadSystemNotificationSettings() {
         guard let core else { return }
-        do {
-            systemNotificationSettings = try core.feedSystemNotificationSettings()
-            systemNotificationSettingsError = nil
-        } catch {
-            systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.feedSystemNotificationSettings() }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(settings):
+                self.systemNotificationSettings = settings
+                self.systemNotificationSettingsError = nil
+            case let .failure(error):
+                self.systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
+            }
         }
     }
+
     func setSystemNotificationsEnabled(
         feedID: Int64,
         enabled: Bool,
@@ -796,63 +825,69 @@ final class BrowserStore: ObservableObject {
         guard let core, !updatingSystemNotificationFeedIDs.contains(feedID) else { return }
         updatingSystemNotificationFeedIDs.insert(feedID)
         systemNotificationSettingsError = nil
-
-        Task { @MainActor [weak self] in
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
             guard let self else { return }
             do {
-                if enabled {
-                    try await SystemNotificationManager.shared.ensureAuthorization()
-                }
-
-                let result = await Task.detached(priority: .userInitiated) {
-                    Result {
-                        try core.setFeedSystemNotificationsEnabled(
-                            feedId: feedID,
-                            enabled: enabled
-                        )
+                if enabled { try await SystemNotificationManager.shared.ensureAuthorization() }
+                guard let result = await coordinator.responsiveResult(
+                    for: core,
+                    {
+                        try core.setFeedSystemNotificationsEnabled(feedId: feedID, enabled: enabled)
                         return try core.feedSystemNotificationSettings()
                     }
-                }.value
-
+                ) else {
+                    self.updatingSystemNotificationFeedIDs.remove(feedID)
+                    return
+                }
+                guard self.core === core else { return }
                 switch result {
                 case let .success(settings):
-                    updatingSystemNotificationFeedIDs.remove(feedID)
-                    systemNotificationSettings = settings
+                    self.updatingSystemNotificationFeedIDs.remove(feedID)
+                    self.systemNotificationSettings = settings
                     completion?(.success(()))
                 case let .failure(error):
-                    updatingSystemNotificationFeedIDs.remove(feedID)
-                    systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
+                    self.updatingSystemNotificationFeedIDs.remove(feedID)
+                    self.systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
                     completion?(.failure(error))
                 }
             } catch {
-                updatingSystemNotificationFeedIDs.remove(feedID)
-                systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
+                self.updatingSystemNotificationFeedIDs.remove(feedID)
+                self.systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
                 completion?(.failure(error))
             }
         }
     }
+
     func selectNotificationFeed(_ feedID: Int64) {
         startupRouteState.markExplicitRoute()
         select(.feed(feedID))
     }
-    private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
+    private func updateCoreSettings(
+        _ update: @escaping @Sendable (Flux) throws -> Void,
+        afterSuccess: @escaping () -> Void = {}
+    ) {
         guard let core else { return }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result {
-                try update(core)
-                return try core.coreSettings()
-            }
-            await MainActor.run {
-                switch result {
-                case let .success(settings):
-                    store.value?.coreSettings = settings
-                    afterSuccess()
-                case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    try update(core)
+                    return try core.coreSettings()
                 }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(settings):
+                self.coreSettings = settings
+                afterSuccess()
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     func handle(event: CoreEvent) {
         switch event {
         case .articleReadStateChanged, .articleStarredStateChanged:
@@ -893,12 +928,28 @@ final class BrowserStore: ObservableObject {
     }
     private func reloadLiveUnreadTotal() {
         guard let core else { return }
-        do {
-            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-        } catch {
-            NativeLog.sync.error("live unread count refresh failed: \(error.localizedDescription, privacy: .public)")
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    try core.countArticles(
+                        query: ArticleQuery(
+                            scope: .all,
+                            readFilter: .unread,
+                            starredFilter: .all,
+                            sort: .newestFirst,
+                            limit: 0,
+                            cursor: nil
+                        )
+                    )
+                }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            if case let .success(total) = result { self.unreadTotal = total }
         }
     }
+
     private func acknowledgePendingNewDataForCurrentScope() {
         switch scope {
         case .all:
