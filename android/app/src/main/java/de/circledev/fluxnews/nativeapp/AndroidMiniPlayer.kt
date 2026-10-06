@@ -43,8 +43,8 @@ import uniffi.flux_uniffi.MediaArtworkSource
 internal fun AndroidArticleListBottomDock(
     coordinator: AndroidMediaPlaybackCoordinator,
     onOpenPlayer: () -> Unit,
-    actions: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    actions: @Composable () -> Unit,
 ) {
     val playback by coordinator.state.collectAsState()
     val showMiniPlayer = playback.enclosureId != null &&
