@@ -37,8 +37,21 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             diagnostics = diagnostics,
         )
     }
+    internal val mediaTransferCoordinator: AndroidMediaTransferCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidMediaTransferCoordinator(
+            context = applicationContext,
+            coreRuntime = coreRuntime,
+            playbackCoordinator = mediaPlaybackCoordinator,
+            diagnostics = diagnostics,
+        )
+    }
     internal val mediaRuntime: AndroidMediaRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidMediaRuntime(coreRuntime, diagnostics, mediaPlaybackCoordinator)
+        AndroidMediaRuntime(
+            coreRuntime,
+            diagnostics,
+            mediaPlaybackCoordinator,
+            mediaTransferCoordinator,
+        )
     }
     internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSystemNotificationManager(applicationContext, coreRuntime, diagnostics)
@@ -58,7 +71,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
-            effects = listOf(systemNotifications, widgetProjection),
+            effects = listOf(systemNotifications, widgetProjection, mediaTransferCoordinator),
             onEffectError = { effect, error ->
                 diagnostics.record(
                     AndroidAppLogLevel.Error,
