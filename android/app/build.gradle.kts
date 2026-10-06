@@ -132,6 +132,7 @@ dependencies {
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
