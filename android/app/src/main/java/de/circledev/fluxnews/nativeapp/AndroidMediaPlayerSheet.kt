@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -786,19 +788,12 @@ private fun AndroidMediaArtwork(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Surface(
+            Image(
+                painter = painterResource(R.drawable.fallback_artwork),
+                contentDescription = "Fallback media artwork",
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Headphones,
-                        contentDescription = null,
-                        modifier = Modifier.size(58.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            )
         }
         if (loading) {
             CircularProgressIndicator()
