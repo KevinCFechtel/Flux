@@ -5,6 +5,7 @@ import kotlinx.coroutines.sync.withLock
 import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.DownloadOrigin
+import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ListeningListSort
 
 internal data class AndroidListeningListState(
@@ -12,6 +13,8 @@ internal data class AndroidListeningListState(
     val feeds: List<ListeningListFeed> = emptyList(),
     val selectedFeedId: Long? = null,
     val sort: ListeningListSort = ListeningListSort.RECENTLY_ADDED,
+    val feedIconVariant: FeedIconVariant = FeedIconVariant.NORMAL,
+    val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -21,6 +24,9 @@ internal class AndroidListeningListStore(
     private val transferCoordinator: AndroidMediaTransferCoordinator? = null,
 ) {
     private val mutationMutex = Mutex()
+    private val feedIconMutex = Mutex()
+    private val feedIconCache = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
+    private val unavailableFeedIcons = mutableMapOf<FeedIconVariant, MutableSet<Long>>()
     private val mutableState = kotlinx.coroutines.flow.MutableStateFlow(AndroidListeningListState())
     val state: kotlinx.coroutines.flow.StateFlow<AndroidListeningListState> = mutableState
 
@@ -30,6 +36,8 @@ internal class AndroidListeningListStore(
     fun activateSession(generation: Long?) {
         if (sessionGeneration == generation) return
         sessionGeneration = generation
+        feedIconCache.clear()
+        unavailableFeedIcons.clear()
         mutableState.value = AndroidListeningListState()
     }
 
@@ -75,6 +83,44 @@ internal class AndroidListeningListStore(
         if (mutableState.value.selectedFeedId == feedId) return
         mutableState.value = mutableState.value.copy(selectedFeedId = feedId)
         reload()
+    }
+
+    suspend fun ensureFeedIcons(feedIds: List<Long>, variant: FeedIconVariant) {
+        val generation = sessionGeneration ?: return
+        feedIconMutex.withLock {
+            if (sessionGeneration != generation) return@withLock
+
+            val cache = feedIconCache.getOrPut(variant) { mutableMapOf() }
+            val unavailable = unavailableFeedIcons.getOrPut(variant) { mutableSetOf() }
+            val requested = feedIds.asSequence()
+                .filter { it > 0L }
+                .distinct()
+                .filter { it !in cache && it !in unavailable }
+                .toList()
+
+            if (requested.isNotEmpty()) {
+                val loaded = runCatching {
+                    coreRuntime.remoteForGeneration(generation) { core ->
+                        requested.mapNotNull { feedId ->
+                            core.feedIcon(feedId = feedId, variant = variant)
+                                ?.pngData
+                                ?.let { feedId to it }
+                        }.toMap()
+                    }
+                }.getOrNull() ?: emptyMap()
+
+                if (sessionGeneration != generation) return@withLock
+                cache.putAll(loaded)
+                unavailable.addAll(requested.filterNot(loaded::containsKey))
+            }
+
+            if (sessionGeneration == generation) {
+                mutableState.value = mutableState.value.copy(
+                    feedIconVariant = variant,
+                    feedIconPngByFeedId = cache.toMap(),
+                )
+            }
+        }
     }
 
     suspend fun setSort(sort: ListeningListSort) {
