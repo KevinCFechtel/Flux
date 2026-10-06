@@ -918,27 +918,35 @@ final class BrowserStore: ObservableObject {
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) {
         guard let core else { return }
-        let forSearch = scope == .search
         let coordinator = coreSessionExecutionCoordinator
-        Task { [weak self, core, coordinator] in
-            let result: Result<MutationDisposition, Error>?
-            if forSearch {
-                result = await coordinator.blockingResult(
+        if scope == .search {
+            Task { [weak self, core, coordinator] in
+                guard let result = await coordinator.blockingResult(
                     for: core,
                     { try core.searchSetReadState(articleId: article.id, read: read) }
-                )
-            } else {
-                result = await coordinator.responsiveResult(
-                    for: core,
-                    { try core.setReadState(articleId: article.id, read: read) }
-                )
+                ) else { return }
+                guard let self, self.core === core else { return }
+                switch result {
+                case let .success(disposition):
+                    self.updateVisibleRead([article.id], read: read)
+                    if case .localFirst = disposition { self.reloadCounts() }
+                case let .failure(error):
+                    self.errorMessage = NativeErrorPresentation.message(for: error)
+                }
             }
-            guard let result, let self, self.core === core else { return }
+            return
+        }
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.setReadState(articleId: article.id, read: read) }
+            ) else { return }
+            guard let self, self.core === core else { return }
             switch result {
-            case let .success(disposition):
+            case .success:
                 self.updateVisibleRead([article.id], read: read)
                 self.reloadSelectionTotal()
-                if !forSearch || disposition == .localFirst { self.reloadCounts() }
+                self.reloadCounts()
             case let .failure(error):
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
@@ -947,27 +955,37 @@ final class BrowserStore: ObservableObject {
 
     func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
         guard let core else { completion?(false); return }
-        let forSearch = scope == .search
         let coordinator = coreSessionExecutionCoordinator
-        Task { [weak self, core, coordinator] in
-            let result: Result<MutationDisposition, Error>?
-            if forSearch {
-                result = await coordinator.blockingResult(
+        if scope == .search {
+            Task { [weak self, core, coordinator] in
+                guard let result = await coordinator.blockingResult(
                     for: core,
                     { try core.searchSetStarredState(articleId: article.id, starred: starred) }
-                )
-            } else {
-                result = await coordinator.responsiveResult(
-                    for: core,
-                    { try core.setStarredState(articleId: article.id, starred: starred) }
-                )
+                ) else { completion?(false); return }
+                guard let self, self.core === core else { completion?(false); return }
+                switch result {
+                case let .success(disposition):
+                    self.updateVisible([article.id]) { $0.isStarred = starred }
+                    if case .localFirst = disposition { self.reloadCounts() }
+                    completion?(true)
+                case let .failure(error):
+                    self.errorMessage = NativeErrorPresentation.message(for: error)
+                    completion?(false)
+                }
             }
-            guard let result, let self, self.core === core else { completion?(false); return }
+            return
+        }
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.setStarredState(articleId: article.id, starred: starred) }
+            ) else { completion?(false); return }
+            guard let self, self.core === core else { completion?(false); return }
             switch result {
-            case let .success(disposition):
+            case .success:
                 self.updateVisible([article.id]) { $0.isStarred = starred }
                 self.reloadSelectionTotal()
-                if !forSearch || disposition == .localFirst { self.reloadCounts() }
+                self.reloadCounts()
                 completion?(true)
             case let .failure(error):
                 self.errorMessage = NativeErrorPresentation.message(for: error)
