@@ -119,7 +119,9 @@ internal class AndroidListeningListStore(
             coreRuntime.localForGeneration(generation) { core -> operation(core) }
         }
         if (result.isSuccess && sessionGeneration == generation) {
-            if (reconcileTransfers) transferCoordinator?.reconcile(generation)
+            if (reconcileTransfers) {
+                transferCoordinator?.reconcileAndSignal(generation)
+            }
             reload()
         }
         result
