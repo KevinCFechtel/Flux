@@ -435,6 +435,29 @@ internal class AndroidMediaPlaybackCoordinator(
         }
     }
 
+    suspend fun artworkSource(enclosureId: Long): MediaArtworkSource? {
+        val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
+        return runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.mediaArtworkSource(enclosureId = enclosureId)
+            }
+        }.getOrNull()?.takeIf {
+            coreRuntime.activeSessionGeneration() == generation
+        }
+    }
+
+    suspend fun chapters(enclosureId: Long): List<MediaChapter> {
+        val generation = activeGeneration ?: coreRuntime.activeSessionGeneration()
+            ?: return emptyList()
+        return runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.mediaChapters(enclosureId = enclosureId)
+            }
+        }.getOrDefault(emptyList()).takeIf {
+            coreRuntime.activeSessionGeneration() == generation
+        } ?: emptyList()
+    }
+
     suspend fun artworkBytes(reference: String): ByteArray? {
         val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
         return runCatching {
