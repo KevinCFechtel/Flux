@@ -172,6 +172,8 @@ internal interface AndroidConfigurationRestoreBoundary {
     fun clearCredentials()
     suspend fun capturePlatform(headers: List<StoredCredentialHeader>): AndroidBackupSettingsV1
     suspend fun applyPlatform(settings: AndroidBackupSettingsV1)
+    suspend fun prepareForLifecycleChange() = Unit
+    suspend fun resumeAfterLifecycleChange() = Unit
     fun publishReady(credentials: StoredAccountCredentials)
     fun publishRecoveryError()
 }
@@ -185,21 +187,26 @@ internal class AndroidConfigurationRestoreTransaction(
         // Preferences exist independently from account material and must always be reversible.
         val previousNative = boundary.capturePlatform(previousCredentials?.customHeaders ?: emptyList()).validated()
         val previousSnapshot = boundary.snapshot()
+        boundary.prepareForLifecycleChange()
         try {
-            if (previousSnapshot != null) boundary.replaceCore(restored) else {
-                boundary.openFresh(replacement)
-                boundary.replaceCore(restored)
+            try {
+                if (previousSnapshot != null) boundary.replaceCore(restored) else {
+                    boundary.openFresh(replacement)
+                    boundary.replaceCore(restored)
+                }
+                boundary.writeCredentials(replacement)
+                boundary.applyPlatform(native)
+                boundary.replaceRuntime(replacement)
+                boundary.publishReady(replacement)
+            } catch (failure: Exception) {
+                if (!rollback(previousSnapshot, previousCredentials, previousNative)) {
+                    boundary.publishRecoveryError()
+                    throw AndroidConfigurationBackupException.RollbackFailed
+                }
+                throw failure
             }
-            boundary.writeCredentials(replacement)
-            boundary.applyPlatform(native)
-            boundary.replaceRuntime(replacement)
-            boundary.publishReady(replacement)
-        } catch (failure: Exception) {
-            if (!rollback(previousSnapshot, previousCredentials, previousNative)) {
-                boundary.publishRecoveryError()
-                throw AndroidConfigurationBackupException.RollbackFailed
-            }
-            throw failure
+        } finally {
+            boundary.resumeAfterLifecycleChange()
         }
     }
 
@@ -232,6 +239,7 @@ internal class AndroidConfigurationBackupController(
     private val navigation: AndroidNavigationPreferences,
     private val articles: AndroidArticlePreferences,
     private val actionBar: AndroidActionBarPreferences,
+    private val lifecycleParticipant: AndroidCoreLifecycleParticipant = AndroidNoopCoreLifecycleParticipant,
 ) {
     private val restoreTransaction = AndroidConfigurationRestoreTransaction(object : AndroidConfigurationRestoreBoundary {
         override suspend fun <T> withLock(block: suspend () -> T): T = bootstrap.withConfigurationBackupLock(block)
@@ -247,6 +255,8 @@ internal class AndroidConfigurationBackupController(
         override fun clearCredentials() = bootstrap.clearCredentialsForConfigurationBackup()
         override suspend fun capturePlatform(headers: List<StoredCredentialHeader>) = AndroidBackupSettingsV1.capture(navigation, articles, actionBar, headers)
         override suspend fun applyPlatform(settings: AndroidBackupSettingsV1) = apply(settings)
+        override suspend fun prepareForLifecycleChange() = lifecycleParticipant.prepareForCoreLifecycleChange(AndroidCoreLifecycleChange.ConfigurationRestore)
+        override suspend fun resumeAfterLifecycleChange() = lifecycleParticipant.resumeAfterCoreLifecycleChange(AndroidCoreLifecycleChange.ConfigurationRestore)
         override fun publishReady(credentials: StoredAccountCredentials) = bootstrap.publishRestoredAccount(credentials)
         override fun publishRecoveryError() = bootstrap.publishConfigurationRecoveryError()
     })
