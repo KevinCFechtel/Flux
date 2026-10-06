@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,14 +50,17 @@ internal fun AndroidArticleListBottomDock(
     actions: @Composable () -> Unit,
 ) {
     val playback by coordinator.state.collectAsState()
+    val darkMode = isSystemInDarkTheme()
     val showMiniPlayer = playback.enclosureId != null &&
         playback.status != AndroidMediaPlaybackPresentationStatus.Stopped
 
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 3.dp,
+        color = MaterialTheme.colorScheme.background.copy(
+            alpha = if (darkMode) 0.70f else 0.85f,
+        ),
+        tonalElevation = 0.dp,
         shadowElevation = 8.dp,
     ) {
         Column {
