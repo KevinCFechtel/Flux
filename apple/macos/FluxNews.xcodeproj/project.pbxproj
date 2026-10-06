@@ -64,6 +64,8 @@
 		A60 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
 		A61 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
 		A62 /* ReaderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61 /* ReaderPresentation.swift */; };
+		A63 /* AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62 /* AppleCoreExecution.swift */; };
+		A64 /* AppleCoreSessionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63 /* AppleCoreSessionExecutionCoordinator.swift */; };
 		D6M1 /* MediaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6M2 /* MediaPresentation.swift */; };
 		D6M3 /* MediaTransferFileLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6M4 /* MediaTransferFileLayout.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
@@ -150,6 +152,8 @@
 		B56 /* MediaRemoteControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemoteControlCoordinator.swift; sourceTree = "<group>"; };
 		B60 /* MacOSPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSPresentation.swift; sourceTree = "<group>"; };
 		B61 /* ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderPresentation.swift; path = ../../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
+		B62 /* AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreExecution.swift; path = ../../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
+		B63 /* AppleCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreSessionExecutionCoordinator.swift; path = ../../shared/FluxApple/AppleCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
 		D6M2 /* MediaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaPresentation.swift; path = ../../shared/FluxApple/MediaPresentation.swift; sourceTree = "<group>"; };
 		D6M4 /* MediaTransferFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaTransferFileLayout.swift; path = ../../shared/FluxApple/MediaTransferFileLayout.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -446,6 +450,8 @@
 				A59 /* MediaRemoteControlCoordinator.swift in Sources */,
 				A60 /* MacOSPresentation.swift in Sources */,
 				A62 /* ReaderPresentation.swift in Sources */,
+				A63 /* AppleCoreExecution.swift in Sources */,
+				A64 /* AppleCoreSessionExecutionCoordinator.swift in Sources */,
 				D6M1 /* MediaPresentation.swift in Sources */,
 				D6M3 /* MediaTransferFileLayout.swift in Sources */,
 			);
