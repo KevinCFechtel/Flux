@@ -308,11 +308,7 @@ internal class AndroidMediaDownloadWorker(
                     application.mediaTransferCoordinator.clearProgress(enclosureId)
                     return Result.success()
                 }
-                val body = result.body ?: run {
-                    reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
-                    application.mediaTransferCoordinator.clearProgress(enclosureId)
-                    return Result.success()
-                }
+                val body = result.body
                 val totalBytes = body.contentLength().takeIf { it > 0L }
                 application.mediaTransferCoordinator.updateProgress(
                     enclosureId,
