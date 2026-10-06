@@ -12,7 +12,10 @@ internal val LocalAndroidDownloadedData = staticCompositionLocalOf<AndroidDownlo
  * Deletion here only requests deletion of local media files in the Core. Listening List state
  * and playback progress are intentionally not cleared.
  */
-internal class AndroidDownloadedData(private val coreRuntime: AndroidCoreRuntime) {
+internal class AndroidDownloadedData(
+    private val coreRuntime: AndroidCoreRuntime,
+    private val transferCoordinator: AndroidMediaTransferCoordinator? = null,
+) {
     data class Summary(
         val fileCount: ULong,
         val totalSizeBytes: ULong,
@@ -29,6 +32,8 @@ internal class AndroidDownloadedData(private val coreRuntime: AndroidCoreRuntime
     }
 
     suspend fun requestDeleteAll(): Result<ULong> = runCatching {
-        coreRuntime.local { core -> core.requestAllDownloadDeletions() }
+        val requested = coreRuntime.local { core -> core.requestAllDownloadDeletions() }
+        transferCoordinator?.reconcile()
+        requested
     }
 }
