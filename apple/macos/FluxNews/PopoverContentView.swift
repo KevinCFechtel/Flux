@@ -2228,18 +2228,47 @@ private struct FeedSettingsView: View {
 
     private func load() {
         guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
-        do { preferences = try store.feedPreferences(feedID: target.id); error = nil }
-        catch { self.error = NativeErrorPresentation.message(for: error) }
+        store.loadFeedPreferences(feedID: target.id) { result in
+            switch result {
+            case let .success(value):
+                preferences = value
+                error = nil
+            case let .failure(loadError):
+                error = NativeErrorPresentation.message(for: loadError)
+            }
+        }
     }
+
+    private func applyPreferenceUpdate(
+        _ operation: (@escaping (Result<FeedPreferences, Error>) -> Void) -> Void
+    ) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else {
+            dismiss()
+            return
+        }
+        isSaving = true
+        error = nil
+        operation { result in
+            isSaving = false
+            switch result {
+            case let .success(value):
+                preferences = value
+            case let .failure(updateError):
+                error = NativeErrorPresentation.message(for: updateError)
+            }
+        }
+    }
+
     private func updateDetailRendering(_ mode: DetailRenderingMode) {
-        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
-        do { try store.setFeedDetailRendering(feedID: target.id, mode: mode); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = NativeErrorPresentation.message(for: error) }
+        applyPreferenceUpdate { completion in
+            store.setFeedDetailRendering(feedID: target.id, mode: mode, completion: completion)
+        }
     }
+
     private func updateTruncateDetail(_ enabled: Bool) {
-        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
-        do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = NativeErrorPresentation.message(for: error) }
+        applyPreferenceUpdate { completion in
+            store.setFeedTruncateDetail(feedID: target.id, enabled: enabled, completion: completion)
+        }
     }
     private func updateSystemNotifications(_ enabled: Bool) {
         guard store.catalog.feeds.contains(where: { $0.id == target.id }) else {
@@ -2260,14 +2289,15 @@ private struct FeedSettingsView: View {
     }
 
     private func updateOpenInMiniflux(_ enabled: Bool) {
-        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
-        do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = NativeErrorPresentation.message(for: error) }
+        applyPreferenceUpdate { completion in
+            store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled, completion: completion)
+        }
     }
+
     private func updateAutoDownloadAudio(_ enabled: Bool) {
-        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
-        do { try store.setFeedAutoDownloadAudio(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = NativeErrorPresentation.message(for: error) }
+        applyPreferenceUpdate { completion in
+            store.setFeedAutoDownloadAudio(feedID: target.id, enabled: enabled, completion: completion)
+        }
     }
 }
 
