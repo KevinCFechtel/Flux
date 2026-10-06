@@ -121,6 +121,7 @@ internal class AndroidSearchStore private constructor(
     private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
     private val mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit,
     private val transferReconciler: suspend (Long) -> Unit,
+    private val transferRevision: kotlinx.coroutines.flow.StateFlow<Long>?,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(
@@ -199,6 +200,7 @@ internal class AndroidSearchStore private constructor(
         transferReconciler = { generation ->
             transferCoordinator?.reconcile(generation)
         },
+        transferRevision = transferCoordinator?.revision,
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -218,6 +220,7 @@ internal class AndroidSearchStore private constructor(
         listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit = { _, _, _ -> },
         transferReconciler: suspend (Long) -> Unit = { _ -> },
+        transferRevision: kotlinx.coroutines.flow.StateFlow<Long>? = null,
         activeSessionGeneration: () -> Long?,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -231,6 +234,7 @@ internal class AndroidSearchStore private constructor(
         listeningListWriter,
         mediaDownloadWriter,
         transferReconciler,
+        transferRevision,
         activeSessionGeneration,
     )
 
@@ -247,6 +251,16 @@ internal class AndroidSearchStore private constructor(
     val state = mutableState.asStateFlow()
     val feedback = mutableFeedback.asSharedFlow()
     val actionMessages = mutableActionMessages.asSharedFlow()
+
+    init {
+        transferRevision?.let { revisions ->
+            scope.launch {
+                revisions.collect {
+                    refreshVisibleMediaActions()
+                }
+            }
+        }
+    }
 
     fun activateSession(sessionGeneration: Long?) {
         val current = mutableState.value
@@ -501,8 +515,10 @@ internal class AndroidSearchStore private constructor(
                 val refreshed = runCatching {
                     mediaActionStatesLoader(generation, listOf(articleId))[articleId]
                 }.getOrNull()
+                if (activeSessionGeneration() != generation) return@launch
                 if (refreshed != null) {
                     mutableState.update { state ->
+                        if (state.sessionGeneration != generation) return@update state
                         state.copy(
                             mediaActionStates = state.mediaActionStates + (articleId to refreshed),
                             audioArticleIds = if (refreshed.hasAudio) {
@@ -517,6 +533,31 @@ internal class AndroidSearchStore private constructor(
             } else {
                 mutableActionMessages.emit("Download action could not be completed.")
             }
+        }
+    }
+
+    private suspend fun refreshVisibleMediaActions() {
+        val current = mutableState.value
+        val sessionGeneration = current.sessionGeneration ?: return
+        if (
+            activeSessionGeneration() != sessionGeneration ||
+            current.results.isEmpty() ||
+            current.submittedQuery.isBlank()
+        ) {
+            return
+        }
+        val request = current.requestGeneration
+        val query = current.submittedQuery
+        val refreshed = runCatching {
+            mediaActionStatesLoader(sessionGeneration, current.results.map { it.id })
+        }.getOrNull() ?: return
+        if (!owns(request, sessionGeneration, query)) return
+        mutableState.update { state ->
+            if (!ownsState(state, request, sessionGeneration, query)) return@update state
+            state.copy(
+                mediaActionStates = refreshed,
+                audioArticleIds = refreshed.filterValues { it.hasAudio }.keys,
+            )
         }
     }
 
