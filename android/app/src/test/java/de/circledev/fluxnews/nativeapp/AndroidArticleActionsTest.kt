@@ -52,7 +52,7 @@ class AndroidArticleActionsTest {
     }
 
     @Test
-    fun mediaSwipeActionsStayUnavailableUntilNativeMediaPhase() {
+    fun mediaSwipePolicyEnablesListeningListButKeepsDownloadsGated() {
         val article = article()
         assertFalse(
             AndroidArticleActionPolicy.isSwipeActionAvailable(
@@ -61,11 +61,28 @@ class AndroidArticleActionsTest {
                 hasAudio = true,
             ),
         )
+        assertTrue(
+            AndroidArticleActionPolicy.isSwipeActionAvailable(
+                AndroidArticleSwipeAction.ListeningList,
+                article,
+                hasAudio = true,
+                mediaActionsEnabled = true,
+            ),
+        )
+        assertFalse(
+            AndroidArticleActionPolicy.isSwipeActionAvailable(
+                AndroidArticleSwipeAction.ListeningList,
+                article,
+                hasAudio = false,
+                mediaActionsEnabled = true,
+            ),
+        )
         assertFalse(
             AndroidArticleActionPolicy.isSwipeActionAvailable(
                 AndroidArticleSwipeAction.DownloadAudio,
                 article,
                 hasAudio = true,
+                mediaActionsEnabled = true,
             ),
         )
         assertTrue(
