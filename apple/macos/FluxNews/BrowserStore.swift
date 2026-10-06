@@ -918,43 +918,64 @@ final class BrowserStore: ObservableObject {
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) {
         guard let core else { return }
-        if scope == .search {
-            let store = WeakBrowserStore(self)
-            Task.detached {
-                let result = Result { try core.searchSetReadState(articleId: article.id, read: read) }
-                await MainActor.run {
-                    switch result {
-                    case let .success(disposition):
-                        store.value?.updateVisibleRead([article.id], read: read)
-                        if case .localFirst = disposition { store.value?.reloadCounts() }
-                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
-                    }
-                }
+        let forSearch = scope == .search
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let result: Result<MutationDisposition, Error>?
+            if forSearch {
+                result = await coordinator.blockingResult(
+                    for: core,
+                    { try core.searchSetReadState(articleId: article.id, read: read) }
+                )
+            } else {
+                result = await coordinator.responsiveResult(
+                    for: core,
+                    { try core.setReadState(articleId: article.id, read: read) }
+                )
             }
-            return
+            guard let result, let self, self.core === core else { return }
+            switch result {
+            case let .success(disposition):
+                self.updateVisibleRead([article.id], read: read)
+                self.reloadSelectionTotal()
+                if !forSearch || disposition == .localFirst { self.reloadCounts() }
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
         }
-        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisibleRead([article.id], read: read); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
+
     func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
         guard let core else { completion?(false); return }
-        if scope == .search {
-            let store = WeakBrowserStore(self)
-            Task.detached {
-                let result = Result { try core.searchSetStarredState(articleId: article.id, starred: starred) }
-                await MainActor.run {
-                    switch result {
-                    case let .success(disposition):
-                        store.value?.updateVisible([article.id]) { $0.isStarred = starred }
-                        if case .localFirst = disposition { store.value?.reloadCounts() }
-                        completion?(true)
-                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error); completion?(false)
-                    }
-                }
+        let forSearch = scope == .search
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let result: Result<MutationDisposition, Error>?
+            if forSearch {
+                result = await coordinator.blockingResult(
+                    for: core,
+                    { try core.searchSetStarredState(articleId: article.id, starred: starred) }
+                )
+            } else {
+                result = await coordinator.responsiveResult(
+                    for: core,
+                    { try core.setStarredState(articleId: article.id, starred: starred) }
+                )
             }
-            return
+            guard let result, let self, self.core === core else { completion?(false); return }
+            switch result {
+            case let .success(disposition):
+                self.updateVisible([article.id]) { $0.isStarred = starred }
+                self.reloadSelectionTotal()
+                if !forSearch || disposition == .localFirst { self.reloadCounts() }
+                completion?(true)
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+                completion?(false)
+            }
         }
-        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = NativeErrorPresentation.message(for: error); completion?(false) }
     }
+
     func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         loadReaderDocument(articleID: article.id, forSearch: ReaderDocumentSource.forScope(scope) == .search, completion: completion)
     }
@@ -1156,22 +1177,58 @@ final class BrowserStore: ObservableObject {
     }
     func flushScrollover(_ ids: [Int64]) {
         guard let core, !ids.isEmpty else { return }
-        let started = ContinuousClock.now
-        do {
-            _ = try core.setReadStateBulk(articleIds: ids, read: true)
-            let elapsed = started.duration(to: .now)
-            if elapsed >= .milliseconds(8) {
-                let components = elapsed.components
-                let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
-                NativeLog.scrollover.debug("scrollover mutation elapsed_ms=\(milliseconds, privacy: .public) ids=\(ids.count, privacy: .public)")
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let started = ContinuousClock.now
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.setReadStateBulk(articleIds: ids, read: true) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case .success:
+                let elapsed = started.duration(to: .now)
+                if elapsed >= .milliseconds(8) {
+                    let components = elapsed.components
+                    let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+                    NativeLog.scrollover.debug("scrollover mutation elapsed_ms=\(milliseconds, privacy: .public) ids=\(ids.count, privacy: .public)")
+                }
+                self.lastScrolloverBatch = self.scrolloverUndoBatch.append(ids)
+                self.updateVisibleRead(ids, read: true, retainingForScrolloverUndo: true)
+                self.scrolloverCountsPending = true
+                self.showScrolloverUndo()
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
-            lastScrolloverBatch = scrolloverUndoBatch.append(ids)
-            updateVisibleRead(ids, read: true, retainingForScrolloverUndo: true)
-            scrolloverCountsPending = true
-            showScrolloverUndo()
-        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+        }
     }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisibleRead(lastScrolloverBatch, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) } }
+
+    func undoScrollover() {
+        guard let core, !lastScrolloverBatch.isEmpty else { return }
+        let ids = lastScrolloverBatch
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.setReadStateBulk(articleIds: ids, read: false) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case .success:
+                self.updateVisibleRead(ids, read: false)
+                self.restoreScrolloverRemovedArticles()
+                self.scrolloverUndoBatch.clear()
+                self.lastScrolloverBatch = []
+                self.scrolloverUndoVisible = false
+                self.undoExpiry?.cancel()
+                self.reloadSelectionTotal()
+                self.reloadCounts()
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setStartupScope(_ preference: StartupScopePreference) {
         startupScope = preference
@@ -1504,44 +1561,33 @@ final class BrowserStore: ObservableObject {
     }
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) { let ids = Set(ids); for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) } }
     private func reloadScrolloverCounts() {
-        guard let core else { return }
-        let selectionQuery = query()
-        let categoryIDs = catalog.categories.map(\.id)
-        let feedIDs = catalog.feeds.map(\.id)
-        let categoryQueries = categoryIDs.map { (id: $0, query: query(scope: .category($0))) }
-        let feedQueries = feedIDs.map { (id: $0, query: query(scope: .feed($0))) }
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            do {
-                let started = ContinuousClock.now
-                let selectionTotal = try core.countArticles(query: selectionQuery)
-                let unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-                let starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-                var categoryCounts: [Int64: UInt64] = [:]
-                var feedCounts: [Int64: UInt64] = [:]
-                for item in categoryQueries { categoryCounts[item.id] = try core.countArticles(query: item.query) }
-                for item in feedQueries { feedCounts[item.id] = try core.countArticles(query: item.query) }
-                let elapsed = started.duration(to: .now)
-                if elapsed >= .milliseconds(8) {
-                    let components = elapsed.components
-                    let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
-                    NativeLog.scrollover.debug("scrollover count refresh elapsed_ms=\(milliseconds, privacy: .public) queries=\(categoryIDs.count + feedIDs.count + 3, privacy: .public)")
+        guard let core, let selectionQuery = query() else { return }
+        let countMode: NavigationCountMode = unreadOnly ? .unread : .all
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    let selectionTotal = try core.countArticles(query: selectionQuery)
+                    let projection = try core.navigationProjection(countMode: countMode)
+                    return (selectionTotal, projection)
                 }
-                let categoryCountsSnapshot = categoryCounts
-                let feedCountsSnapshot = feedCounts
-                await MainActor.run {
-                    guard let store = store.value else { return }
-                    store.selectionTotal = selectionTotal
-                    store.unreadTotal = unreadTotal
-                    store.starredTotal = starredTotal
-                    store.categorySidebarCounts = categoryCountsSnapshot
-                    store.feedSidebarCounts = feedCountsSnapshot
-                }
-            } catch {
-                await MainActor.run { store.value?.errorMessage = NativeErrorPresentation.message(for: error) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success((selectionTotal, projection)):
+                self.selectionTotal = selectionTotal
+                self.catalog = projection.catalog
+                self.unreadTotal = projection.unreadTotal
+                self.starredTotal = projection.starredTotal
+                self.categorySidebarCounts = Dictionary(uniqueKeysWithValues: projection.categoryCounts.map { ($0.id, $0.count) })
+                self.feedSidebarCounts = Dictionary(uniqueKeysWithValues: projection.feedCounts.map { ($0.id, $0.count) })
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
+
     private func showScrolloverUndo() {
         guard scrolloverUndoBatch.showsUndo else {
             scrolloverUndoVisible = false
