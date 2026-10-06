@@ -97,6 +97,10 @@ import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.FeedIconVariant
+import uniffi.flux_uniffi.DownloadOrigin
+import uniffi.flux_uniffi.DownloadState
+import uniffi.flux_uniffi.Enclosure
+import uniffi.flux_uniffi.MediaDownload
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.SaveToServiceResult
@@ -314,6 +318,8 @@ internal data class AndroidArticleRowPresentation(
 internal data class AndroidArticleMediaActionState(
     val hasAudio: Boolean,
     val isInListeningList: Boolean,
+    val audioEnclosures: List<Enclosure> = emptyList(),
+    val downloads: Map<Long, MediaDownload> = emptyMap(),
 )
 
 internal data class AndroidArticleTimelineContentState(
@@ -393,6 +399,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
     private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
+    private val mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit,
     private val activeSessionGeneration: () -> Long?,
     private val monotonicMillis: () -> Long,
 ) {
@@ -406,9 +413,14 @@ internal class AndroidArticleTimelineStore private constructor(
             } else {
                 coreRuntime.local { core ->
                     core.articleAudioActionStates(articleIds).associate { projection ->
+                        val audioEnclosures = projection.enclosures.filter { enclosure ->
+                            enclosure.mediaKind == MediaKind.AUDIO
+                        }
                         projection.articleId to AndroidArticleMediaActionState(
-                            hasAudio = projection.enclosures.any { enclosure -> enclosure.mediaKind == MediaKind.AUDIO },
+                            hasAudio = audioEnclosures.isNotEmpty(),
                             isInListeningList = projection.isInListeningList,
+                            audioEnclosures = audioEnclosures,
+                            downloads = projection.downloads.associateBy { it.enclosureId },
                         )
                     }
                 }
@@ -483,6 +495,22 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             Unit
         },
+        mediaDownloadWriter = { generation, enclosureId, state ->
+            coreRuntime.localForGeneration(generation) { core ->
+                when (state) {
+                    null, DownloadState.NOT_DOWNLOADED ->
+                        core.requestDownload(enclosureId = enclosureId, origin = DownloadOrigin.MANUAL)
+                    DownloadState.REQUESTED ->
+                        core.cancelDownload(enclosureId = enclosureId)
+                    DownloadState.DOWNLOADED ->
+                        core.requestDownloadDeletion(enclosureId = enclosureId)
+                    DownloadState.FAILED ->
+                        core.retryDownload(enclosureId = enclosureId)
+                    DownloadState.DELETE_REQUESTED -> Unit
+                }
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         monotonicMillis = SystemClock::elapsedRealtime,
     )
@@ -511,6 +539,7 @@ internal class AndroidArticleTimelineStore private constructor(
             AndroidSaveToServiceOutcome.Saved
         },
         listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+        mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit = { _, _, _ -> },
         monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -527,6 +556,7 @@ internal class AndroidArticleTimelineStore private constructor(
         minifluxEntryUrlLoader,
         saveToServiceWriter,
         listeningListWriter,
+        mediaDownloadWriter,
         activeSessionGeneration,
         monotonicMillis,
     )
@@ -954,6 +984,38 @@ internal class AndroidArticleTimelineStore private constructor(
                 )
             } else {
                 mutableActionMessages.emit("Listening List could not be updated.")
+            }
+        }
+    }
+
+    fun requestToggleDownload(articleId: Long, enclosureId: Long) {
+        val generation = activeSessionGeneration() ?: return
+        val current = mutableState.value.mediaActionStates[articleId] ?: return
+        val downloadState = current.downloads[enclosureId]?.state
+        explicitActionScope.launch {
+            val result = runCatching {
+                mediaDownloadWriter(generation, enclosureId, downloadState)
+            }
+            if (activeSessionGeneration() != generation) return@launch
+            if (result.isSuccess) {
+                val refreshed = runCatching {
+                    mediaActionStatesLoader(listOf(articleId))[articleId]
+                }.getOrNull()
+                if (refreshed != null) {
+                    mutableState.update { state ->
+                        state.copy(
+                            mediaActionStates = state.mediaActionStates + (articleId to refreshed),
+                            audioArticleIds = if (refreshed.hasAudio) {
+                                state.audioArticleIds + articleId
+                            } else {
+                                state.audioArticleIds - articleId
+                            },
+                        )
+                    }
+                }
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+            } else {
+                mutableActionMessages.emit("Download action could not be completed.")
             }
         }
     }
