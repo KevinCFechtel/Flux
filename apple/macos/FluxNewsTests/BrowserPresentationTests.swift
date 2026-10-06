@@ -21,6 +21,13 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(source.components(separatedBy: "Task.detached").count - 1, 2)
         XCTAssertTrue(source.contains("exportConfigBackup(input: input, password: password)"))
         XCTAssertTrue(source.contains("parseConfigBackup(bytes: bytes, password: password"))
+        XCTAssertTrue(source.contains("defer { self?.feedIconRequests.complete(key) }"))
+        XCTAssertTrue(source.contains("defer { self?.articleThumbnailRequests.complete(key) }"))
+        XCTAssertTrue(source.contains("guard self.core === core else { return }"))
+        XCTAssertTrue(source.contains("feedIconRequests = FeedIconRequestState()"))
+        XCTAssertTrue(source.contains("articleThumbnailRequests = ArticleThumbnailRequestState()"))
+        XCTAssertTrue(source.contains("blockingCancellableResult("))
+        XCTAssertTrue(source.contains("syncCancellable(reason: reason, cancellation: cancellation)"))
     }
 
     func testStartupScopeResolvesKnownTargets() {
