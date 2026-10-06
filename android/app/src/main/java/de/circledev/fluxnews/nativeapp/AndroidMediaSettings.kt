@@ -36,7 +36,10 @@ internal enum class AndroidDownloadRetentionChoice(val displayName: String) {
 }
 
 /** Core-owned media policy bridge. Android deliberately keeps no DataStore mirror. */
-internal class AndroidMediaSettings(private val coreRuntime: AndroidCoreRuntime) {
+internal class AndroidMediaSettings(
+    private val coreRuntime: AndroidCoreRuntime,
+    private val transferCoordinator: AndroidMediaTransferCoordinator? = null,
+) {
     data class State(
         val downloadNetworkPolicy: DownloadNetworkPolicy,
         val downloadRetention: AndroidDownloadRetentionChoice,
@@ -58,23 +61,29 @@ internal class AndroidMediaSettings(private val coreRuntime: AndroidCoreRuntime)
         }
     }
 
-    suspend fun setDownloadNetworkPolicy(value: DownloadNetworkPolicy): Result<Unit> = runCatching {
-        coreRuntime.local { it.setDownloadNetworkPolicy(value) }
+    suspend fun setDownloadNetworkPolicy(value: DownloadNetworkPolicy): Result<Unit> = mutate {
+        it.setDownloadNetworkPolicy(value)
     }
 
-    suspend fun setDownloadRetention(value: AndroidDownloadRetentionChoice): Result<Unit> = runCatching {
-        coreRuntime.local { it.setDownloadRetention(value.coreValue()) }
+    suspend fun setDownloadRetention(value: AndroidDownloadRetentionChoice): Result<Unit> = mutate {
+        it.setDownloadRetention(value.coreValue())
     }
 
-    suspend fun setDeleteAfterPlayback(value: Boolean): Result<Unit> = runCatching {
-        coreRuntime.local { it.setDeleteAfterPlayback(value) }
+    suspend fun setDeleteAfterPlayback(value: Boolean): Result<Unit> = mutate {
+        it.setDeleteAfterPlayback(value)
     }
 
-    suspend fun setAutoDownloadListeningList(value: Boolean): Result<Unit> = runCatching {
-        coreRuntime.local { it.setAutoDownloadListeningList(value) }
+    suspend fun setAutoDownloadListeningList(value: Boolean): Result<Unit> = mutate {
+        it.setAutoDownloadListeningList(value)
     }
 
-    suspend fun setRemoveCompletedListeningList(value: Boolean): Result<Unit> = runCatching {
-        coreRuntime.local { it.setRemoveCompletedListeningList(value) }
+    suspend fun setRemoveCompletedListeningList(value: Boolean): Result<Unit> = mutate {
+        it.setRemoveCompletedListeningList(value)
     }
+
+    private suspend fun mutate(operation: (uniffi.flux_uniffi.Flux) -> Unit): Result<Unit> =
+        runCatching {
+            coreRuntime.local { core -> operation(core) }
+            transferCoordinator?.reconcile()
+        }
 }
