@@ -15,6 +15,10 @@ on:
       - "core/**"
       - ".github/workflows/apple.yml"
 
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
