@@ -1007,6 +1007,18 @@ E1/E5 must characterize the real production-upgrade behavior. Preserve the exist
 
 ## 17. E6 — Native Media, Listening List and Background Transfers
 
+Status: **IN PROGRESS — runtime/lifecycle foundation implemented**
+
+The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
+
+- `FluxApplication` owns one process-scoped `AndroidMediaRuntime` over the existing `AndroidCoreRuntime`;
+- a narrow Core-lifecycle participant boundary quiesces media before account replacement, local-state rebuild, account removal and configuration restore, then reattaches it only to the current Core-session generation;
+- playback checkpoints are generation-bound Core writes and stale-session completions are ignored rather than adopted by a replacement account;
+- Media3 1.11.1 provides the native ExoPlayer/MediaSession baseline;
+- `AndroidMediaPlaybackService` is the single long-lived playback container, configured for spoken media, Android audio focus and becoming-noisy handling;
+- the service is registered as a media-playback foreground service so later E6 background playback and E7 system/Android Auto integration build on the same player rather than introducing a temporary Activity-owned runtime;
+- Listening List presentation, productive Core playback preparation/control and the physical background-transfer executor remain subsequent E6 slices.
+
 E6 consumes the frozen Phase B media domain.
 
 Android owns one app-scoped media runtime over the same Core account/session.
