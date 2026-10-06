@@ -95,6 +95,7 @@ internal data class AndroidSearchState(
     val loadingMore: Boolean = false,
     val errorMessage: String? = null,
     val audioArticleIds: Set<Long> = emptySet(),
+    val mediaActionStates: Map<Long, AndroidArticleMediaActionState> = emptyMap(),
     val feedIconVariant: FeedIconVariant? = null,
     val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
     val requestGeneration: Long = 0,
@@ -109,10 +110,11 @@ internal class AndroidSearchStore private constructor(
     private val searchLoader: suspend (Long, SearchArticlesRequest) -> SearchArticlesResult,
     private val readWriter: suspend (Long, Long, Boolean) -> Unit,
     private val starredWriter: suspend (Long, Long, Boolean) -> Unit,
-    private val audioLoader: suspend (Long, List<Long>) -> Set<Long>,
+    private val mediaActionStatesLoader: suspend (Long, List<Long>) -> Map<Long, AndroidArticleMediaActionState>,
     private val feedIconLoader: suspend (Long, List<Long>, FeedIconVariant) -> Map<Long, ByteArray>,
     private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
+    private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
@@ -131,12 +133,14 @@ internal class AndroidSearchStore private constructor(
             }
             Unit
         },
-        audioLoader = { generation, articleIds ->
-            if (articleIds.isEmpty()) emptySet() else coreRuntime.localForGeneration(generation) { core ->
-                core.articleAudioActionStates(articleIds)
-                    .asSequence()
-                    .filter { p -> p.enclosures.any { it.mediaKind == MediaKind.AUDIO } }
-                    .mapTo(mutableSetOf()) { it.articleId }
+        mediaActionStatesLoader = { generation, articleIds ->
+            if (articleIds.isEmpty()) emptyMap() else coreRuntime.localForGeneration(generation) { core ->
+                core.articleAudioActionStates(articleIds).associate { projection ->
+                    projection.articleId to AndroidArticleMediaActionState(
+                        hasAudio = projection.enclosures.any { it.mediaKind == MediaKind.AUDIO },
+                        isInListeningList = projection.isInListeningList,
+                    )
+                }
             }
         },
         feedIconLoader = { generation, feedIds, variant ->
@@ -155,6 +159,13 @@ internal class AndroidSearchStore private constructor(
                 SaveToServiceResult.NO_INTEGRATION_CONFIGURED -> AndroidSaveToServiceOutcome.NoIntegrationConfigured
             }
         },
+        listeningListWriter = { generation, articleId, enabled ->
+            coreRuntime.localForGeneration(generation) { core ->
+                if (enabled) core.addToListeningList(articleId = articleId)
+                else core.removeFromListeningList(articleId = articleId)
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -163,12 +174,18 @@ internal class AndroidSearchStore private constructor(
         readWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         starredWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         audioLoader: suspend (Long, List<Long>) -> Set<Long> = { _, _ -> emptySet() },
+        mediaActionStatesLoader: suspend (Long, List<Long>) -> Map<Long, AndroidArticleMediaActionState> = { generation, ids ->
+            audioLoader(generation, ids).associateWith {
+                AndroidArticleMediaActionState(hasAudio = true, isInListeningList = false)
+            }
+        },
         feedIconLoader: suspend (Long, List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _, _ -> emptyMap() },
         minifluxEntryUrlLoader: suspend (Long, Long) -> String = { _, id -> "https://example.test/entry/$id" },
         saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome = { _, _ -> AndroidSaveToServiceOutcome.Saved },
+        listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         activeSessionGeneration: () -> Long?,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(searchLoader, readWriter, starredWriter, audioLoader, feedIconLoader, minifluxEntryUrlLoader, saveToServiceWriter, activeSessionGeneration)
+    ) : this(searchLoader, readWriter, starredWriter, mediaActionStatesLoader, feedIconLoader, minifluxEntryUrlLoader, saveToServiceWriter, listeningListWriter, activeSessionGeneration)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutationMutex = Mutex()
@@ -227,7 +244,7 @@ internal class AndroidSearchStore private constructor(
                             state.copy(results = results, total = page.total, searching = false, errorMessage = null)
                         } else state
                     }
-                    loadAudio(request, sessionGeneration, query, results.map { it.id })
+                    loadMediaActions(request, sessionGeneration, query, results.map { it.id })
                 },
                 onFailure = {
                     mutableState.update { state ->
@@ -284,7 +301,7 @@ internal class AndroidSearchStore private constructor(
                         appended = updated.drop(state.results.size).map { it.id }
                         state.copy(results = updated, total = page.total, loadingMore = false, errorMessage = null)
                     }
-                    loadAudio(request, sessionGeneration, query, appended)
+                    loadMediaActions(request, sessionGeneration, query, appended)
                 },
                 onFailure = {
                     mutableState.update { state ->
@@ -397,13 +414,45 @@ internal class AndroidSearchStore private constructor(
         }
     }
 
-    private fun loadAudio(request: Long, sessionGeneration: Long, query: String, articleIds: List<Long>) {
+    fun requestSetListeningList(articleId: Long, enabled: Boolean) {
+        val generation = activeSessionGeneration() ?: return
+        scope.launch {
+            val result = runCatching {
+                listeningListWriter(generation, articleId, enabled)
+            }
+            if (activeSessionGeneration() != generation) return@launch
+            if (result.isSuccess) {
+                mutableState.update { state ->
+                    val current = state.mediaActionStates[articleId] ?: return@update state
+                    state.copy(
+                        mediaActionStates = state.mediaActionStates + (
+                            articleId to current.copy(isInListeningList = enabled)
+                        ),
+                    )
+                }
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+                mutableActionMessages.emit(
+                    if (enabled) "Added to Listening List." else "Removed from Listening List.",
+                )
+            } else {
+                mutableActionMessages.emit("Listening List could not be updated.")
+            }
+        }
+    }
+
+    private fun loadMediaActions(request: Long, sessionGeneration: Long, query: String, articleIds: List<Long>) {
         if (articleIds.isEmpty()) return
         scope.launch {
-            val audioIds = runCatching { audioLoader(sessionGeneration, articleIds) }.getOrNull() ?: return@launch
+            val mediaStates = runCatching {
+                mediaActionStatesLoader(sessionGeneration, articleIds)
+            }.getOrNull() ?: return@launch
             if (!owns(request, sessionGeneration, query)) return@launch
             mutableState.update { state ->
-                if (ownsState(state, request, sessionGeneration, query)) state.copy(audioArticleIds = state.audioArticleIds + audioIds) else state
+                if (!ownsState(state, request, sessionGeneration, query)) return@update state
+                state.copy(
+                    audioArticleIds = state.audioArticleIds + mediaStates.filterValues { it.hasAudio }.keys,
+                    mediaActionStates = state.mediaActionStates + mediaStates,
+                )
             }
         }
     }
@@ -498,7 +547,11 @@ internal fun AndroidSearchDestination(
             AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage("The article does not have a valid comments URL.")
             AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage("The article could not be shared.")
             AndroidArticleSwipeAction.SaveToService -> store.requestSaveToService(article.id)
-            AndroidArticleSwipeAction.ListeningList, AndroidArticleSwipeAction.DownloadAudio -> Unit
+            AndroidArticleSwipeAction.ListeningList -> {
+                val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
+                store.requestSetListeningList(article.id, !current)
+            }
+            AndroidArticleSwipeAction.DownloadAudio -> Unit
         }
     }
     fun performContext(article: ArticleSummary, action: AndroidArticleContextAction) {
@@ -621,6 +674,7 @@ internal fun AndroidSearchDestination(
                                     article = article,
                                     hasAudio = hasAudio,
                                     configuration = preferences.swipeConfiguration,
+                                    mediaActionsEnabled = true,
                                     rowWidth = maxWidth,
                                     onOpen = { openNormal(article) },
                                     onSwipeAction = { performSwipe(article, it) },
