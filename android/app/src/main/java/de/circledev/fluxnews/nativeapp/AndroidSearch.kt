@@ -198,7 +198,7 @@ internal class AndroidSearchStore private constructor(
             Unit
         },
         transferReconciler = { generation ->
-            transferCoordinator?.reconcile(generation)
+            transferCoordinator?.reconcileAndSignal(generation)
         },
         transferRevision = transferCoordinator?.revision,
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
