@@ -60,6 +60,12 @@ internal fun AndroidListeningListDestination(
         if (sessionGeneration != null) store.reload()
     }
 
+    LaunchedEffect(transferCoordinator, sessionGeneration) {
+        transferCoordinator.revision.collect {
+            if (sessionGeneration != null) store.reload()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
