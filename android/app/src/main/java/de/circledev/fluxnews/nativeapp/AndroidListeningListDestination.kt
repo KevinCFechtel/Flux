@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
@@ -23,7 +24,6 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -127,7 +127,7 @@ internal fun AndroidListeningListDestination(
                     }
                     Box {
                         IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(Icons.Rounded.Sort, contentDescription = "Sort Listening List")
+                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort Listening List")
                         }
                         DropdownMenu(
                             expanded = sortMenuOpen,
