@@ -1024,7 +1024,6 @@ final class BrowserStore: ObservableObject {
         }
     }
     private func handleSyncCompleted(_ metadata: SyncCompleted) {
-        isLoading = false
         refreshListeningListIfVisible()
         reloadLiveUnreadTotal()
         if metadata.reason == .background || metadata.reason == .periodic {
