@@ -1026,7 +1026,10 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - Android background transfers are now Core-authoritative WorkManager jobs keyed only by enclosure ID: workers re-read current Core work after process death, apply Core network policy as WorkManager constraints, finalize deterministic files under the configured media root, and report only `downloadFinished`, `downloadFailed` or `downloadDeleted` back to Core;
 - WorkManager is deliberately only the Android platform task registry, not a second domain state machine; Media3 `DownloadManager`/`DownloadIndex` is not used because the Core already owns durable download state;
 - transfer reconciliation runs after startup, successful sync, media-policy changes, download/delete mutations and Core lifecycle replacement; stale native jobs are cancelled and deletions are deferred while an enclosure is actively playing;
-- Listening List download/cancel/retry/delete controls are productive; article-level Download Audio projection and transient transfer-progress presentation remain the next E6 slice.
+- Listening List download/cancel/retry/delete controls are productive, including transient byte/total progress from the native worker runtime;
+- Timeline and Search now retain the batched Core enclosure/download projection and expose article-level Download Audio as Download/Cancel/Retry/Delete semantics; multiple audio enclosures use one native chooser rather than per-row Core queries;
+- worker completion/failure/deletion publishes only an in-memory revision signal so Timeline, Search and Listening List re-read authoritative Core download state without introducing a second persisted transfer state;
+- richer player presentation (artwork, chapters, show notes, rate/sleep controls) and physical background/process-death acceptance remain subsequent E6 work.
 
 E6 consumes the frozen Phase B media domain.
 
