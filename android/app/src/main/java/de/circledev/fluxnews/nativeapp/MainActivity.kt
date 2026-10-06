@@ -191,6 +191,7 @@ private fun FluxNewsApp(
                 searchStore = searchStore,
                 listeningListStore = listeningListStore,
                 mediaPlaybackCoordinator = mediaPlaybackCoordinator,
+                mediaTransferCoordinator = mediaTransferCoordinator,
                 readerStore = readerStore,
                 articleOpenResolver = articleOpenResolver,
                 navigationPreferences = navigationPreferences,
