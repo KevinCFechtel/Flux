@@ -27,6 +27,7 @@ import uniffi.flux_uniffi.MediaArtworkSource
 import uniffi.flux_uniffi.MediaChapter
 import uniffi.flux_uniffi.PlaybackPreparation
 import uniffi.flux_uniffi.PlaybackStatus
+import uniffi.flux_uniffi.ReaderDocument
 
 internal enum class AndroidMediaPlaybackSourceKind {
     Local,
@@ -43,6 +44,7 @@ internal enum class AndroidMediaPlaybackPresentationStatus {
 
 internal data class AndroidMediaPlaybackState(
     val enclosureId: Long? = null,
+    val articleId: Long? = null,
     val articleTitle: String? = null,
     val feedTitle: String? = null,
     val positionMs: Long = 0L,
@@ -329,6 +331,7 @@ internal class AndroidMediaPlaybackCoordinator(
 
         mutableState.value = mutableState.value.copy(
             enclosureId = enclosureId,
+            articleId = preparation.enclosure.articleId,
             articleTitle = preparation.articleTitle,
             feedTitle = preparation.feedTitle,
             positionMs = startPositionMs,
@@ -429,6 +432,31 @@ internal class AndroidMediaPlaybackCoordinator(
                 }
             }
         }
+    }
+
+    suspend fun artworkBytes(reference: String): ByteArray? {
+        val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
+        return runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.mediaArtwork(reference = reference)
+            }
+        }.getOrNull()?.takeIf {
+            coreRuntime.activeSessionGeneration() == generation
+        }
+    }
+
+    suspend fun showNotes(articleId: Long): Result<ReaderDocument> {
+        val generation = activeGeneration ?: coreRuntime.activeSessionGeneration()
+            ?: return Result.failure(IllegalStateException("No active Core session."))
+        val result = runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.readerDocument(articleId = articleId)
+            }
+        }
+        if (coreRuntime.activeSessionGeneration() != generation) {
+            return Result.failure(IllegalStateException("Core session changed."))
+        }
+        return result
     }
 
     suspend fun restart(enclosureId: Long) {
