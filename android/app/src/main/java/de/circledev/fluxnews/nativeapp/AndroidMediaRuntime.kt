@@ -27,6 +27,7 @@ internal class AndroidMediaRuntime(
     private val coreRuntime: AndroidCoreRuntime,
     private val diagnostics: AndroidAppDiagnostics,
     private val playbackCoordinator: AndroidMediaPlaybackCoordinator,
+    private val transferCoordinator: AndroidMediaTransferCoordinator,
 ) : AndroidCoreLifecycleParticipant {
     private val hostLock = Any()
 
@@ -51,6 +52,7 @@ internal class AndroidMediaRuntime(
     }
 
     override suspend fun prepareForCoreLifecycleChange(change: AndroidCoreLifecycleChange) {
+        transferCoordinator.cancelAllScheduledWork()
         val host = synchronized(hostLock) { playbackHost }
         val generation = attachedGeneration ?: coreRuntime.activeSessionGeneration()
 
@@ -111,5 +113,8 @@ internal class AndroidMediaRuntime(
 
     override suspend fun resumeAfterCoreLifecycleChange(change: AndroidCoreLifecycleChange) {
         attachedGeneration = coreRuntime.activeSessionGeneration()
+        attachedGeneration?.let { generation ->
+            transferCoordinator.reconcile(generation)
+        }
     }
 }
