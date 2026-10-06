@@ -9,10 +9,14 @@ DESTINATION="${DESTINATION:-platform=macOS}"
 
 "${REPOSITORY_DIR}/apple/Build/build-uniffi.sh"
 
-xcodebuild \
+# The test gate validates compilation and tests only. Installable/signed app
+# artifacts belong to build-app.sh and release.sh.
+FLUX_UNIFFI_PREPARED=1 xcodebuild \
   -project "${PROJECT}" \
   -scheme FluxNews \
   -configuration Debug \
   -destination "${DESTINATION}" \
   -derivedDataPath "${DERIVED_DATA}" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
   test
