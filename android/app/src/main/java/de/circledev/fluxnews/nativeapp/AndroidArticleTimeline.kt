@@ -400,10 +400,14 @@ internal class AndroidArticleTimelineStore private constructor(
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
     private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
     private val mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit,
+    private val transferReconciler: suspend (Long) -> Unit,
     private val activeSessionGeneration: () -> Long?,
     private val monotonicMillis: () -> Long,
 ) {
-    internal constructor(coreRuntime: AndroidCoreRuntime) : this(
+    internal constructor(
+        coreRuntime: AndroidCoreRuntime,
+        transferCoordinator: AndroidMediaTransferCoordinator? = null,
+    ) : this(
         pageLoader = { query, includeTotal ->
             coreRuntime.local { core -> core.articlePage(query, includeTotal) }
         },
@@ -511,6 +515,9 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             Unit
         },
+        transferReconciler = { generation ->
+            transferCoordinator?.reconcile(generation)
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         monotonicMillis = SystemClock::elapsedRealtime,
     )
@@ -540,6 +547,7 @@ internal class AndroidArticleTimelineStore private constructor(
         },
         listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit = { _, _, _ -> },
+        transferReconciler: suspend (Long) -> Unit = { _ -> },
         monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -557,6 +565,7 @@ internal class AndroidArticleTimelineStore private constructor(
         saveToServiceWriter,
         listeningListWriter,
         mediaDownloadWriter,
+        transferReconciler,
         activeSessionGeneration,
         monotonicMillis,
     )
@@ -998,6 +1007,7 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             if (activeSessionGeneration() != generation) return@launch
             if (result.isSuccess) {
+                runCatching { transferReconciler(generation) }
                 val refreshed = runCatching {
                     mediaActionStatesLoader(listOf(articleId))[articleId]
                 }.getOrNull()
