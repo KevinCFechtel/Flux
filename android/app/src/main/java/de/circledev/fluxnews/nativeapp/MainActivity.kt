@@ -142,7 +142,12 @@ private fun FluxNewsApp(
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
     val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
-    LaunchedEffect(readyState?.serverUrl) { if (readyState != null) backgroundSync.reconcileFromCore() }
+    LaunchedEffect(readyState?.serverUrl) {
+        if (readyState != null) {
+            backgroundSync.reconcileFromCore()
+            (LocalContext.current.applicationContext as FluxApplication).mediaTransferCoordinator.reconcile()
+        }
+    }
     fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) { bootstrapState = ready; syncCoordinator.requestSync(SyncReason.APP_START) }
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
