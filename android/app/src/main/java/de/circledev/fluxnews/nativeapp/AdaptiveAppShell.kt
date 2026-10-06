@@ -128,6 +128,8 @@ internal fun AdaptiveAppShell(
     syncCoordinator: AndroidSyncCoordinator,
     timelineStore: AndroidArticleTimelineStore,
     searchStore: AndroidSearchStore,
+    listeningListStore: AndroidListeningListStore,
+    mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator,
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
@@ -294,9 +296,10 @@ internal fun AdaptiveAppShell(
             )
         }
         composable(ShellRoute.ListeningList) {
-            SecondaryDestination(
-                title = "Listening List",
-                message = "Native media presentation is connected to this destination in the media phase.",
+            AndroidListeningListDestination(
+                store = listeningListStore,
+                playbackCoordinator = mediaPlaybackCoordinator,
+                sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
             )
         }
