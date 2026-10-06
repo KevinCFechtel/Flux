@@ -55,6 +55,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -2550,6 +2551,7 @@ internal fun FeedIcon(
     variant: FeedIconVariant,
     onRequest: suspend (Long, FeedIconVariant) -> Unit,
     requestIfMissing: Boolean = true,
+    size: Dp = 22.dp,
 ) {
     LaunchedEffect(feedId, variant, pngData == null, requestIfMissing) {
         if (requestIfMissing && pngData == null) onRequest(feedId, variant)
@@ -2567,12 +2569,12 @@ internal fun FeedIcon(
         AsyncImage(
             model = imageRequest,
             contentDescription = null,
-            modifier = Modifier.size(22.dp).clip(CircleShape),
+            modifier = Modifier.size(size).clip(CircleShape),
         )
     } else {
         Box(
             modifier = Modifier
-                .size(22.dp)
+                .size(size)
                 .clearAndSetSemantics { }
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primary),
