@@ -65,9 +65,14 @@ internal class AndroidMediaSettings(
         it.setDownloadNetworkPolicy(value)
     }
 
-    suspend fun setDownloadRetention(value: AndroidDownloadRetentionChoice): Result<Unit> = mutate {
-        it.setDownloadRetention(value.coreValue())
-    }
+    suspend fun setDownloadRetention(value: AndroidDownloadRetentionChoice): Result<Unit> =
+        runCatching {
+            coreRuntime.local { core ->
+                core.setDownloadRetention(value.coreValue())
+                core.evaluateMediaCleanup()
+            }
+            transferCoordinator?.reconcileAndSignal()
+        }
 
     suspend fun setDeleteAfterPlayback(value: Boolean): Result<Unit> = mutate {
         it.setDeleteAfterPlayback(value)
