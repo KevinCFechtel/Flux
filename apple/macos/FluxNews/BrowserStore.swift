@@ -1503,15 +1503,17 @@ final class BrowserStore: ObservableObject {
                 dataJson: String(decoding: payload, as: UTF8.self)
             )
         )
-        return try await Task.detached(priority: .userInitiated) {
-            Data(try exportConfigBackup(input: input, password: password))
-        }.value
+        return try Data(
+            await AppleCoreExecution.shared.blocking {
+                try exportConfigBackup(input: input, password: password)
+            }
+        )
     }
 
     func importConfigurationBackup(bytes: Data, password: String) async throws -> BackupImportOutcome {
-        let restored = try await Task.detached(priority: .userInitiated) {
+        let restored = try await AppleCoreExecution.shared.blocking {
             try parseConfigBackup(bytes: bytes, password: password, expectedPlatform: .macos)
-        }.value
+        }
         guard restored.platformSettings.schemaVersion == MacOSBackupSettingsV1.version else {
             throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
         }
