@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,8 +53,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DownloadState
+import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.ListeningListSort
@@ -72,6 +78,11 @@ internal fun AndroidListeningListDestination(
     val playback by playbackCoordinator.state.collectAsState()
     val transferProgress by transferCoordinator.progress.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+    val feedIconVariant = if (isSystemInDarkTheme()) {
+        FeedIconVariant.DARK
+    } else {
+        FeedIconVariant.NORMAL
+    }
     var feedMenuOpen by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var playerArticleId by remember { mutableStateOf<Long?>(null) }
@@ -79,6 +90,14 @@ internal fun AndroidListeningListDestination(
     LaunchedEffect(sessionGeneration) {
         store.activateSession(sessionGeneration)
         if (sessionGeneration != null) store.reload()
+    }
+    LaunchedEffect(state.items, feedIconVariant, sessionGeneration) {
+        if (sessionGeneration != null) {
+            store.ensureFeedIcons(
+                state.items.map { it.feedId },
+                feedIconVariant,
+            )
+        }
     }
     LaunchedEffect(transferCoordinator, sessionGeneration) {
         transferCoordinator.revision.collect {
@@ -229,6 +248,11 @@ internal fun AndroidListeningListDestination(
                         item = item,
                         playback = playback,
                         transferProgress = transferProgress,
+                        feedIconVariant = feedIconVariant,
+                        feedIconPngData = state.feedIconPngByFeedId[item.feedId],
+                        onRequestFeedIcon = { feedId, variant ->
+                            store.ensureFeedIcons(listOf(feedId), variant)
+                        },
                         onPlay = { enclosureId ->
                             coroutineScope.launch { playbackCoordinator.play(enclosureId) }
                         },
@@ -278,6 +302,9 @@ private fun AndroidListeningListRow(
     item: ListeningListItem,
     playback: AndroidMediaPlaybackState,
     transferProgress: Map<Long, AndroidMediaTransferProgress>,
+    feedIconVariant: FeedIconVariant,
+    feedIconPngData: ByteArray?,
+    onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
     onOpenPlayer: () -> Unit,
@@ -322,13 +349,38 @@ private fun AndroidListeningListRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    item.feedTitle.ifBlank { "Unknown Feed" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FeedIcon(
+                        feedId = item.feedId,
+                        title = item.feedTitle,
+                        pngData = feedIconPngData,
+                        variant = feedIconVariant,
+                        onRequest = onRequestFeedIcon,
+                        size = 16.dp,
+                    )
+                    Text(
+                        item.feedTitle.ifBlank { "Unknown Feed" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    androidListeningListPublicationDate(item.publishedAt)?.let { date ->
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            date,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (isNowPlaying) {
                     Text(
                         "Now Playing",
@@ -665,6 +717,13 @@ private fun AndroidMediaMetric(
         )
     }
 }
+
+private fun androidListeningListPublicationDate(value: String): String? =
+    runCatching {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+            .withLocale(Locale.getDefault())
+            .format(Instant.parse(value).atZone(java.time.ZoneId.systemDefault()))
+    }.getOrNull()
 
 private fun androidMediaBytes(bytes: Long): String {
     val safe = bytes.coerceAtLeast(0L).toDouble()
