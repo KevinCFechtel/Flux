@@ -98,19 +98,19 @@ files and embeds the macOS library for its app target.
 
 ## NativeDev TestFlight distribution
 
-Archive and upload a physical-device nativeDev build with:
+Archive and export a physical-device nativeDev build with:
 
 ```bash
 DEVELOPMENT_TEAM=<your-team-id> apple/ios/Build/archive.sh --build-number 3
-apple/ios/Build/upload-testflight.sh
+apple/ios/Build/export-testflight.sh
 ```
 
-To export an IPA without uploading it, use `apple/ios/Build/export-testflight.sh`;
-it writes `.build/TestFlightExport/FluxNews.ipa` for manual Transporter upload.
+`export-testflight.sh` writes the IPA locally for manual upload with Apple's
+Transporter app; the repository does not contain a direct-upload script.
 
 The archive is written to `.build/Archives/FluxNews-nativeDev.xcarchive` and
-export/upload files are written under `.build/Exports/FluxNews-nativeDev`.
-These generated directories are safe to delete. The archive and upload scripts
+the exported IPA is written under `dist/TestFlightExport` by default.
+These generated directories are safe to delete. The archive and export scripts
 reject the production Bundle ID before distribution. NativeDev TestFlight can
 coexist with the Flutter production app, but it does not test Flutter-to-native
 migration; use the separate Upgrade-Test configuration for that validation.
