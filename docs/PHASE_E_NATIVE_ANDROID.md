@@ -1020,7 +1020,9 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - productive playback now resolves Core `PlaybackPreparation`, prefers a validated local media reference under the configured media root, falls back to HTTP(S), restores in-progress position and projects chapters/artwork source;
 - Play/Pause/Stop, seek, ±30-second skip, 0.5x–3.0x playback rate, 20-second Core checkpoints, duration observation, natural completion/restart and the 30–180 minute sleep timer are implemented in the process-scoped playback coordinator;
 - the playback coordinator controls the service through a Media3 `MediaController`, preserving the single-player service boundary needed by E7;
-- Listening List presentation and the physical background-transfer executor remain subsequent E6 slices.
+- the native Listening List destination is now backed by `listeningListFeeds()` + `listeningList(feedId:sort:)`, with feed filtering, sorting, progress presentation, multi-enclosure selection and direct control of the process-scoped Media3 playback coordinator;
+- the Listening List includes a compact native playback surface over the same service-owned player, so playback state is not duplicated in Compose;
+- article-level Listening List toggle projection and the physical background-transfer executor remain subsequent E6 slices; Download Audio stays disabled until the executor exists.
 
 E6 consumes the frozen Phase B media domain.
 
