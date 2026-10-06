@@ -225,6 +225,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var articleAudioActionStates: [Int64: ArticleAudioActionState] = [:]
 
     private var core: Flux?
+    private let coreSessionExecutionCoordinator = AppleCoreSessionExecutionCoordinator()
     private var eventSubscription: EventSubscription?
     private var lastAutomaticSyncAttempt: Date?
     private var periodicSyncTimer: Timer?
@@ -391,68 +392,109 @@ final class BrowserStore: ObservableObject {
         articles.first(where: { $0.id == articleID })?.feedId
             ?? listeningListItems.first(where: { $0.articleId == articleID })?.feedId
     }
-    func query(scope: BrowserScope? = nil) -> ArticleQuery {
+    func query(scope: BrowserScope? = nil) -> ArticleQuery? {
         let requestedScope = scope ?? self.scope
-        let coreScope: ArticleScope = switch requestedScope { case .all, .starred: .all; case .search, .listeningList: fatalError("Scope has no article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
-        return ArticleQuery(scope: coreScope, readFilter: self.scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: self.scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
+        let coreScope: ArticleScope
+        switch requestedScope {
+        case .all, .starred:
+            coreScope = .all
+        case let .category(id):
+            coreScope = .category(id: id)
+        case let .feed(id):
+            coreScope = .feed(id: id)
+        case .search, .listeningList:
+            return nil
+        }
+        return ArticleQuery(
+            scope: coreScope,
+            readFilter: requestedScope == .starred ? .all : (unreadOnly ? .unread : .all),
+            starredFilter: requestedScope == .starred ? .starred : .all,
+            sort: newestFirst ? .newestFirst : .oldestFirst,
+            limit: 0,
+            cursor: nil
+        )
     }
     func reloadVisibleArticles(resetPosition: Bool = false, acknowledgingPendingNewData: Bool = false) {
-        if isListeningList { reloadListeningList(); return }
-        guard scope != .search else { return }
-        guard let core else { return }
-        do {
-            articles = try core.queryArticles(query: query())
-            loadArticleAudioActions(for: articles.map(\.id))
-            selectionTotal = try core.countArticles(query: query())
-            errorMessage = nil
-            if acknowledgingPendingNewData { acknowledgePendingNewDataForCurrentScope() }
-            if resetPosition {
-                resetPresentation()
-                snapshotResetRevision &+= 1
+        guard !isListeningList, scope != .search, let core, let articleQuery = query() else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                {
+                    let articles = try core.queryArticles(query: articleQuery)
+                    let selectionTotal = try core.countArticles(query: articleQuery)
+                    return (articles, selectionTotal)
+                }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success((articles, selectionTotal)):
+                self.articles = articles
+                self.loadArticleAudioActions(for: articles.map(\.id))
+                self.selectionTotal = selectionTotal
+                self.errorMessage = nil
+                if acknowledgingPendingNewData { self.acknowledgePendingNewDataForCurrentScope() }
+                if resetPosition {
+                    self.resetPresentation()
+                    self.snapshotResetRevision &+= 1
+                }
+            case let .failure(error):
+                NativeLog.app.error("article reload failed: \(String(describing: error), privacy: .public)")
+                self.errorMessage = NativeErrorPresentation.message(for: error)
             }
-        } catch {
-            NativeLog.app.error("article reload failed: \(String(describing: error), privacy: .public)")
-            errorMessage = NativeErrorPresentation.message(for: error)
         }
     }
+
     func reloadSelectionTotal() {
-        guard let core else { return }
-        do {
-            selectionTotal = try core.countArticles(query: query())
-            errorMessage = nil
-        } catch {
-            NativeLog.app.error("selection count reload failed: \(String(describing: error), privacy: .public)")
-            errorMessage = NativeErrorPresentation.message(for: error)
+        guard let core, let articleQuery = query() else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.countArticles(query: articleQuery) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(total):
+                self.selectionTotal = total
+                self.errorMessage = nil
+            case let .failure(error):
+                NativeLog.app.error("selection count reload failed: \(String(describing: error), privacy: .public)")
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
         }
     }
-    func reloadNavigation() {
+
+    func reloadNavigation() { reloadNavigationAndCounts() }
+    func reloadCounts() { reloadNavigationAndCounts() }
+
+    func reloadNavigationAndCounts() {
         guard let core else { return }
-        do {
-            catalog = try core.navigationCatalog()
-            pendingNewData.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
-            publishPendingNewData()
-        } catch {
-            NativeLog.app.error("navigation reload failed: \(String(describing: error), privacy: .public)")
-            errorMessage = NativeErrorPresentation.message(for: error)
+        let countMode: NavigationCountMode = unreadOnly ? .unread : .all
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.navigationProjection(countMode: countMode) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(projection):
+                self.catalog = projection.catalog
+                self.unreadTotal = projection.unreadTotal
+                self.starredTotal = projection.starredTotal
+                self.categorySidebarCounts = Dictionary(uniqueKeysWithValues: projection.categoryCounts.map { ($0.id, $0.count) })
+                self.feedSidebarCounts = Dictionary(uniqueKeysWithValues: projection.feedCounts.map { ($0.id, $0.count) })
+                self.pendingNewData.removeAbsentFeeds(Set(projection.catalog.feeds.map(\.id)))
+                self.publishPendingNewData()
+                self.errorMessage = nil
+            case let .failure(error):
+                NativeLog.app.error("navigation projection reload failed: \(String(describing: error), privacy: .public)")
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
         }
     }
-    func reloadCounts() {
-        guard let core else { return }
-        do {
-            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-            starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-            var categoryCounts: [Int64: UInt64] = [:]
-            var feedCounts: [Int64: UInt64] = [:]
-            for category in catalog.categories { categoryCounts[category.id] = try core.countArticles(query: query(scope: .category(category.id))) }
-            for feed in catalog.feeds { feedCounts[feed.id] = try core.countArticles(query: query(scope: .feed(feed.id))) }
-            categorySidebarCounts = categoryCounts
-            feedSidebarCounts = feedCounts
-        } catch {
-            NativeLog.app.error("sidebar count reload failed: \(String(describing: error), privacy: .public)")
-            errorMessage = NativeErrorPresentation.message(for: error)
-        }
-    }
-    func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
+
     func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool, displayScale: CGFloat = 2) {
         let key = "\(feedID)-\(darkAppearance ? "dark" : "normal")"
         guard feedIconRequests.begin(key, cached: feedIcons[key] != nil), let core else { return }
