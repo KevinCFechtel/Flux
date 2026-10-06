@@ -28,6 +28,9 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
+    internal val mediaRuntime: AndroidMediaRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidMediaRuntime(coreRuntime, diagnostics)
+    }
     internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSystemNotificationManager(applicationContext, coreRuntime, diagnostics)
     }
@@ -71,7 +74,14 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val articlePreferences: AndroidArticlePreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticlePreferences(preferenceStore) }
     internal val actionBarPreferences: AndroidActionBarPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidActionBarPreferences(preferenceStore) }
     internal val configurationBackup: AndroidConfigurationBackupController by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidConfigurationBackupController(accountBootstrap, coreRuntime, navigationPreferences, articlePreferences, actionBarPreferences)
+        AndroidConfigurationBackupController(
+            accountBootstrap,
+            coreRuntime,
+            navigationPreferences,
+            articlePreferences,
+            actionBarPreferences,
+            mediaRuntime,
+        )
     }
     val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidAccountBootstrap(
@@ -79,6 +89,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             preferenceStore = preferenceStore,
             coreRuntime = coreRuntime,
             storagePaths = storagePaths,
+            lifecycleParticipant = mediaRuntime,
             onWidgetStateCleared = { AndroidWidgetUpdates.refreshAll(applicationContext) },
         )
     }
