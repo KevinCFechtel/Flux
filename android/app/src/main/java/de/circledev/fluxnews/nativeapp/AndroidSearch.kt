@@ -564,6 +564,9 @@ internal fun AndroidSearchDestination(
     val searchFocusRequester = remember { FocusRequester() }
     val feedIconVariant = if (isSystemInDarkTheme()) FeedIconVariant.DARK else FeedIconVariant.NORMAL
     val referenceMillis = remember(state.requestGeneration) { System.currentTimeMillis() }
+    var pendingDownloadChoice by remember {
+        androidx.compose.runtime.mutableStateOf<AndroidArticleMediaActionState?>(null)
+    }
 
     LaunchedEffect(sessionGeneration) { store.activateSession(sessionGeneration) }
     LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
@@ -631,7 +634,17 @@ internal fun AndroidSearchDestination(
                 val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
                 store.requestSetListeningList(article.id, !current)
             }
-            AndroidArticleSwipeAction.DownloadAudio -> Unit
+            AndroidArticleSwipeAction.DownloadAudio -> {
+                val mediaState = state.mediaActionStates[article.id] ?: return
+                when (mediaState.audioEnclosures.size) {
+                    0 -> Unit
+                    1 -> store.requestToggleDownload(
+                        article.id,
+                        mediaState.audioEnclosures.first().id,
+                    )
+                    else -> pendingDownloadChoice = mediaState
+                }
+            }
         }
     }
     fun performContext(article: ArticleSummary, action: AndroidArticleContextAction) {
@@ -788,6 +801,21 @@ internal fun AndroidSearchDestination(
                 }
             }
             }
+        }
+        pendingDownloadChoice?.let { mediaState ->
+            AndroidArticleDownloadChooserDialog(
+                state = mediaState,
+                onSelect = { enclosureId ->
+                    val articleId = mediaState.audioEnclosures
+                        .firstOrNull { it.id == enclosureId }
+                        ?.articleId
+                    if (articleId != null) {
+                        store.requestToggleDownload(articleId, enclosureId)
+                    }
+                    pendingDownloadChoice = null
+                },
+                onDismiss = { pendingDownloadChoice = null },
+            )
         }
         AndroidArticleReaderOverlay(
             store = readerStore,
