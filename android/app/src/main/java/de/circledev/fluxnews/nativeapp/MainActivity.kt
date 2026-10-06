@@ -87,8 +87,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
-                val mediaSettings = remember(coreRuntime) { AndroidMediaSettings(coreRuntime) }
-                val downloadedData = remember(coreRuntime) { AndroidDownloadedData(coreRuntime) }
+                val mediaSettings = remember(coreRuntime, mediaTransferCoordinator) {
+                    AndroidMediaSettings(coreRuntime, mediaTransferCoordinator)
+                }
+                val downloadedData = remember(coreRuntime, mediaTransferCoordinator) {
+                    AndroidDownloadedData(coreRuntime, mediaTransferCoordinator)
+                }
                 val backgroundSync = application.backgroundSync
                 val systemNotifications = application.systemNotifications
                 CompositionLocalProvider(
