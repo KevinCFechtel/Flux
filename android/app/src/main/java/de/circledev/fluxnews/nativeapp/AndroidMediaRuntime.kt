@@ -5,7 +5,7 @@ package de.circledev.fluxnews.nativeapp
  * lifecycle changes. The enclosure ID remains the Core media identity; this is not durable media
  * state.
  */
-internal data class AndroidMediaPlaybackCheckpoint(
+data class AndroidMediaPlaybackCheckpoint(
     val enclosureId: Long,
     val positionMs: Long,
     val durationMs: Long?,
