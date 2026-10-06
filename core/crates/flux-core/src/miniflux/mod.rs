@@ -20,6 +20,7 @@ const PAGE_SIZE: i64 = 100;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 const READ_TIMEOUT: Duration = Duration::from_secs(80);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_CUSTOM_HEADERS: usize = 32;
 const MAX_HEADER_NAME_BYTES: usize = 256;
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
@@ -479,6 +480,7 @@ impl MinifluxClient {
             // Keep slow-but-progressing API transfers viable while failing a dead
             // route much earlier. This especially limits stalls when DNS returns
             // an unusable address family before a working alternative.
+            .timeout(REQUEST_TIMEOUT)
             .timeout_connect(CONNECT_TIMEOUT)
             .timeout_read(READ_TIMEOUT)
             .timeout_write(WRITE_TIMEOUT)
