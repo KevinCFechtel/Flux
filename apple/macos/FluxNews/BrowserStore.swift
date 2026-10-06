@@ -1733,7 +1733,8 @@ final class BrowserStore: ObservableObject {
             WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh skipped because Flux core is unavailable")
             return
         }
-        Task.detached {
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [core, coordinator] in
             let store: WidgetSnapshotStore
             do {
                 store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
@@ -1741,11 +1742,15 @@ final class BrowserStore: ObservableObject {
                 WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh could not resolve App Group container error=\(error.localizedDescription, privacy: .public)")
                 return
             }
-            do {
-                try WidgetSnapshotWriter.refresh(core: core, store: store)
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try WidgetSnapshotWriter.refresh(core: core, store: store) }
+            ) else { return }
+            switch result {
+            case .success:
                 WidgetSnapshotDiagnostics.logger.notice("Widget snapshot refresh succeeded path=\(store.snapshotPath, privacy: .public)")
                 WidgetTimelineReloader.reloadAll()
-            } catch {
+            case let .failure(error):
                 WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh failed error=\(error.localizedDescription, privacy: .public)")
             }
         }
@@ -1814,23 +1819,62 @@ final class BrowserStore: ObservableObject {
     }
     func open(_ article: ArticleSummary) {
         setRead(article, true)
-        let prefersMiniflux = (try? core?.feedPreferences(feedId: article.feedId).openInMiniflux) ?? false
+        guard let core else {
+            routeOpen(article, prefersMiniflux: false)
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.feedPreferences(feedId: article.feedId).openInMiniflux }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(prefersMiniflux):
+                self.routeOpen(article, prefersMiniflux: prefersMiniflux)
+            case .failure:
+                self.routeOpen(article, prefersMiniflux: false)
+            }
+        }
+    }
+
+    private func routeOpen(_ article: ArticleSummary, prefersMiniflux: Bool) {
         switch ArticleOpenRouting.action(clickOnNews: clickOnNews, openInMiniflux: prefersMiniflux) {
         case .detail: openDetail(article)
         case .original: openOriginal(article)
         case .miniflux: openInMiniflux(article)
         }
     }
+
     private func openArticle(_ articleID: Int64) {
         guard let core else { return }
-        do {
-            let query = ArticleQuery(scope: .all, readFilter: .all, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
-            guard let article = try core.queryArticles(query: query).first(where: { $0.id == articleID }) else { return }
-            open(article)
-        } catch {
-            errorMessage = NativeErrorPresentation.message(for: error)
+        let query = ArticleQuery(
+            scope: .all,
+            readFilter: .all,
+            starredFilter: .all,
+            sort: .newestFirst,
+            limit: 0,
+            cursor: nil
+        )
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.queryArticles(query: query).first(where: { $0.id == articleID }) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(article?):
+                self.open(article)
+            case .success(nil):
+                return
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
         }
     }
+
     private func openWidgetScope(_ selection: WidgetContentSelection) {
         switch selection.scope {
         case .allNews:
@@ -1858,11 +1902,23 @@ final class BrowserStore: ObservableObject {
     func openOriginal(_ article: ArticleSummary) { if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func openInMiniflux(_ article: ArticleSummary) {
-        guard let core, let url = MinifluxEntryURL.resolve(articleID: article.id, using: core.minifluxEntryUrl) else {
-            errorMessage = String(localized: "Flux could not resolve the Miniflux entry URL.")
-            return
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { MinifluxEntryURL.resolve(articleID: article.id, using: core.minifluxEntryUrl) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(url?):
+                NSWorkspace.shared.open(url)
+            case .success(nil):
+                self.errorMessage = String(localized: "Flux could not resolve the Miniflux entry URL.")
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
         }
-        NSWorkspace.shared.open(url)
     }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func loadFeedPreferences(
