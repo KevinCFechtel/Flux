@@ -26,6 +26,7 @@ internal interface AndroidMediaPlaybackHost {
 internal class AndroidMediaRuntime(
     private val coreRuntime: AndroidCoreRuntime,
     private val diagnostics: AndroidAppDiagnostics,
+    private val playbackCoordinator: AndroidMediaPlaybackCoordinator,
 ) : AndroidCoreLifecycleParticipant {
     private val hostLock = Any()
 
@@ -102,6 +103,9 @@ internal class AndroidMediaRuntime(
             }
         }
 
+        if (change != AndroidCoreLifecycleChange.LocalStateRebuild) {
+            playbackCoordinator.clearForCoreLifecycle()
+        }
         attachedGeneration = null
     }
 
