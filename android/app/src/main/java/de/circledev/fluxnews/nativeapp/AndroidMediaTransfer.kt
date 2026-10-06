@@ -100,7 +100,7 @@ internal class AndroidMediaTransferCoordinator(
     val revision = mutableRevision.asStateFlow()
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
-        reconcile(sessionGeneration)
+        reconcileAndSignal(sessionGeneration)
     }
 
     suspend fun reconcile(sessionGeneration: Long? = coreRuntime.activeSessionGeneration()) {
