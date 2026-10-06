@@ -28,6 +28,7 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertTrue(source.contains("articleThumbnailRequests = ArticleThumbnailRequestState()"))
         XCTAssertTrue(source.contains("blockingCancellableResult("))
         XCTAssertTrue(source.contains("syncCancellable(reason: reason, cancellation: cancellation)"))
+        XCTAssertFalse(source.contains("reloadLiveUnreadTotal()"))
     }
 
     func testStartupScopeResolvesKnownTargets() {
