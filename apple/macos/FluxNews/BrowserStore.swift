@@ -879,7 +879,7 @@ final class BrowserStore: ObservableObject {
             case let .success(syncResult):
                 NativeLog.sync.debug("sync completed; reconciling native media work")
                 self.requestMediaTransferReconciliation()
-                await SystemNotificationManager.shared.deliver(syncResult.systemNotificationCandidates, core: core)
+                await SystemNotificationManager.shared.deliver(syncResult.systemNotificationCandidates, core: core, coordinator: coordinator)
             case let .failure(error):
                 NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .public)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
@@ -2216,11 +2216,19 @@ final class SystemNotificationManager: NSObject, UNUserNotificationCenterDelegat
         }
     }
 
-    func deliver(_ candidates: [SystemNotificationCandidate], core: Flux) async {
+    func deliver(
+        _ candidates: [SystemNotificationCandidate],
+        core: Flux,
+        coordinator: AppleCoreSessionExecutionCoordinator
+    ) async {
         for candidate in candidates {
             do {
                 try await add(candidate)
-                try core.acknowledgeSystemNotification(candidateId: candidate.candidateId)
+                guard let acknowledgement = await coordinator.responsiveResult(
+                    for: core,
+                    { try core.acknowledgeSystemNotification(candidateId: candidate.candidateId) }
+                ) else { return }
+                if case let .failure(error) = acknowledgement { throw error }
             } catch {
                 NativeLog.notification.error("system notification delivery failed candidate_id=\(candidate.candidateId, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             }
