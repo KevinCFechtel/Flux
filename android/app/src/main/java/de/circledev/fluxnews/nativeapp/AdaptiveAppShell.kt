@@ -536,6 +536,8 @@ private fun NewsRootContent(
     val actionBarState by LocalAndroidActionBarPreferences.current.state.collectAsState(
         initial = AndroidActionBarPreferenceState(),
     )
+    val playbackState by mediaPlaybackCoordinator.state.collectAsState()
+    var nowPlayingPresented by remember { mutableStateOf(false) }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
     val projection = navigation.projection
@@ -657,8 +659,13 @@ private fun NewsRootContent(
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
     val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
+    val miniPlayerVisible = playbackState.enclosureId != null &&
+        playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
     val bottomActionClearance = if (bottomActionsVisible) {
-        navigationBarHeight + 32.dp + (44.dp * actionCapsuleScale)
+        navigationBarHeight +
+            32.dp +
+            (44.dp * actionCapsuleScale) +
+            if (miniPlayerVisible) 78.dp else 0.dp
     } else {
         0.dp
     }
@@ -810,24 +817,30 @@ private fun NewsRootContent(
         }
 
         if (bottomActionsVisible) {
-            AndroidArticleActionCapsule(
-                selection = selection,
-                resolvedActions = resolvedActions,
-                syncState = syncState,
-                syncSuccessVisible = syncSuccessVisible,
-                actionsEnabled = !markReadRunning,
-                scale = actionCapsuleScale,
-                onRequestManualSync = {
-                    syncCoordinator.requestSync(SyncReason.MANUAL)
-                },
-                onCancelManualSync = syncCoordinator::cancelManualSync,
-                onSelectionChanged = onSelectionChanged,
-                onAction = ::executeArticleListAction,
+            AndroidArticleListBottomDock(
+                coordinator = mediaPlaybackCoordinator,
+                onOpenPlayer = { nowPlayingPresented = true },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(bottom = 12.dp),
-            )
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                AndroidArticleActionCapsule(
+                    selection = selection,
+                    resolvedActions = resolvedActions,
+                    syncState = syncState,
+                    syncSuccessVisible = syncSuccessVisible,
+                    actionsEnabled = !markReadRunning,
+                    scale = actionCapsuleScale,
+                    onRequestManualSync = {
+                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                    },
+                    onCancelManualSync = syncCoordinator::cancelManualSync,
+                    onSelectionChanged = onSelectionChanged,
+                    onAction = ::executeArticleListAction,
+                    embeddedInDock = true,
+                )
+            }
         }
 
         AndroidArticleReaderOverlay(
@@ -840,6 +853,13 @@ private fun NewsRootContent(
                     }
                 }
             },
+        )
+    }
+
+    if (nowPlayingPresented && playbackState.enclosureId != null) {
+        AndroidMediaPlayerSheet(
+            coordinator = mediaPlaybackCoordinator,
+            onDismiss = { nowPlayingPresented = false },
         )
     }
 
@@ -911,6 +931,7 @@ private fun AndroidArticleActionCapsule(
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
     onAction: (AndroidActionBarAction) -> Unit,
     modifier: Modifier = Modifier,
+    embeddedInDock: Boolean = false,
 ) {
     var overflowExpanded by remember { mutableStateOf(false) }
     var filterExpanded by remember { mutableStateOf(false) }
@@ -936,10 +957,14 @@ private fun AndroidArticleActionCapsule(
     Box(modifier) {
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.background.copy(alpha = if (darkMode) 0.70f else 0.85f),
+            color = if (embeddedInDock) {
+                Color.Transparent
+            } else {
+                MaterialTheme.colorScheme.background.copy(alpha = if (darkMode) 0.70f else 0.85f)
+            },
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
-            shadowElevation = if (darkMode) 0.5.dp else 0.dp,
+            shadowElevation = if (embeddedInDock) 0.dp else if (darkMode) 0.5.dp else 0.dp,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 2.dp),
