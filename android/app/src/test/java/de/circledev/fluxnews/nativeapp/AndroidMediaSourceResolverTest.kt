@@ -15,7 +15,9 @@ class AndroidMediaSourceResolverTest {
     @Test
     fun readableLocalReferenceWinsOverRemoteSource() = withMediaRoot { root ->
         val downloaded = File(root, "downloads/42.mp3")
-        check(downloaded.parentFile.mkdirs())
+        checkNotNull(downloaded.parentFile).let { parent ->
+            check(parent.mkdirs() || parent.isDirectory)
+        }
         downloaded.writeText("audio")
 
         val resolved = AndroidMediaSourceResolver(root).resolve(
