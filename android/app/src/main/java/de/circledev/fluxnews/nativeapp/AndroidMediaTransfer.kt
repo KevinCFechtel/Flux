@@ -1,0 +1,411 @@
+package de.circledev.fluxnews.nativeapp
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import uniffi.flux_uniffi.DownloadFailureKind
+import uniffi.flux_uniffi.DownloadNetworkPolicy
+import uniffi.flux_uniffi.MediaTransferWork
+import uniffi.flux_uniffi.SyncCompleted
+
+internal object AndroidMediaTransferFileLayout {
+    fun reference(enclosureId: Long, url: String, mimeType: String): String {
+        require(enclosureId > 0L)
+        return "downloads/" + enclosureId + "." + extension(url, mimeType)
+    }
+
+    fun destination(mediaRoot: File, reference: String): File {
+        val relative = File(reference)
+        require(!relative.isAbsolute) { "Media reference must be relative." }
+        val root = mediaRoot.canonicalFile
+        val target = File(root, reference).canonicalFile
+        require(target.toPath().startsWith(root.toPath())) { "Media reference escapes media root." }
+        return target
+    }
+
+    private fun extension(url: String, mimeType: String): String {
+        val pathExtension = runCatching {
+            URI(url).path
+                ?.substringAfterLast('/', "")
+                ?.substringAfterLast('.', "")
+                ?.lowercase()
+                ?.takeIf { it.matches(Regex("[a-z0-9]{1,5}")) }
+        }.getOrNull()
+        if (pathExtension in setOf("mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "mp4", "m4v", "webm")) {
+            return pathExtension!!
+        }
+        return when (mimeType.substringBefore(';').trim().lowercase()) {
+            "audio/mpeg" -> "mp3"
+            "audio/mp4", "audio/x-m4a" -> "m4a"
+            "audio/aac" -> "aac"
+            "audio/ogg", "application/ogg" -> "ogg"
+            "audio/opus" -> "opus"
+            "audio/wav", "audio/x-wav" -> "wav"
+            "audio/flac" -> "flac"
+            "video/mp4" -> "mp4"
+            "video/webm", "audio/webm" -> "webm"
+            else -> "bin"
+        }
+    }
+}
+
+internal class AndroidMediaTransferCoordinator(
+    context: Context,
+    private val coreRuntime: AndroidCoreRuntime,
+    private val playbackCoordinator: AndroidMediaPlaybackCoordinator,
+    private val diagnostics: AndroidAppDiagnostics,
+) : AndroidPostSyncEffect {
+    private val applicationContext = context.applicationContext
+    private val workManager = WorkManager.getInstance(applicationContext)
+
+    override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
+        reconcile(sessionGeneration)
+    }
+
+    suspend fun reconcile(sessionGeneration: Long? = coreRuntime.activeSessionGeneration()) {
+        val generation = sessionGeneration ?: return
+        if (coreRuntime.activeSessionGeneration() != generation) return
+
+        val snapshot = runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                Triple(
+                    core.coreSettings(),
+                    core.downloadsRequiringTransfer(),
+                    core.downloadsRequiringDeletion(),
+                )
+            }
+        }.getOrElse { failure ->
+            diagnostics.record(
+                AndroidAppLogLevel.Warning,
+                "media-transfer",
+                "Transfer reconciliation could not read Core work: " + failure.javaClass.simpleName,
+            )
+            return
+        }
+
+        val requestedTransfers = snapshot.second.associateBy { it.enclosureId }
+        val requestedDeletions = snapshot.third.associateBy { it.enclosureId }
+        cancelStaleWork(requestedTransfers.keys, requestedDeletions.keys)
+
+        val networkType = when (snapshot.first.downloadNetworkPolicy) {
+            DownloadNetworkPolicy.ANY_NETWORK -> NetworkType.CONNECTED
+            DownloadNetworkPolicy.UNMETERED_ONLY -> NetworkType.UNMETERED
+        }
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(networkType)
+            .build()
+
+        requestedTransfers.values.forEach { work ->
+            val request = OneTimeWorkRequestBuilder<AndroidMediaDownloadWorker>()
+                .setInputData(AndroidMediaTransferWorkerInput.data(work.enclosureId))
+                .setConstraints(constraints)
+                .addTag(TRANSFER_TAG)
+                .addTag(AndroidMediaTransferWorkerInput.enclosureTag(work.enclosureId))
+                .build()
+            workManager.enqueueUniqueWork(
+                transferWorkName(work.enclosureId),
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }
+
+        requestedDeletions.values.forEach { work ->
+            if (playbackCoordinator.blocksMediaDeletion(work.enclosureId)) return@forEach
+            val request = OneTimeWorkRequestBuilder<AndroidMediaDeletionWorker>()
+                .setInputData(AndroidMediaTransferWorkerInput.data(work.enclosureId))
+                .addTag(DELETION_TAG)
+                .addTag(AndroidMediaTransferWorkerInput.enclosureTag(work.enclosureId))
+                .build()
+            workManager.enqueueUniqueWork(
+                deletionWorkName(work.enclosureId),
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }
+    }
+
+    fun cancelAllScheduledWork() {
+        workManager.cancelAllWorkByTag(TRANSFER_TAG)
+        workManager.cancelAllWorkByTag(DELETION_TAG)
+    }
+
+    private suspend fun cancelStaleWork(
+        requestedTransferIds: Set<Long>,
+        requestedDeletionIds: Set<Long>,
+    ) = withContext(Dispatchers.IO) {
+        val transfers = runCatching {
+            workManager.getWorkInfosByTag(TRANSFER_TAG).get()
+        }.getOrDefault(emptyList())
+        transfers
+            .filter { !it.state.isFinished }
+            .mapNotNull(AndroidMediaTransferWorkerInput::enclosureId)
+            .filter { it !in requestedTransferIds }
+            .forEach { workManager.cancelUniqueWork(transferWorkName(it)) }
+
+        val deletions = runCatching {
+            workManager.getWorkInfosByTag(DELETION_TAG).get()
+        }.getOrDefault(emptyList())
+        deletions
+            .filter { !it.state.isFinished }
+            .mapNotNull(AndroidMediaTransferWorkerInput::enclosureId)
+            .filter { it !in requestedDeletionIds }
+            .forEach { workManager.cancelUniqueWork(deletionWorkName(it)) }
+    }
+
+    companion object {
+        internal const val TRANSFER_TAG = "flux-media-transfer"
+        internal const val DELETION_TAG = "flux-media-deletion"
+        internal fun transferWorkName(id: Long) = "flux-media-transfer-" + id
+        internal fun deletionWorkName(id: Long) = "flux-media-deletion-" + id
+    }
+}
+
+private object AndroidMediaTransferWorkerInput {
+    private const val ENCLOSURE_ID = "enclosure_id"
+    fun data(enclosureId: Long) = Data.Builder().putLong(ENCLOSURE_ID, enclosureId).build()
+    fun enclosureTag(enclosureId: Long) = "flux-media-enclosure-" + enclosureId
+    fun enclosureId(info: WorkInfo): Long? =
+        info.tags.firstNotNullOfOrNull { tag ->
+            tag.removePrefix("flux-media-enclosure-")
+                .takeIf { it != tag }
+                ?.toLongOrNull()
+        }
+    fun enclosureId(parameters: WorkerParameters): Long =
+        parameters.inputData.getLong(ENCLOSURE_ID, -1L)
+}
+
+internal class AndroidMediaDownloadWorker(
+    appContext: Context,
+    parameters: WorkerParameters,
+) : CoroutineWorker(appContext, parameters) {
+    private val application = appContext.applicationContext as FluxApplication
+    private val enclosureId = AndroidMediaTransferWorkerInput.enclosureId(parameters)
+    private val httpClient = OkHttpClient.Builder().build()
+
+    override suspend fun doWork(): Result {
+        if (enclosureId <= 0L) return Result.failure()
+        val ready = application.accountBootstrap.restoreStoredAccount()
+        if (ready !is AndroidAccountBootstrap.State.Ready) return Result.retry()
+        val generation = application.coreRuntime.activeSessionGeneration() ?: return Result.retry()
+
+        val work = currentWork(generation) ?: return Result.success()
+        if (!networkPolicyAllows(generation)) return Result.retry()
+
+        setForeground(foregroundInfo(work))
+        val reference = AndroidMediaTransferFileLayout.reference(
+            work.enclosureId,
+            work.url,
+            work.mimeType,
+        )
+        val destination = runCatching {
+            AndroidMediaTransferFileLayout.destination(application.storagePaths.media, reference)
+        }.getOrElse {
+            reportFailure(generation, DownloadFailureKind.STORAGE)
+            return Result.success()
+        }
+
+        if (destination.isFile && destination.length() > 0L) {
+            reportFinished(generation, reference, destination.length())
+            return Result.success()
+        }
+
+        destination.parentFile?.let { parent ->
+            if (!parent.mkdirs() && !parent.isDirectory) {
+                reportFailure(generation, DownloadFailureKind.STORAGE)
+                return Result.success()
+            }
+        }
+        val temporary = File(destination.parentFile, "." + destination.name + ".part")
+        temporary.delete()
+
+        try {
+            val uri = URI(work.url)
+            if (uri.scheme?.lowercase() !in setOf("http", "https")) {
+                reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
+                return Result.success()
+            }
+            val response = withContext(Dispatchers.IO) {
+                httpClient.newCall(Request.Builder().url(work.url).build()).execute()
+            }
+            response.use { result ->
+                if (!result.isSuccessful) {
+                    reportFailure(generation, DownloadFailureKind.NETWORK)
+                    return Result.success()
+                }
+                val body = result.body ?: run {
+                    reportFailure(generation, DownloadFailureKind.INVALID_MEDIA)
+                    return Result.success()
+                }
+                withContext(Dispatchers.IO) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(temporary).use { output ->
+                            input.copyTo(output)
+                            output.fd.sync()
+                        }
+                    }
+                    require(temporary.length() > 0L)
+                    try {
+                        Files.move(
+                            temporary.toPath(),
+                            destination.toPath(),
+                            StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    } catch (_: Exception) {
+                        Files.move(
+                            temporary.toPath(),
+                            destination.toPath(),
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    }
+                }
+            }
+            if (currentWork(generation) == null) {
+                destination.delete()
+                return Result.success()
+            }
+            reportFinished(generation, reference, destination.length())
+            return Result.success()
+        } catch (cancelled: CancellationException) {
+            temporary.delete()
+            throw cancelled
+        } catch (failure: Throwable) {
+            temporary.delete()
+            val kind = when (failure) {
+                is java.io.IOException -> DownloadFailureKind.NETWORK
+                is SecurityException -> DownloadFailureKind.STORAGE
+                else -> DownloadFailureKind.UNKNOWN
+            }
+            reportFailure(generation, kind)
+            return Result.success()
+        }
+    }
+
+    private suspend fun currentWork(generation: Long): MediaTransferWork? =
+        runCatching {
+            application.coreRuntime.localForGeneration(generation) { core ->
+                core.downloadsRequiringTransfer().firstOrNull { it.enclosureId == enclosureId }
+            }
+        }.getOrNull()
+
+    private suspend fun networkPolicyAllows(generation: Long): Boolean {
+        val policy = runCatching {
+            application.coreRuntime.localForGeneration(generation) {
+                it.coreSettings().downloadNetworkPolicy
+            }
+        }.getOrNull() ?: return false
+        if (policy == DownloadNetworkPolicy.ANY_NETWORK) return true
+        val connectivity = applicationContext.getSystemService(ConnectivityManager::class.java)
+        return connectivity != null && !connectivity.isActiveNetworkMetered
+    }
+
+    private suspend fun reportFinished(generation: Long, reference: String, size: Long) {
+        runCatching {
+            application.coreRuntime.localForGeneration(generation) { core ->
+                core.downloadFinished(
+                    enclosureId = enclosureId,
+                    localFile = reference,
+                    fileSizeBytes = size.coerceAtLeast(0L).toULong(),
+                )
+            }
+        }
+    }
+
+    private suspend fun reportFailure(generation: Long, kind: DownloadFailureKind) {
+        if (currentWork(generation) == null) return
+        runCatching {
+            application.coreRuntime.localForGeneration(generation) { core ->
+                core.downloadFailed(enclosureId = enclosureId, failureKind = kind)
+            }
+        }
+    }
+
+    private fun foregroundInfo(work: MediaTransferWork): ForegroundInfo {
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "Media downloads",
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_sync)
+            .setContentTitle("Downloading audio")
+            .setContentText("FluxNews is saving media for offline playback.")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(0, 0, true)
+            .build()
+        return ForegroundInfo(
+            NOTIFICATION_ID_BASE + (work.enclosureId % 10_000L).toInt(),
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "flux-media-downloads"
+        private const val NOTIFICATION_ID_BASE = 31_000
+    }
+}
+
+internal class AndroidMediaDeletionWorker(
+    appContext: Context,
+    parameters: WorkerParameters,
+) : CoroutineWorker(appContext, parameters) {
+    private val application = appContext.applicationContext as FluxApplication
+    private val enclosureId = AndroidMediaTransferWorkerInput.enclosureId(parameters)
+
+    override suspend fun doWork(): Result {
+        if (enclosureId <= 0L) return Result.failure()
+        val ready = application.accountBootstrap.restoreStoredAccount()
+        if (ready !is AndroidAccountBootstrap.State.Ready) return Result.retry()
+        val generation = application.coreRuntime.activeSessionGeneration() ?: return Result.retry()
+        if (application.mediaPlaybackCoordinator.blocksMediaDeletion(enclosureId)) return Result.retry()
+
+        val work = runCatching {
+            application.coreRuntime.localForGeneration(generation) { core ->
+                core.downloadsRequiringDeletion().firstOrNull { it.enclosureId == enclosureId }
+            }
+        }.getOrNull() ?: return Result.success()
+
+        val reference = work.localFile
+        if (!reference.isNullOrBlank()) {
+            val target = runCatching {
+                AndroidMediaTransferFileLayout.destination(application.storagePaths.media, reference)
+            }.getOrElse { return Result.failure() }
+            if (target.exists() && !target.delete()) return Result.retry()
+        }
+
+        return runCatching {
+            application.coreRuntime.localForGeneration(generation) { core ->
+                core.downloadDeleted(enclosureId = enclosureId)
+            }
+            Result.success()
+        }.getOrElse { Result.retry() }
+    }
+}
