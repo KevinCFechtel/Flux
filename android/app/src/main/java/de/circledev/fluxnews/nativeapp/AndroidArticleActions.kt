@@ -114,7 +114,7 @@ internal object AndroidArticleActionPolicy {
         AndroidArticleSwipeAction.Comments -> validWebUrl(article.commentsUrl)
 
         AndroidArticleSwipeAction.ListeningList -> mediaActionsEnabled && hasAudio
-        AndroidArticleSwipeAction.DownloadAudio -> false
+        AndroidArticleSwipeAction.DownloadAudio -> mediaActionsEnabled && hasAudio
     }
 
     fun resolveSwipeSide(
