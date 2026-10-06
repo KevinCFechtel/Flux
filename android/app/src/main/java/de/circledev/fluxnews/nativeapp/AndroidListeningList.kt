@@ -4,6 +4,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
+import uniffi.flux_uniffi.DownloadOrigin
 import uniffi.flux_uniffi.ListeningListSort
 
 internal data class AndroidListeningListState(
@@ -17,6 +18,7 @@ internal data class AndroidListeningListState(
 
 internal class AndroidListeningListStore(
     private val coreRuntime: AndroidCoreRuntime,
+    private val transferCoordinator: AndroidMediaTransferCoordinator? = null,
 ) {
     private val mutationMutex = Mutex()
     private val mutableState = kotlinx.coroutines.flow.MutableStateFlow(AndroidListeningListState())
@@ -84,7 +86,28 @@ internal class AndroidListeningListStore(
     suspend fun removeFromListeningList(articleId: Long): Result<Unit> =
         mutate { core -> core.removeFromListeningList(articleId = articleId) }
 
+    suspend fun requestDownload(enclosureId: Long): Result<Unit> =
+        mutate(reconcileTransfers = true) { core ->
+            core.requestDownload(enclosureId = enclosureId, origin = DownloadOrigin.MANUAL)
+        }
+
+    suspend fun cancelDownload(enclosureId: Long): Result<Unit> =
+        mutate(reconcileTransfers = true) { core ->
+            core.cancelDownload(enclosureId = enclosureId)
+        }
+
+    suspend fun retryDownload(enclosureId: Long): Result<Unit> =
+        mutate(reconcileTransfers = true) { core ->
+            core.retryDownload(enclosureId = enclosureId)
+        }
+
+    suspend fun deleteDownload(enclosureId: Long): Result<Unit> =
+        mutate(reconcileTransfers = true) { core ->
+            core.requestDownloadDeletion(enclosureId = enclosureId)
+        }
+
     private suspend fun mutate(
+        reconcileTransfers: Boolean = false,
         operation: (uniffi.flux_uniffi.Flux) -> Unit,
     ): Result<Unit> = mutationMutex.withLock {
         val generation = sessionGeneration ?: return@withLock Result.failure(
@@ -93,7 +116,10 @@ internal class AndroidListeningListStore(
         val result = runCatching {
             coreRuntime.localForGeneration(generation) { core -> operation(core) }
         }
-        if (result.isSuccess && sessionGeneration == generation) reload()
+        if (result.isSuccess && sessionGeneration == generation) {
+            if (reconcileTransfers) transferCoordinator?.reconcile(generation)
+            reload()
+        }
         result
     }
 }
