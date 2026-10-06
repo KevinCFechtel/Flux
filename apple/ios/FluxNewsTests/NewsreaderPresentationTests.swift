@@ -829,35 +829,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testLandscapeCounterLabelExplainsCountSemantics() {
-        let german = Locale(identifier: "de_DE")
-        XCTAssertEqual(
-            ArticleListCounterPresentation.inlineLandscapeLabel(
-                scope: .all,
-                unreadOnly: true,
-                count: 79,
-                locale: german
-            ),
-            "79 ungelesen"
-        )
-        XCTAssertEqual(
-            ArticleListCounterPresentation.inlineLandscapeLabel(
-                scope: .all,
-                unreadOnly: false,
-                count: 79,
-                locale: german
-            ),
-            "79 Artikel"
-        )
-        XCTAssertEqual(
-            ArticleListCounterPresentation.inlineLandscapeLabel(
-                scope: .starred,
-                unreadOnly: true,
-                count: 79,
-                locale: german
-            ),
-            "79 Artikel"
-        )
+    func testLandscapeCounterGermanLocalizationCatalog() throws {
+        let german = try localizationBundle("de")
+        XCTAssertEqual(String(localized: "\(79) unread", bundle: german), "79 ungelesen")
+        XCTAssertEqual(String(localized: "\(79) article", bundle: german), "79 Artikel")
     }
 
     func testArticleListActionCapacityAdaptsToChromeMode() {
@@ -3883,7 +3858,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             assertOptionalFrameEqual(
                 diagnostics.publicationTimeIconFrame,
                 expected.publicationTimeIconFrame,
-                accuracy: Self.accessoryFrameAccuracy
+                accuracy: Self.publicationTimeIconFrameAccuracy
             )
             assertOptionalFrameEqual(
                 diagnostics.landscapeReadingTimeContainerFrame,
@@ -4554,6 +4529,10 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// absorbs one grid step for decorative accessories only — cell height and
     /// every text frame stay at 0.5 pt.
     private static let accessoryFrameAccuracy: CGFloat = 1.0
+    /// SF Symbol alignment-rect insets for `clock.arrow.circlepath` differ
+    /// slightly across iOS runtimes even though the Auto Layout slot remains
+    /// unchanged. Keep this tolerance specific to that decorative symbol.
+    private static let publicationTimeIconFrameAccuracy: CGFloat = 1.5
 
     private func layoutInput(
         mode: ArticlePresentationMode,
