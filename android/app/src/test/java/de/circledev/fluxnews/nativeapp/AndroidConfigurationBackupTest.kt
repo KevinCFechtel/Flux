@@ -76,7 +76,7 @@ class AndroidConfigurationBackupTest {
         assertEquals("new-key", fake.readyCredentials?.apiKey)
         assertFalse(fake.recoveryPublished)
         assertTrue(fake.allMutationsInsideLock)
-        assertEquals(listOf("lock.enter", "capturePlatform", "snapshot", "replaceCore", "writeCredentials", "applyPlatform", "replaceRuntime", "publishReady", "lock.exit"), fake.calls)
+        assertEquals(listOf("lock.enter", "capturePlatform", "snapshot", "lifecycle.prepare", "replaceCore", "writeCredentials", "applyPlatform", "replaceRuntime", "publishReady", "lifecycle.resume", "lock.exit"), fake.calls)
     }
 
     @Test fun freshInstallRestoreCommitsAllState() = runBlocking {
@@ -89,7 +89,7 @@ class AndroidConfigurationBackupTest {
         assertEquals(settings(), fake.platformState)
         assertEquals("new-key", fake.runtimeCredentials?.apiKey)
         assertEquals("new-key", fake.readyCredentials?.apiKey)
-        assertEquals(listOf("lock.enter", "capturePlatform", "snapshot", "openFresh", "replaceCore", "writeCredentials", "applyPlatform", "replaceRuntime", "publishReady", "lock.exit"), fake.calls)
+        assertEquals(listOf("lock.enter", "capturePlatform", "snapshot", "lifecycle.prepare", "openFresh", "replaceCore", "writeCredentials", "applyPlatform", "replaceRuntime", "publishReady", "lifecycle.resume", "lock.exit"), fake.calls)
     }
 
     @Test fun existingAccountFailureAfterCoreReplacementRestoresEverything() = runBlocking {
@@ -272,6 +272,9 @@ class AndroidConfigurationBackupTest {
             if (failure == FailurePoint.CapturePlatform) throw InjectedFailure()
             return platformState.copy(customHeaders = headers)
         }
+
+        override suspend fun prepareForLifecycleChange() { mutation("lifecycle.prepare") }
+        override suspend fun resumeAfterLifecycleChange() { mutation("lifecycle.resume") }
 
         override suspend fun applyPlatform(settings: AndroidBackupSettingsV1) {
             mutation("applyPlatform")
