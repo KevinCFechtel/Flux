@@ -96,6 +96,8 @@ internal class AndroidMediaTransferCoordinator(
     private val mutableProgress =
         MutableStateFlow<Map<Long, AndroidMediaTransferProgress>>(emptyMap())
     val progress = mutableProgress.asStateFlow()
+    private val mutableRevision = MutableStateFlow(0L)
+    val revision = mutableRevision.asStateFlow()
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
         reconcile(sessionGeneration)
@@ -183,6 +185,10 @@ internal class AndroidMediaTransferCoordinator(
         mutableProgress.value = mutableProgress.value - enclosureId
     }
 
+    internal fun signalWorkChanged() {
+        mutableRevision.value = mutableRevision.value + 1L
+    }
+
     private suspend fun cancelStaleWork(
         requestedTransferIds: Set<Long>,
         requestedDeletionIds: Set<Long>,
@@ -194,7 +200,10 @@ internal class AndroidMediaTransferCoordinator(
             .filter { !it.state.isFinished }
             .mapNotNull(AndroidMediaTransferWorkerInput::enclosureId)
             .filter { it !in requestedTransferIds }
-            .forEach { workManager.cancelUniqueWork(transferWorkName(it)) }
+            .forEach {
+                workManager.cancelUniqueWork(transferWorkName(it))
+                clearProgress(it)
+            }
 
         val deletions = runCatching {
             workManager.getWorkInfosByTag(DELETION_TAG).get()
@@ -390,7 +399,7 @@ internal class AndroidMediaDownloadWorker(
     }
 
     private suspend fun reportFinished(generation: Long, reference: String, size: Long) {
-        runCatching {
+        val result = runCatching {
             application.coreRuntime.localForGeneration(generation) { core ->
                 core.downloadFinished(
                     enclosureId = enclosureId,
@@ -399,15 +408,17 @@ internal class AndroidMediaDownloadWorker(
                 )
             }
         }
+        if (result.isSuccess) application.mediaTransferCoordinator.signalWorkChanged()
     }
 
     private suspend fun reportFailure(generation: Long, kind: DownloadFailureKind) {
         if (currentWork(generation) == null) return
-        runCatching {
+        val result = runCatching {
             application.coreRuntime.localForGeneration(generation) { core ->
                 core.downloadFailed(enclosureId = enclosureId, failureKind = kind)
             }
         }
+        if (result.isSuccess) application.mediaTransferCoordinator.signalWorkChanged()
     }
 
     private fun foregroundInfo(work: MediaTransferWork): ForegroundInfo {
@@ -472,6 +483,7 @@ internal class AndroidMediaDeletionWorker(
             application.coreRuntime.localForGeneration(generation) { core ->
                 core.downloadDeleted(enclosureId = enclosureId)
             }
+            application.mediaTransferCoordinator.signalWorkChanged()
             Result.success()
         }.getOrElse { Result.retry() }
     }
