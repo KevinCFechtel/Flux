@@ -33,7 +33,7 @@ internal class AndroidDownloadedData(
 
     suspend fun requestDeleteAll(): Result<ULong> = runCatching {
         val requested = coreRuntime.local { core -> core.requestAllDownloadDeletions() }
-        transferCoordinator?.reconcile()
+        transferCoordinator?.reconcileAndSignal()
         requested
     }
 }
