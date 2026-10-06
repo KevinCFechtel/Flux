@@ -517,7 +517,7 @@ internal class AndroidArticleTimelineStore private constructor(
             Unit
         },
         transferReconciler = { generation ->
-            transferCoordinator?.reconcile(generation)
+            transferCoordinator?.reconcileAndSignal(generation)
         },
         transferRevision = transferCoordinator?.revision,
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
