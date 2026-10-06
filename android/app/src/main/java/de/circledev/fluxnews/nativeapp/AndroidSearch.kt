@@ -67,6 +67,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.FeedIconVariant
+import uniffi.flux_uniffi.DownloadOrigin
+import uniffi.flux_uniffi.DownloadState
+import uniffi.flux_uniffi.Enclosure
+import uniffi.flux_uniffi.MediaDownload
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.SaveToServiceResult
 import uniffi.flux_uniffi.SearchArticlesRequest
@@ -115,9 +119,14 @@ internal class AndroidSearchStore private constructor(
     private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
     private val listeningListWriter: suspend (Long, Long, Boolean) -> Unit,
+    private val mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit,
+    private val transferReconciler: suspend (Long) -> Unit,
     private val activeSessionGeneration: () -> Long?,
 ) {
-    internal constructor(coreRuntime: AndroidCoreRuntime) : this(
+    internal constructor(
+        coreRuntime: AndroidCoreRuntime,
+        transferCoordinator: AndroidMediaTransferCoordinator? = null,
+    ) : this(
         searchLoader = { generation, request ->
             coreRuntime.remoteForGeneration(generation) { core -> core.searchArticles(request = request) }
         },
@@ -136,9 +145,14 @@ internal class AndroidSearchStore private constructor(
         mediaActionStatesLoader = { generation, articleIds ->
             if (articleIds.isEmpty()) emptyMap() else coreRuntime.localForGeneration(generation) { core ->
                 core.articleAudioActionStates(articleIds).associate { projection ->
+                    val audioEnclosures = projection.enclosures.filter { enclosure ->
+                        enclosure.mediaKind == MediaKind.AUDIO
+                    }
                     projection.articleId to AndroidArticleMediaActionState(
-                        hasAudio = projection.enclosures.any { it.mediaKind == MediaKind.AUDIO },
+                        hasAudio = audioEnclosures.isNotEmpty(),
                         isInListeningList = projection.isInListeningList,
+                        audioEnclosures = audioEnclosures,
+                        downloads = projection.downloads.associateBy { it.enclosureId },
                     )
                 }
             }
@@ -166,6 +180,25 @@ internal class AndroidSearchStore private constructor(
             }
             Unit
         },
+        mediaDownloadWriter = { generation, enclosureId, state ->
+            coreRuntime.localForGeneration(generation) { core ->
+                when (state) {
+                    null, DownloadState.NOT_DOWNLOADED ->
+                        core.requestDownload(enclosureId = enclosureId, origin = DownloadOrigin.MANUAL)
+                    DownloadState.REQUESTED ->
+                        core.cancelDownload(enclosureId = enclosureId)
+                    DownloadState.DOWNLOADED ->
+                        core.requestDownloadDeletion(enclosureId = enclosureId)
+                    DownloadState.FAILED ->
+                        core.retryDownload(enclosureId = enclosureId)
+                    DownloadState.DELETE_REQUESTED -> Unit
+                }
+            }
+            Unit
+        },
+        transferReconciler = { generation ->
+            transferCoordinator?.reconcile(generation)
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -183,9 +216,23 @@ internal class AndroidSearchStore private constructor(
         minifluxEntryUrlLoader: suspend (Long, Long) -> String = { _, id -> "https://example.test/entry/$id" },
         saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome = { _, _ -> AndroidSaveToServiceOutcome.Saved },
         listeningListWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+        mediaDownloadWriter: suspend (Long, Long, DownloadState?) -> Unit = { _, _, _ -> },
+        transferReconciler: suspend (Long) -> Unit = { _ -> },
         activeSessionGeneration: () -> Long?,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(searchLoader, readWriter, starredWriter, mediaActionStatesLoader, feedIconLoader, minifluxEntryUrlLoader, saveToServiceWriter, listeningListWriter, activeSessionGeneration)
+    ) : this(
+        searchLoader,
+        readWriter,
+        starredWriter,
+        mediaActionStatesLoader,
+        feedIconLoader,
+        minifluxEntryUrlLoader,
+        saveToServiceWriter,
+        listeningListWriter,
+        mediaDownloadWriter,
+        transferReconciler,
+        activeSessionGeneration,
+    )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutationMutex = Mutex()
@@ -436,6 +483,39 @@ internal class AndroidSearchStore private constructor(
                 )
             } else {
                 mutableActionMessages.emit("Listening List could not be updated.")
+            }
+        }
+    }
+
+    fun requestToggleDownload(articleId: Long, enclosureId: Long) {
+        val generation = activeSessionGeneration() ?: return
+        val current = mutableState.value.mediaActionStates[articleId] ?: return
+        val downloadState = current.downloads[enclosureId]?.state
+        scope.launch {
+            val result = runCatching {
+                mediaDownloadWriter(generation, enclosureId, downloadState)
+            }
+            if (activeSessionGeneration() != generation) return@launch
+            if (result.isSuccess) {
+                runCatching { transferReconciler(generation) }
+                val refreshed = runCatching {
+                    mediaActionStatesLoader(generation, listOf(articleId))[articleId]
+                }.getOrNull()
+                if (refreshed != null) {
+                    mutableState.update { state ->
+                        state.copy(
+                            mediaActionStates = state.mediaActionStates + (articleId to refreshed),
+                            audioArticleIds = if (refreshed.hasAudio) {
+                                state.audioArticleIds + articleId
+                            } else {
+                                state.audioArticleIds - articleId
+                            },
+                        )
+                    }
+                }
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+            } else {
+                mutableActionMessages.emit("Download action could not be completed.")
             }
         }
     }
