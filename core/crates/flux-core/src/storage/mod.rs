@@ -1690,6 +1690,37 @@ impl Store {
             .map_err(sql_error)
     }
 
+    pub fn persist_probed_media_artwork(
+        &self,
+        enclosure_id: i64,
+        artwork: Vec<u8>,
+    ) -> Result<bool, CoreError> {
+        let existing = self.media_metadata(enclosure_id)?
+            .and_then(|metadata| metadata.embedded_artwork_reference);
+        if existing.is_some() {
+            return Ok(false);
+        }
+
+        let artwork_reference = self.persist_artwork(&Some(artwork))?;
+        let Some(artwork_reference) = artwork_reference else {
+            return Ok(false);
+        };
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        ensure_enclosure(&tx, enclosure_id)?;
+        tx.execute(
+            "INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,NULL,'native',?2) ON CONFLICT(enclosure_id) DO UPDATE SET embedded_artwork_reference=COALESCE(media_metadata.embedded_artwork_reference,excluded.embedded_artwork_reference)",
+            params![enclosure_id, artwork_reference],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(true)
+    }
+
     pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
         let Some(path) = resolve_media_reference(&self.media_root, reference) else {
             return Ok(None);
