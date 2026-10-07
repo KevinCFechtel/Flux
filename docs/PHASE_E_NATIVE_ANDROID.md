@@ -1056,6 +1056,7 @@ Required product scope:
 - playback rate;
 - sleep timer;
 - chapters/show notes/artwork;
+- adding audio to the Listening List asynchronously requests the shared Core's bounded remote artwork probe when no full download is already requested/available; MP3/ID3 uses an adaptive prefix probe (256 KiB initially, at most 8 MiB for the declared tag), while MP4/M4A uses best-effort 1 MiB prefix + 1 MiB tail sampling; successful probe artwork is persisted by Core and propagated through the existing media revision path without delaying the add action;
 - playback checkpoints and completion/restart;
 - audio focus/noisy-route handling;
 - background playback;
