@@ -249,7 +249,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 mediaId != AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID
             ) {
                 return Futures.immediateFuture(
-                    SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE),
+                    SessionResult(SessionError.ERROR_BAD_VALUE),
                 )
             }
 
