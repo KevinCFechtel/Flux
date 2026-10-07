@@ -77,6 +77,7 @@ internal fun AndroidListeningListDestination(
     val state by store.state.collectAsState()
     val playback by playbackCoordinator.state.collectAsState()
     val transferProgress by transferCoordinator.progress.collectAsState()
+    val mediaRevision by transferCoordinator.revision.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     val feedIconVariant = if (isSystemInDarkTheme()) {
         FeedIconVariant.DARK
@@ -99,10 +100,8 @@ internal fun AndroidListeningListDestination(
             )
         }
     }
-    LaunchedEffect(transferCoordinator, sessionGeneration) {
-        transferCoordinator.revision.collect {
-            if (sessionGeneration != null) store.reload()
-        }
+    LaunchedEffect(mediaRevision, sessionGeneration) {
+        if (sessionGeneration != null) store.reload()
     }
 
     Scaffold(
@@ -292,6 +291,7 @@ internal fun AndroidListeningListDestination(
             AndroidMediaPlayerSheet(
                 coordinator = playbackCoordinator,
                 previewItem = item,
+                mediaRevision = mediaRevision,
                 onDismiss = { playerArticleId = null },
             )
         }
