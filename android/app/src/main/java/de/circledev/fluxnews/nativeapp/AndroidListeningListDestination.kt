@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -49,6 +51,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,6 +62,7 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DownloadState
 import uniffi.flux_uniffi.FeedIconVariant
@@ -252,6 +258,11 @@ internal fun AndroidListeningListDestination(
                         onRequestFeedIcon = { feedId, variant ->
                             store.ensureFeedIcons(listOf(feedId), variant)
                         },
+                        artwork = selectedListeningListArtwork(
+                            item = item,
+                            playback = playback,
+                            artworkByEnclosureId = state.artworkByEnclosureId,
+                        ),
                         onPlay = { enclosureId ->
                             coroutineScope.launch { playbackCoordinator.play(enclosureId) }
                         },
@@ -305,6 +316,7 @@ private fun AndroidListeningListRow(
     feedIconVariant: FeedIconVariant,
     feedIconPngData: ByteArray?,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
+    artwork: AndroidListeningListArtwork?,
     onPlay: (Long) -> Unit,
     onPause: () -> Unit,
     onOpenPlayer: () -> Unit,
@@ -337,7 +349,13 @@ private fun AndroidListeningListRow(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            AndroidListeningListArtwork(
+                artwork = artwork,
+                modifier = Modifier.size(56.dp),
+            )
+
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -390,25 +408,6 @@ private fun AndroidListeningListRow(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-            }
-
-            Box {
-                IconButton(onClick = { actionsOpen = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Listening List actions")
-                }
-                AndroidListeningListItemMenu(
-                    expanded = actionsOpen,
-                    item = item,
-                    playback = playback,
-                    onDismiss = { actionsOpen = false },
-                    onPlay = onPlay,
-                    onPause = onPause,
-                    onRequestDownload = onRequestDownload,
-                    onCancelDownload = onCancelDownload,
-                    onRetryDownload = onRetryDownload,
-                    onDeleteDownload = onDeleteDownload,
-                    onRemove = onRemove,
-                )
             }
         }
 
@@ -517,7 +516,72 @@ private fun AndroidListeningListRow(
                     contentDescription = if (isPlaying) "Pause" else "Play",
                 )
             }
+
+            Box {
+                IconButton(onClick = { actionsOpen = true }) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Listening List actions")
+                }
+                AndroidListeningListItemMenu(
+                    expanded = actionsOpen,
+                    item = item,
+                    playback = playback,
+                    onDismiss = { actionsOpen = false },
+                    onPlay = onPlay,
+                    onPause = onPause,
+                    onRequestDownload = onRequestDownload,
+                    onCancelDownload = onCancelDownload,
+                    onRetryDownload = onRetryDownload,
+                    onDeleteDownload = onDeleteDownload,
+                    onRemove = onRemove,
+                )
+            }
         }
+    }
+}
+
+private fun selectedListeningListArtwork(
+    item: ListeningListItem,
+    playback: AndroidMediaPlaybackState,
+    artworkByEnclosureId: Map<Long, AndroidListeningListArtwork>,
+): AndroidListeningListArtwork? {
+    val enclosureId = playback.enclosureId
+        ?.takeIf { loadedId ->
+            item.audioEnclosures.any { it.enclosure.id == loadedId }
+        }
+        ?: item.activeEnclosureId
+        ?: item.audioEnclosures.firstOrNull()?.enclosure?.id
+    return enclosureId?.let(artworkByEnclosureId::get)
+}
+
+@Composable
+private fun AndroidListeningListArtwork(
+    artwork: AndroidListeningListArtwork?,
+    modifier: Modifier = Modifier,
+) {
+    val clipped = modifier.clip(RoundedCornerShape(10.dp))
+    when (artwork) {
+        is AndroidListeningListArtwork.LocalBytes -> AsyncImage(
+            model = artwork.bytes,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = clipped,
+            error = painterResource(R.drawable.fallback_artwork),
+            fallback = painterResource(R.drawable.fallback_artwork),
+        )
+        is AndroidListeningListArtwork.RemoteUrl -> AsyncImage(
+            model = artwork.url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = clipped,
+            error = painterResource(R.drawable.fallback_artwork),
+            fallback = painterResource(R.drawable.fallback_artwork),
+        )
+        null -> Image(
+            painter = painterResource(R.drawable.fallback_artwork),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = clipped,
+        )
     }
 }
 
