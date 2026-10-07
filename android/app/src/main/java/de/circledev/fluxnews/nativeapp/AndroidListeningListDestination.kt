@@ -558,25 +558,33 @@ private fun AndroidListeningListArtwork(
     artwork: AndroidListeningListArtwork?,
     modifier: Modifier = Modifier,
 ) {
+    val remoteBytes by produceState<ByteArray?>(
+        initialValue = null,
+        key1 = artwork,
+    ) {
+        value = when (artwork) {
+            is AndroidListeningListArtwork.RemoteUrl ->
+                AndroidMediaArtworkLoader.loadRemote(artwork.url)
+            else -> null
+        }
+    }
+    val model = when (artwork) {
+        is AndroidListeningListArtwork.LocalBytes -> artwork.bytes
+        is AndroidListeningListArtwork.RemoteUrl -> remoteBytes
+        null -> null
+    }
     val clipped = modifier.clip(RoundedCornerShape(10.dp))
-    when (artwork) {
-        is AndroidListeningListArtwork.LocalBytes -> AsyncImage(
-            model = artwork.bytes,
+    if (model != null) {
+        AsyncImage(
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = clipped,
             error = painterResource(R.drawable.fallback_artwork),
             fallback = painterResource(R.drawable.fallback_artwork),
         )
-        is AndroidListeningListArtwork.RemoteUrl -> AsyncImage(
-            model = artwork.url,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = clipped,
-            error = painterResource(R.drawable.fallback_artwork),
-            fallback = painterResource(R.drawable.fallback_artwork),
-        )
-        null -> Image(
+    } else {
+        Image(
             painter = painterResource(R.drawable.fallback_artwork),
             contentDescription = null,
             contentScale = ContentScale.Crop,
