@@ -355,67 +355,67 @@ internal class AndroidMediaDownloadWorker(
             }
             val call = httpClient.newCall(Request.Builder().url(work.url).build())
             activeCall.set(call)
-            val response = try {
-                withContext(Dispatchers.IO) { call.execute() }
-            } finally {
-                activeCall.compareAndSet(call, null)
-            }
-            response.use { result ->
-                if (!result.isSuccessful) {
-                    reportFailure(generation, DownloadFailureKind.NETWORK)
-                    application.mediaTransferCoordinator.clearProgress(enclosureId)
-                    return Result.success()
-                }
-                val body = result.body
-                val totalBytes = body.contentLength().takeIf { it > 0L }
-                application.mediaTransferCoordinator.updateProgress(
-                    enclosureId,
-                    0L,
-                    totalBytes,
-                )
-                withContext(Dispatchers.IO) {
-                    body.byteStream().use { input ->
-                        FileOutputStream(temporary).use { output ->
-                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                            var downloaded = 0L
-                            var lastReported = 0L
-                            while (true) {
-                                currentCoroutineContext().ensureActive()
-                                val read = input.read(buffer)
-                                if (read < 0) break
-                                output.write(buffer, 0, read)
-                                downloaded += read
-                                if (
-                                    downloaded - lastReported >= 256L * 1024L ||
-                                    totalBytes != null && downloaded >= totalBytes
-                                ) {
-                                    application.mediaTransferCoordinator.updateProgress(
-                                        enclosureId,
-                                        downloaded,
-                                        totalBytes,
-                                    )
-                                    lastReported = downloaded
+            try {
+                val response = withContext(Dispatchers.IO) { call.execute() }
+                response.use { result ->
+                    if (!result.isSuccessful) {
+                        reportFailure(generation, DownloadFailureKind.NETWORK)
+                        application.mediaTransferCoordinator.clearProgress(enclosureId)
+                        return Result.success()
+                    }
+                    val body = result.body
+                    val totalBytes = body.contentLength().takeIf { it > 0L }
+                    application.mediaTransferCoordinator.updateProgress(
+                        enclosureId,
+                        0L,
+                        totalBytes,
+                    )
+                    withContext(Dispatchers.IO) {
+                        body.byteStream().use { input ->
+                            FileOutputStream(temporary).use { output ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                var downloaded = 0L
+                                var lastReported = 0L
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    output.write(buffer, 0, read)
+                                    downloaded += read
+                                    if (
+                                        downloaded - lastReported >= 256L * 1024L ||
+                                        totalBytes != null && downloaded >= totalBytes
+                                    ) {
+                                        application.mediaTransferCoordinator.updateProgress(
+                                            enclosureId,
+                                            downloaded,
+                                            totalBytes,
+                                        )
+                                        lastReported = downloaded
+                                    }
                                 }
+                                output.fd.sync()
                             }
-                            output.fd.sync()
+                        }
+                        require(temporary.length() > 0L)
+                        try {
+                            Files.move(
+                                temporary.toPath(),
+                                destination.toPath(),
+                                StandardCopyOption.ATOMIC_MOVE,
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
+                        } catch (_: Exception) {
+                            Files.move(
+                                temporary.toPath(),
+                                destination.toPath(),
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
                         }
                     }
-                    require(temporary.length() > 0L)
-                    try {
-                        Files.move(
-                            temporary.toPath(),
-                            destination.toPath(),
-                            StandardCopyOption.ATOMIC_MOVE,
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
-                    } catch (_: Exception) {
-                        Files.move(
-                            temporary.toPath(),
-                            destination.toPath(),
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
-                    }
                 }
+            } finally {
+                activeCall.compareAndSet(call, null)
             }
             if (currentWork(generation) == null) {
                 destination.delete()
