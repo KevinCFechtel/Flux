@@ -3,6 +3,7 @@ package de.circledev.fluxnews.nativeapp
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.util.LruCache
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -179,6 +180,10 @@ internal class AndroidMediaPlaybackCoordinator(
     private val sourceResolver = AndroidMediaSourceResolver(mediaRoot)
     private val commandMutex = Mutex()
     private val directExecutor = Executor { command -> command.run() }
+    private val artworkCache = object : LruCache<String, ByteArray>(16 * 1024) {
+        override fun sizeOf(key: String, value: ByteArray): Int =
+            (value.size / 1024).coerceAtLeast(1)
+    }
 
     private val mutableState = kotlinx.coroutines.flow.MutableStateFlow(AndroidMediaPlaybackState())
     val state: kotlinx.coroutines.flow.StateFlow<AndroidMediaPlaybackState> = mutableState
@@ -547,14 +552,17 @@ internal class AndroidMediaPlaybackCoordinator(
     }
 
     suspend fun artworkBytes(reference: String): ByteArray? {
+        artworkCache.get(reference)?.let { return it }
         val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
-        return runCatching {
+        val bytes = runCatching {
             coreRuntime.localForGeneration(generation) { core ->
                 core.mediaArtwork(reference = reference)
             }
         }.getOrNull()?.takeIf {
             coreRuntime.activeSessionGeneration() == generation
-        }
+        } ?: return null
+        artworkCache.put(reference, bytes)
+        return bytes
     }
 
     suspend fun showNotes(articleId: Long): Result<ReaderDocument> {
@@ -625,6 +633,7 @@ internal class AndroidMediaPlaybackCoordinator(
             }
         }
         activeGeneration = null
+        artworkCache.evictAll()
         preparedStatus = PlaybackStatus.NOT_STARTED
         completionSent = false
         lastObservedDurationMs = null
