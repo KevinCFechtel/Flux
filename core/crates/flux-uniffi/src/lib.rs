@@ -1315,6 +1315,11 @@ impl Flux {
             .map(|value| value.map(Into::into))
             .map_err(map_error)
     }
+    pub fn probe_media_artwork(&self, enclosure_id: i64) -> Result<bool, FluxError> {
+        self.core
+            .probe_media_artwork(enclosure_id)
+            .map_err(map_error)
+    }
     pub fn media_artwork_source(
         &self,
         enclosure_id: i64,
