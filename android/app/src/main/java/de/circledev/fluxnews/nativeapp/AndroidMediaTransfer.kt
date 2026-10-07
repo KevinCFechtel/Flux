@@ -22,18 +22,15 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import uniffi.flux_uniffi.DownloadFailureKind
@@ -297,14 +294,7 @@ internal class AndroidMediaDownloadWorker(
         .retryOnConnectionFailure(true)
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .callTimeout(60, TimeUnit.SECONDS)
         .build()
-    private val activeCall = AtomicReference<Call?>(null)
-
-    override fun onStopped() {
-        activeCall.getAndSet(null)?.cancel()
-        super.onStopped()
-    }
 
     override suspend fun doWork(): Result {
         if (enclosureId <= 0L) return Result.failure()
@@ -354,10 +344,8 @@ internal class AndroidMediaDownloadWorker(
                 return Result.success()
             }
             val call = httpClient.newCall(Request.Builder().url(work.url).build())
-            activeCall.set(call)
-            try {
-                val response = withContext(Dispatchers.IO) { call.execute() }
-                response.use { result ->
+            val response = runInterruptible(Dispatchers.IO) { call.execute() }
+            response.use { result ->
                     if (!result.isSuccessful) {
                         reportFailure(generation, DownloadFailureKind.NETWORK)
                         application.mediaTransferCoordinator.clearProgress(enclosureId)
@@ -370,14 +358,13 @@ internal class AndroidMediaDownloadWorker(
                         0L,
                         totalBytes,
                     )
-                    withContext(Dispatchers.IO) {
+                    runInterruptible(Dispatchers.IO) {
                         body.byteStream().use { input ->
                             FileOutputStream(temporary).use { output ->
                                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                                 var downloaded = 0L
                                 var lastReported = 0L
                                 while (true) {
-                                    currentCoroutineContext().ensureActive()
                                     val read = input.read(buffer)
                                     if (read < 0) break
                                     output.write(buffer, 0, read)
@@ -414,9 +401,6 @@ internal class AndroidMediaDownloadWorker(
                         }
                     }
                 }
-            } finally {
-                activeCall.compareAndSet(call, null)
-            }
             if (currentWork(generation) == null) {
                 destination.delete()
                 application.mediaTransferCoordinator.clearProgress(enclosureId)
