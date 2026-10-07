@@ -393,26 +393,15 @@ internal class AndroidMediaPlaybackCoordinator(
             .setTitle(preparation.articleTitle)
             .setArtist(preparation.feedTitle)
             .setAlbumTitle(preparation.feedTitle)
+            .setArtworkUri(AndroidAutoArtworkProvider.uri(applicationContext, enclosureId))
             .apply {
                 preparedDurationMs
                     ?.takeIf { it >= 0L }
                     ?.let(::setDurationMs)
-                when (val artwork = preparation.artworkSource) {
-                    is MediaArtworkSource.LocalReference -> {
-                        localArtworkBytes?.let { bytes ->
-                            setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                        }
+                if (preparation.artworkSource is MediaArtworkSource.LocalReference) {
+                    localArtworkBytes?.let { bytes ->
+                        setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                     }
-                    is MediaArtworkSource.RemoteUrl -> {
-                        runCatching { Uri.parse(artwork.url) }
-                            .getOrNull()
-                            ?.takeIf { uri ->
-                                uri.scheme.equals("http", ignoreCase = true) ||
-                                    uri.scheme.equals("https", ignoreCase = true)
-                            }
-                            ?.let(::setArtworkUri)
-                    }
-                    null -> Unit
                 }
             }
             .build()
