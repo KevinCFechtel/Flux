@@ -2,6 +2,7 @@ package de.circledev.fluxnews.nativeapp
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import java.util.concurrent.atomic.AtomicLong
 import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
@@ -109,10 +110,12 @@ internal class AndroidAutoMediaLibraryStore(
 ) {
     @Volatile
     private var currentSnapshot = AndroidAutoMediaLibrarySnapshot()
+    private val nextRefreshGeneration = AtomicLong(0L)
 
     fun snapshot(): AndroidAutoMediaLibrarySnapshot = currentSnapshot
 
     fun clear() {
+        nextRefreshGeneration.incrementAndGet()
         currentSnapshot = AndroidAutoMediaLibrarySnapshot()
     }
 
@@ -120,6 +123,7 @@ internal class AndroidAutoMediaLibraryStore(
         generation: Long,
         feedId: Long? = null,
     ): AndroidAutoMediaLibrarySnapshot {
+        val refreshGeneration = nextRefreshGeneration.incrementAndGet()
         val projected = runCatching {
             coreRuntime.localForGeneration(generation) { core ->
                 val feeds = core.listeningListFeeds()
@@ -140,7 +144,10 @@ internal class AndroidAutoMediaLibraryStore(
                 )
             }
         }.getOrElse { failure ->
-            if (coreRuntime.activeSessionGeneration() == generation) {
+            if (
+                coreRuntime.activeSessionGeneration() == generation &&
+                nextRefreshGeneration.get() == refreshGeneration
+            ) {
                 diagnostics.record(
                     AndroidAppLogLevel.Warning,
                     "android-auto",
@@ -150,7 +157,10 @@ internal class AndroidAutoMediaLibraryStore(
             return snapshot()
         }
 
-        if (coreRuntime.activeSessionGeneration() != generation) {
+        if (
+            coreRuntime.activeSessionGeneration() != generation ||
+            nextRefreshGeneration.get() != refreshGeneration
+        ) {
             return snapshot()
         }
 
