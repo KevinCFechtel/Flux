@@ -452,9 +452,14 @@ struct IOSListeningListView: View {
     }
 
     private struct IOSListeningListArtworkView: View {
-        private static let cache = NSCache<NSString, UIImage>()
-        private static let fallbackImage: UIImage? = AppleFallbackArtwork.data()
-            .flatMap(UIImage.init(data:))
+        private struct PreparedArtwork: @unchecked Sendable {
+            let image: UIImage
+            let pixelCost: Int
+        }
+
+        nonisolated(unsafe) private static let cache = NSCache<NSString, UIImage>()
+        nonisolated(unsafe) private static let fallbackImage: UIImage? =
+            AppleFallbackArtwork.data().flatMap(UIImage.init(data:))
 
         let enclosureID: Int64?
         let refreshToken: String
@@ -505,20 +510,34 @@ struct IOSListeningListView: View {
                     enclosureID: enclosureID
                 ),
                       let data = await playbackCoordinator.artwork(source: source),
-                      !Task.isCancelled,
-                      let prepared = await Self.prepareThumbnail(data) else {
+                      !Task.isCancelled else {
+                    image = nil
+                    return
+                }
+                let displayScale = UIScreen.main.scale
+                guard let prepared = await Self.prepareThumbnail(
+                    data,
+                    displayScale: displayScale
+                ) else {
                     image = nil
                     return
                 }
 
-                Self.cache.setObject(prepared, forKey: cacheKey, cost: prepared.pixelCost)
-                image = prepared
+                Self.cache.setObject(
+                    prepared.image,
+                    forKey: cacheKey,
+                    cost: prepared.pixelCost
+                )
+                image = prepared.image
             }
         }
 
-        private static func prepareThumbnail(_ data: Data) async -> UIImage? {
+        private static func prepareThumbnail(
+            _ data: Data,
+            displayScale: CGFloat
+        ) async -> PreparedArtwork? {
             await Task.detached(priority: .utility) {
-                let maxPixelSize = Int((56 * max(UIScreen.main.scale, 1)).rounded(.up))
+                let maxPixelSize = Int((56 * max(displayScale, 1)).rounded(.up))
                 guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
                     return nil
                 }
@@ -535,15 +554,11 @@ struct IOSListeningListView: View {
                 ) else {
                     return nil
                 }
-                return UIImage(cgImage: thumbnail)
+                return PreparedArtwork(
+                    image: UIImage(cgImage: thumbnail),
+                    pixelCost: thumbnail.bytesPerRow * thumbnail.height
+                )
             }.value
-        }
-    }
-
-    private extension UIImage {
-        var pixelCost: Int {
-            guard let cgImage else { return 0 }
-            return cgImage.bytesPerRow * cgImage.height
         }
     }
 
