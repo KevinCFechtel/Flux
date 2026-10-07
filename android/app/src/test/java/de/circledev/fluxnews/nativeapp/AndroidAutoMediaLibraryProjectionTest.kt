@@ -2,7 +2,6 @@ package de.circledev.fluxnews.nativeapp
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.session.MediaConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -162,11 +161,10 @@ class AndroidAutoMediaLibraryProjectionTest {
         assertEquals(null, AndroidAutoMediaLibraryProjection.filterFeedId(filterItems.first().mediaId))
     }
 
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     @Test
     fun partiallyPlayedItemPublishesCompletionPercentage() {
-        val projected = requireNotNull(
-            AndroidAutoMediaLibraryProjection.mediaItem(
+        val selected = requireNotNull(
+            AndroidAutoMediaLibraryProjection.selectedEnclosure(
                 item(
                     activeEnclosureId = 51L,
                     enclosureIds = listOf(51L),
@@ -181,23 +179,15 @@ class AndroidAutoMediaLibraryProjectionTest {
             ),
         )
 
-        val extras = requireNotNull(projected.mediaMetadata.extras)
-        assertEquals(
-            MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED,
-            extras.getInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS),
-        )
-        assertEquals(
-            0.25,
-            extras.getDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE),
-            0.0001,
-        )
+        val progress = AndroidAutoMediaLibraryProjection.playbackProgress(selected)
+        assertEquals(AndroidAutoPlaybackCompletion.PartiallyPlayed, progress.completion)
+        assertEquals(0.25, progress.percentage ?: error("Missing progress percentage"), 0.0001)
     }
 
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     @Test
     fun completedItemPublishesFullyPlayedStatus() {
-        val projected = requireNotNull(
-            AndroidAutoMediaLibraryProjection.mediaItem(
+        val selected = requireNotNull(
+            AndroidAutoMediaLibraryProjection.selectedEnclosure(
                 item(
                     activeEnclosureId = 52L,
                     enclosureIds = listOf(52L),
@@ -212,12 +202,9 @@ class AndroidAutoMediaLibraryProjectionTest {
             ),
         )
 
-        val extras = requireNotNull(projected.mediaMetadata.extras)
-        assertEquals(
-            MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_FULLY_PLAYED,
-            extras.getInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS),
-        )
-        assertFalse(extras.containsKey(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE))
+        val progress = AndroidAutoMediaLibraryProjection.playbackProgress(selected)
+        assertEquals(AndroidAutoPlaybackCompletion.FullyPlayed, progress.completion)
+        assertEquals(null, progress.percentage)
     }
 
     @Test
