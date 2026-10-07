@@ -10,6 +10,15 @@ import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ListeningListSort
 import uniffi.flux_uniffi.MediaArtworkSource
 
+internal fun androidListeningListReloadIsCurrent(
+    activeSessionGeneration: Long?,
+    latestReloadGeneration: Long,
+    expectedSessionGeneration: Long,
+    expectedReloadGeneration: Long,
+): Boolean =
+    activeSessionGeneration == expectedSessionGeneration &&
+        latestReloadGeneration == expectedReloadGeneration
+
 internal sealed interface AndroidListeningListArtwork {
     data class RemoteUrl(val url: String) : AndroidListeningListArtwork
     data class LocalReference(val reference: String) : AndroidListeningListArtwork
@@ -92,14 +101,22 @@ internal class AndroidListeningListStore(
         }
 
         if (
-            sessionGeneration != generation ||
-            nextReloadGeneration.get() != reloadGeneration
+            !androidListeningListReloadIsCurrent(
+                sessionGeneration,
+                nextReloadGeneration.get(),
+                generation,
+                reloadGeneration,
+            )
         ) return
         result.fold(
             onSuccess = { (feeds, selectedFeedId, items, artworkByEnclosureId) ->
                 if (
-                    sessionGeneration != generation ||
-                    nextReloadGeneration.get() != reloadGeneration
+                    !androidListeningListReloadIsCurrent(
+                        sessionGeneration,
+                        nextReloadGeneration.get(),
+                        generation,
+                        reloadGeneration,
+                    )
                 ) return@fold
                 mutableState.value = mutableState.value.copy(
                     items = items,
@@ -112,8 +129,12 @@ internal class AndroidListeningListStore(
             },
             onFailure = {
                 if (
-                    sessionGeneration != generation ||
-                    nextReloadGeneration.get() != reloadGeneration
+                    !androidListeningListReloadIsCurrent(
+                        sessionGeneration,
+                        nextReloadGeneration.get(),
+                        generation,
+                        reloadGeneration,
+                    )
                 ) return@fold
                 mutableState.value = mutableState.value.copy(
                     isLoading = false,
