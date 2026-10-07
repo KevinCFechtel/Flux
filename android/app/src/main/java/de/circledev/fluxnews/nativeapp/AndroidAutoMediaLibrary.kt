@@ -41,14 +41,20 @@ internal object AndroidAutoMediaLibraryProjection {
     private const val FILTER_FEED_PREFIX = "flux:listening-list:filter:feed:"
 
     @OptIn(UnstableApi::class)
-    fun rootItem(): MediaItem =
+    fun rootItem(
+        supportsFeedFilter: Boolean = false,
+    ): MediaItem =
         MediaItem.Builder()
             .setMediaId(ROOT_MEDIA_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle("Listening List")
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
-                    .setSupportedCommands(listOf(FILTER_COMMAND_ACTION))
+                    .apply {
+                        if (supportsFeedFilter) {
+                            setSupportedCommands(listOf(FILTER_COMMAND_ACTION))
+                        }
+                    }
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .build(),
@@ -149,6 +155,7 @@ internal object AndroidAutoMediaLibraryProjection {
     fun mediaItem(
         item: ListeningListItem,
         artworkUri: Uri? = null,
+        includeAndroidAutoProgressExtras: Boolean = false,
     ): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
         val metadata = MediaMetadata.Builder()
@@ -160,7 +167,7 @@ internal object AndroidAutoMediaLibraryProjection {
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .apply {
-                if (selected.playbackState != null) {
+                if (includeAndroidAutoProgressExtras) {
                     setExtras(playbackProgressExtras(selected))
                 }
             }
@@ -178,13 +185,22 @@ internal object AndroidAutoMediaLibraryProjection {
         selected: ListeningListEnclosure,
     ): AndroidAutoPlaybackProgress {
         val playback = selected.playbackState
-            ?: return AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.NotStarted)
+            ?: return AndroidAutoPlaybackProgress(
+                completion = AndroidAutoPlaybackCompletion.NotStarted,
+                percentage = 0.0,
+            )
 
         return when (playback.status) {
             PlaybackStatus.NOT_STARTED ->
-                AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.NotStarted)
+                AndroidAutoPlaybackProgress(
+                    completion = AndroidAutoPlaybackCompletion.NotStarted,
+                    percentage = 0.0,
+                )
             PlaybackStatus.COMPLETED ->
-                AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.FullyPlayed)
+                AndroidAutoPlaybackProgress(
+                    completion = AndroidAutoPlaybackCompletion.FullyPlayed,
+                    percentage = 1.0,
+                )
             PlaybackStatus.IN_PROGRESS -> {
                 val durationMs = playback.durationMs ?: selected.durationMs
                 val percentage = durationMs
@@ -301,6 +317,7 @@ internal class AndroidAutoMediaLibraryStore(
                             applicationContext,
                             selected.enclosure.id,
                         ),
+                        includeAndroidAutoProgressExtras = true,
                     )
                 }
                 AndroidAutoMediaLibrarySnapshot(
