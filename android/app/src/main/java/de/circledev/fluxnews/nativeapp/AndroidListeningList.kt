@@ -207,9 +207,4 @@ private data class Quadruple<A, B, C, D>(
     val second: B,
     val third: C,
     val fourth: D,
-) {
-    operator fun component1(): A = first
-    operator fun component2(): B = second
-    operator fun component3(): C = third
-    operator fun component4(): D = fourth
-}
+)
