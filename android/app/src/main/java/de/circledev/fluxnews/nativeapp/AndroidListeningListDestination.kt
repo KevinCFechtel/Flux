@@ -47,7 +47,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -256,6 +255,7 @@ internal fun AndroidListeningListDestination(
                         transferProgress = transferProgress,
                         feedIconVariant = feedIconVariant,
                         feedIconPngData = state.feedIconPngByFeedId[item.feedId],
+                        playbackCoordinator = playbackCoordinator,
                         onRequestFeedIcon = { feedId, variant ->
                             store.ensureFeedIcons(listOf(feedId), variant)
                         },
@@ -316,6 +316,7 @@ private fun AndroidListeningListRow(
     transferProgress: Map<Long, AndroidMediaTransferProgress>,
     feedIconVariant: FeedIconVariant,
     feedIconPngData: ByteArray?,
+    playbackCoordinator: AndroidMediaPlaybackCoordinator,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
     artwork: AndroidListeningListArtwork?,
     onPlay: (Long) -> Unit,
@@ -354,6 +355,7 @@ private fun AndroidListeningListRow(
         ) {
             AndroidListeningListArtwork(
                 artwork = artwork,
+                playbackCoordinator = playbackCoordinator,
                 modifier = Modifier.size(56.dp),
             )
 
@@ -557,21 +559,22 @@ private fun selectedListeningListArtwork(
 @Composable
 private fun AndroidListeningListArtwork(
     artwork: AndroidListeningListArtwork?,
+    playbackCoordinator: AndroidMediaPlaybackCoordinator,
     modifier: Modifier = Modifier,
 ) {
-    val remoteBytes by produceState<ByteArray?>(
+    val localBytes by androidx.compose.runtime.produceState<ByteArray?>(
         initialValue = null,
         key1 = artwork,
     ) {
         value = when (artwork) {
-            is AndroidListeningListArtwork.RemoteUrl ->
-                AndroidMediaArtworkLoader.loadRemote(artwork.url)
+            is AndroidListeningListArtwork.LocalReference ->
+                playbackCoordinator.artworkBytes(artwork.reference)
             else -> null
         }
     }
     val model = when (artwork) {
-        is AndroidListeningListArtwork.LocalBytes -> artwork.bytes
-        is AndroidListeningListArtwork.RemoteUrl -> remoteBytes
+        is AndroidListeningListArtwork.LocalReference -> localBytes
+        is AndroidListeningListArtwork.RemoteUrl -> artwork.url
         null -> null
     }
     val clipped = modifier.clip(RoundedCornerShape(10.dp))
