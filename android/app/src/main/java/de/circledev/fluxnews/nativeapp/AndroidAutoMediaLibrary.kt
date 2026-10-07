@@ -2,6 +2,7 @@ package de.circledev.fluxnews.nativeapp
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import java.util.concurrent.atomic.AtomicLong
 import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListFeed
@@ -15,6 +16,7 @@ import uniffi.flux_uniffi.ListeningListSort
  * Feeds are retained only as filter metadata for the later E7 filter interaction and never become
  * browse nodes.
  */
+@UnstableApi
 internal object AndroidAutoMediaLibraryProjection {
     const val ROOT_MEDIA_ID = "flux:listening-list"
     const val FILTER_ROOT_MEDIA_ID = "flux:listening-list:filter"
