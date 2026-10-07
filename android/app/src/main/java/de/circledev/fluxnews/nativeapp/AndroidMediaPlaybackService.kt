@@ -20,6 +20,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -104,13 +106,19 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> =
-            libraryResultFuture {
-                val cached = libraryStore.snapshot().itemsByMediaId[mediaId]
-                val item = cached ?: refreshLibraryForHeadlessBrowser()
-                    ?.itemsByMediaId
-                    ?.get(mediaId)
-                item?.let { LibraryResult.ofItem(it, null) }
-                    ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+            if (mediaId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID) {
+                Futures.immediateFuture(
+                    LibraryResult.ofItem(AndroidAutoMediaLibraryProjection.rootItem(), null),
+                )
+            } else {
+                libraryResultFuture {
+                    val cached = libraryStore.snapshot().itemsByMediaId[mediaId]
+                    val item = cached ?: refreshLibraryForHeadlessBrowser()
+                        ?.itemsByMediaId
+                        ?.get(mediaId)
+                    item?.let { LibraryResult.ofItem(it, null) }
+                        ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                }
             }
 
 
@@ -267,6 +275,35 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             .setMediaButtonPreferences(mediaButtonPreferences)
             .build()
         mediaRuntime.attachPlaybackHost(this)
+        observeLibraryChanges()
+    }
+
+    private fun observeLibraryChanges() {
+        serviceScope.launch {
+            app.mediaTransferCoordinator.revision
+                .drop(1)
+                .collectLatest {
+                    invalidateListeningList()
+                }
+        }
+        serviceScope.launch {
+            app.coreRuntime.sessionGeneration
+                .drop(1)
+                .collectLatest {
+                    libraryStore.clear()
+                    invalidateListeningList()
+                }
+        }
+    }
+
+    private fun invalidateListeningList() {
+        val session = mediaSession ?: return
+        val itemCount = libraryStore.snapshot().items.size
+        session.notifyChildrenChanged(
+            AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID,
+            itemCount,
+            null,
+        )
     }
 
     override fun onGetSession(
