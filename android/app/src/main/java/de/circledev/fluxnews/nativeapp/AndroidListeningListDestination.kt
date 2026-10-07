@@ -227,7 +227,7 @@ internal fun AndroidListeningListDestination(
                 Icon(
                     Icons.Rounded.Headphones,
                     contentDescription = null,
-                    modifier = Modifier.size(88.dp),
+                    modifier = Modifier.size(80.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.size(16.dp))
