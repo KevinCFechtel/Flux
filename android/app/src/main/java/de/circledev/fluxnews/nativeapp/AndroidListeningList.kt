@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import uniffi.flux_uniffi.ListeningListFeed
@@ -11,7 +12,7 @@ import uniffi.flux_uniffi.MediaArtworkSource
 
 internal sealed interface AndroidListeningListArtwork {
     data class RemoteUrl(val url: String) : AndroidListeningListArtwork
-    data class LocalBytes(val bytes: ByteArray) : AndroidListeningListArtwork
+    data class LocalReference(val reference: String) : AndroidListeningListArtwork
 }
 
 internal data class AndroidListeningListState(
@@ -40,9 +41,12 @@ internal class AndroidListeningListStore(
     @Volatile
     private var sessionGeneration: Long? = null
 
+    private val nextReloadGeneration = AtomicLong(0)
+
     fun activateSession(generation: Long?) {
         if (sessionGeneration == generation) return
         sessionGeneration = generation
+        nextReloadGeneration.incrementAndGet()
         feedIconCache.clear()
         unavailableFeedIcons.clear()
         mutableState.value = AndroidListeningListState()
@@ -50,6 +54,7 @@ internal class AndroidListeningListStore(
 
     suspend fun reload() {
         val generation = sessionGeneration ?: return
+        val reloadGeneration = nextReloadGeneration.incrementAndGet()
         val requested = mutableState.value
         mutableState.value = requested.copy(isLoading = true, errorMessage = null)
 
@@ -70,9 +75,10 @@ internal class AndroidListeningListStore(
                         .forEach { enclosureId ->
                             when (val source = core.mediaArtworkSource(enclosureId = enclosureId)) {
                                 is MediaArtworkSource.LocalReference -> {
-                                    core.mediaArtwork(reference = source.reference)?.let { bytes ->
-                                        put(enclosureId, AndroidListeningListArtwork.LocalBytes(bytes))
-                                    }
+                                    put(
+                                        enclosureId,
+                                        AndroidListeningListArtwork.LocalReference(source.reference),
+                                    )
                                 }
                                 is MediaArtworkSource.RemoteUrl -> {
                                     put(enclosureId, AndroidListeningListArtwork.RemoteUrl(source.url))
@@ -85,9 +91,16 @@ internal class AndroidListeningListStore(
             }
         }
 
-        if (sessionGeneration != generation) return
+        if (
+            sessionGeneration != generation ||
+            nextReloadGeneration.get() != reloadGeneration
+        ) return
         result.fold(
             onSuccess = { (feeds, selectedFeedId, items, artworkByEnclosureId) ->
+                if (
+                    sessionGeneration != generation ||
+                    nextReloadGeneration.get() != reloadGeneration
+                ) return@fold
                 mutableState.value = mutableState.value.copy(
                     items = items,
                     feeds = feeds,
@@ -98,6 +111,10 @@ internal class AndroidListeningListStore(
                 )
             },
             onFailure = {
+                if (
+                    sessionGeneration != generation ||
+                    nextReloadGeneration.get() != reloadGeneration
+                ) return@fold
                 mutableState.value = mutableState.value.copy(
                     isLoading = false,
                     errorMessage = "Listening List could not be loaded.",
