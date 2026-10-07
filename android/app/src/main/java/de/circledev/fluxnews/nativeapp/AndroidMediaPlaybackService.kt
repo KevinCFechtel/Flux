@@ -489,6 +489,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         return libraryStore.refresh(generation, selectedFeedId)
     }
 
+    @UnstableApi
     private fun mediaSessionItemsFuture(
         block: suspend () -> MediaSession.MediaItemsWithStartPosition,
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
