@@ -227,7 +227,7 @@ internal fun AndroidListeningListDestination(
                 Icon(
                     Icons.Rounded.Headphones,
                     contentDescription = null,
-                    modifier = Modifier.size(56.dp),
+                    modifier = Modifier.size(76.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.size(16.dp))
@@ -390,18 +390,13 @@ private fun AndroidListeningListRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    androidListeningListPublicationDate(item.publishedAt)?.let { date ->
-                        Text(
-                            "·",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            date,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                }
+                androidListeningListPublicationDate(item.publishedAt)?.let { date ->
+                    Text(
+                        date,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 if (isNowPlaying) {
                     Text(
