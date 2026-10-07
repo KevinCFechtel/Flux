@@ -93,6 +93,41 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             }
 
 
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> =
+            libraryResultFuture {
+                val results = searchLibrary(query)
+                session.notifySearchResultChanged(
+                    browser,
+                    query,
+                    results.size,
+                    params,
+                )
+                LibraryResult.ofVoid(params)
+            }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
+            libraryResultFuture {
+                val results = searchLibrary(query)
+                val from = (page.toLong() * pageSize.toLong())
+                    .coerceAtMost(results.size.toLong())
+                    .toInt()
+                val to = (from + pageSize).coerceAtMost(results.size)
+                LibraryResult.ofItemList(results.subList(from, to), params)
+            }
+
+
         /**
          * Resolve Android Auto / legacy MediaBrowser selections through Core. The in-app
          * coordinator already supplies a fully resolved URI, so its own MediaController commands
@@ -224,6 +259,20 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 player.clearMediaItems()
                 libraryStore.clear()
             }
+        }
+    }
+
+    private suspend fun searchLibrary(query: String): List<MediaItem> {
+        val normalized = query.trim()
+        if (normalized.isEmpty()) return emptyList()
+        val snapshot = refreshLibraryForHeadlessBrowser() ?: return emptyList()
+        return snapshot.items.filter { item ->
+            item.mediaMetadata.title
+                ?.toString()
+                ?.contains(normalized, ignoreCase = true) == true ||
+                item.mediaMetadata.artist
+                    ?.toString()
+                    ?.contains(normalized, ignoreCase = true) == true
         }
     }
 
