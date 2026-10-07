@@ -185,6 +185,8 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
+            .setSeekBackIncrementMs(30_000L)
+            .setSeekForwardIncrementMs(30_000L)
             .build()
 
         mediaSession = MediaLibrarySession.Builder(this, player, libraryCallback).build()
