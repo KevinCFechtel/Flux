@@ -45,6 +45,26 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         get() = app.autoMediaLibraryStore
 
     private val libraryCallback = object : MediaLibrarySession.Callback {
+        @UnstableApi
+        override fun onConnectAsync(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.ConnectionResult> {
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                .buildUpon()
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_NEXT)
+                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .build()
+
+            return Futures.immediateFuture(
+                MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+                    .setAvailablePlayerCommands(playerCommands)
+                    .build(),
+            )
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -162,17 +182,32 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 )
             }
 
-            val enclosureId = requested.mediaId.toLongOrNull()?.takeIf { it > 0L }
-                ?: return Futures.immediateFailedFuture(
-                    IllegalArgumentException("Unknown FluxNews media item."),
-                )
-
             return mediaSessionItemsFuture {
                 val snapshot = refreshLibraryForHeadlessBrowser()
                     ?: throw IllegalStateException("FluxNews media library is unavailable.")
-                if (snapshot.itemsByMediaId[requested.mediaId] == null) {
-                    throw IllegalArgumentException("Media item is not in the Listening List.")
-                }
+
+                val requestedMediaItem = requested.mediaId
+                    .toLongOrNull()
+                    ?.takeIf { it > 0L }
+                    ?.let { enclosureId ->
+                        snapshot.itemsByMediaId[enclosureId.toString()]
+                    }
+                    ?: requested.requestMetadata.searchQuery
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty)
+                        ?.let { query ->
+                            snapshot.items.firstOrNull { item ->
+                                AndroidAutoMediaLibraryProjection.matchesSearch(item, query)
+                            }
+                        }
+                    ?: throw IllegalArgumentException(
+                        "Requested media is not in the Listening List.",
+                    )
+
+                val enclosureId = requestedMediaItem.mediaId
+                    .toLongOrNull()
+                    ?.takeIf { it > 0L }
+                    ?: throw IllegalArgumentException("Invalid Listening List media identity.")
 
                 val resolved = app.mediaPlaybackCoordinator.prepareForMediaSession(enclosureId)
                 val requestedStart = startPositionMs
