@@ -435,6 +435,31 @@ internal class AndroidMediaPlaybackCoordinator(
         }
     }
 
+    suspend fun refreshCorePresentation(
+        sessionGeneration: Long? = coreRuntime.activeSessionGeneration(),
+    ) {
+        val generation = sessionGeneration ?: return
+        val enclosureId = mutableState.value.enclosureId ?: return
+        if (coreRuntime.activeSessionGeneration() != generation) return
+
+        val refreshed = runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.mediaArtworkSource(enclosureId = enclosureId) to
+                    core.mediaChapters(enclosureId = enclosureId)
+            }
+        }.getOrNull() ?: return
+
+        if (
+            coreRuntime.activeSessionGeneration() == generation &&
+            mutableState.value.enclosureId == enclosureId
+        ) {
+            mutableState.value = mutableState.value.copy(
+                artworkSource = refreshed.first,
+                chapters = refreshed.second,
+            )
+        }
+    }
+
     suspend fun artworkSource(enclosureId: Long): MediaArtworkSource? {
         val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
         return runCatching {
