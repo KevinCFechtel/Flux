@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
@@ -209,6 +210,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         }
     }
 
+    @UnstableApi
     override fun onCreate() {
         super.onCreate()
 
@@ -224,7 +226,21 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             .setSeekForwardIncrementMs(30_000L)
             .build()
 
-        mediaSession = MediaLibrarySession.Builder(this, player, libraryCallback).build()
+        val mediaButtonPreferences = listOf(
+            CommandButton.Builder(CommandButton.ICON_SKIP_BACK_30)
+                .setDisplayName("Back 30 seconds")
+                .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+                .setSlots(CommandButton.SLOT_BACK)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
+                .setDisplayName("Forward 30 seconds")
+                .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .build(),
+        )
+        mediaSession = MediaLibrarySession.Builder(this, player, libraryCallback)
+            .setMediaButtonPreferences(mediaButtonPreferences)
+            .build()
         mediaRuntime.attachPlaybackHost(this)
     }
 
