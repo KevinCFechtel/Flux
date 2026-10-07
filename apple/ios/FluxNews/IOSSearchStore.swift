@@ -61,6 +61,7 @@ final class IOSSearchStore: ObservableObject {
     private let pageSize = IOSSearchPaginationPolicy.pageSize
     var onLocalFirstMutation: () -> Void = {}
     var onMediaTransferReconciliationRequested: (() async -> Void)?
+    var onMediaArtworkProbeChanged: (() -> Void)?
     private var articleAudioActionGeneration: UInt64 = 0
 
     func attach(
@@ -380,6 +381,7 @@ final class IOSSearchStore: ObservableObject {
             guard let self, self.core === core else { return }
             if case .success(true) = result {
                 self.loadArticleAudioActionStates(for: [articleID])
+                self.onMediaArtworkProbeChanged?()
             }
         }
     }
