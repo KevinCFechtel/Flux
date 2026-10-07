@@ -22,7 +22,10 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
@@ -30,6 +33,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import uniffi.flux_uniffi.DownloadFailureKind
 import uniffi.flux_uniffi.DownloadNetworkPolicy
+import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.MediaTransferWork
 import uniffi.flux_uniffi.SyncCompleted
 
@@ -98,9 +102,30 @@ internal class AndroidMediaTransferCoordinator(
     val progress = mutableProgress.asStateFlow()
     private val mutableRevision = MutableStateFlow(0L)
     val revision = mutableRevision.asStateFlow()
+    private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
         reconcileAndSignal(sessionGeneration)
+    }
+
+    fun requestArtworkProbe(sessionGeneration: Long, articleId: Long) {
+        if (articleId <= 0L || coreRuntime.activeSessionGeneration() != sessionGeneration) return
+        probeScope.launch {
+            val changed = runCatching {
+                coreRuntime.remoteForGeneration(sessionGeneration) { core ->
+                    core.articleEnclosures(articleId = articleId)
+                        .asSequence()
+                        .filter { it.mediaKind == MediaKind.AUDIO }
+                        .any { enclosure ->
+                            core.probeMediaArtwork(enclosureId = enclosure.id)
+                        }
+                }
+            }.getOrDefault(false)
+
+            if (changed && coreRuntime.activeSessionGeneration() == sessionGeneration) {
+                signalCoreMediaChanged(sessionGeneration)
+            }
+        }
     }
 
     suspend fun reconcile(sessionGeneration: Long? = coreRuntime.activeSessionGeneration()) {
