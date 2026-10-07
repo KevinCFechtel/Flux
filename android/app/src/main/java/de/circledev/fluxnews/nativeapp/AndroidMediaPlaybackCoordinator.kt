@@ -359,10 +359,19 @@ internal class AndroidMediaPlaybackCoordinator(
             val chapters = runCatching {
                 core.mediaChapters(enclosureId = enclosureId)
             }.getOrDefault(emptyList())
-            preparation to chapters
+            val artworkBytes = when (val artwork = preparation.artworkSource) {
+                is MediaArtworkSource.LocalReference -> runCatching {
+                    core.mediaArtwork(reference = artwork.reference)
+                }.getOrNull()
+                is MediaArtworkSource.RemoteUrl,
+                null,
+                -> null
+            }
+            Triple(preparation, chapters, artworkBytes)
         }
         val preparation = prepared.first
         val chapters = prepared.second
+        val localArtworkBytes = prepared.third
         val source = sourceResolver.resolve(preparation)
 
         activeGeneration = generation
@@ -380,6 +389,34 @@ internal class AndroidMediaPlaybackCoordinator(
             ?.toLong()
             ?: preparation.playbackState.durationMs?.toLong()
 
+        val mediaMetadata = MediaMetadata.Builder()
+            .setTitle(preparation.articleTitle)
+            .setArtist(preparation.feedTitle)
+            .setAlbumTitle(preparation.feedTitle)
+            .apply {
+                preparedDurationMs
+                    ?.takeIf { it >= 0L }
+                    ?.let(::setDurationMs)
+                when (val artwork = preparation.artworkSource) {
+                    is MediaArtworkSource.LocalReference -> {
+                        localArtworkBytes?.let { bytes ->
+                            setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                        }
+                    }
+                    is MediaArtworkSource.RemoteUrl -> {
+                        runCatching { Uri.parse(artwork.url) }
+                            .getOrNull()
+                            ?.takeIf { uri ->
+                                uri.scheme.equals("http", ignoreCase = true) ||
+                                    uri.scheme.equals("https", ignoreCase = true)
+                            }
+                            ?.let(::setArtworkUri)
+                    }
+                    null -> Unit
+                }
+            }
+            .build()
+
         val mediaItem = MediaItem.Builder()
             .setMediaId(enclosureId.toString())
             .setUri(
@@ -388,12 +425,8 @@ internal class AndroidMediaPlaybackCoordinator(
                     is AndroidResolvedPlaybackSource.Remote -> Uri.parse(source.url)
                 },
             )
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(preparation.articleTitle)
-                    .setArtist(preparation.feedTitle)
-                    .build(),
-            )
+            .setMimeType(preparation.enclosure.mimeType)
+            .setMediaMetadata(mediaMetadata)
             .build()
 
         mutableState.value = mutableState.value.copy(
