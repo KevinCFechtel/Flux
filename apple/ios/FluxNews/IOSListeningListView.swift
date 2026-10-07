@@ -75,6 +75,8 @@ struct IOSListeningListView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
 
                     HStack(spacing: 6) {
                         FeedIconView(
