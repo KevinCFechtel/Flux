@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1, E2, E3 AND E4 COMPLETE — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: E1 THROUGH E6 COMPLETE FOR SEQUENCING — E7 IN PROGRESS — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -1007,7 +1007,7 @@ E1/E5 must characterize the real production-upgrade behavior. Preserve the exist
 
 ## 17. E6 — Native Media, Listening List and Background Transfers
 
-Status: **IN PROGRESS — runtime/lifecycle foundation implemented**
+Status: **COMPLETE FOR SEQUENCING — device-tested; E7 unblocked**
 
 The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 
@@ -1047,7 +1047,7 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - foreground-to-background Activity transition checkpoints the current playback position without pausing background playback;
 - Player Show Notes publication is request-generation guarded so a stale Reader load cannot publish into a different preview item;
 - focused JVM guards cover idle-vs-playing playback sync policy and latest-request Listening List publication;
-- physical background/process-death acceptance and final E6 real-device refinement remain subsequent E6 work.
+- device testing completed without further blocking E6 findings; any later E6 regression is normal bug-fix follow-up unless it contradicts the frozen media ownership/runtime contract.
 
 E6 consumes the frozen Phase B media domain.
 
@@ -1102,6 +1102,8 @@ A MediaLibrary-style service/session should expose browse content required by An
 
 Android Auto browsing uses the current Core-backed Listening List/media read models, not a filesystem scan of downloaded Flutter files.
 
+The Android Auto browse root is the Listening List itself. Its direct children are playable Listening List items. Feeds are not browse nodes and must not become root branches or a second hierarchy level. Feed selection is a filter over that same root item set, using `listeningListFeeds()` only to supply available filter choices and `listeningList(feedId:sort:)` to reload the root contents.
+
 Remote and downloaded media are both valid when Core prepare_playback resolves them.
 
 Initial remote command vocabulary follows the existing media product contract:
@@ -1115,6 +1117,8 @@ Initial remote command vocabulary follows the existing media product contract:
 Do not invent next/previous episode, autoplay or a durable queue merely because Media3 supports them. Those require an explicit product/domain contract.
 
 There remains exactly one native Android player/media runtime per app process.
+
+Initial E7 implementation starts by extending the existing E6 playback service to one `MediaLibraryService` / `MediaLibrarySession`, adding Android Auto manifest discovery and exposing a process-scoped, disposable Core-backed Listening List projection. Headless service startup must restore the existing account/Core session through `AndroidAccountBootstrap`; it must not require `MainActivity` to have run first.
 
 E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
 
