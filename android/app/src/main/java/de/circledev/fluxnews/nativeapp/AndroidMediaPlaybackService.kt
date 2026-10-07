@@ -15,6 +15,7 @@ import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -121,7 +122,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                             snapshot.feeds.none { it.feedId == requestedFeedId }
                         ) {
                             return@libraryResultFuture LibraryResult.ofError(
-                                LibraryResult.RESULT_ERROR_BAD_VALUE,
+                                SessionError.ERROR_BAD_VALUE,
                                 params,
                             )
                         }
@@ -138,7 +139,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                     }
 
                     else -> return@libraryResultFuture LibraryResult.ofError(
-                        LibraryResult.RESULT_ERROR_BAD_VALUE,
+                        SessionError.ERROR_BAD_VALUE,
                         params,
                     )
                 }
@@ -176,11 +177,11 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                     libraryResultFuture {
                         val snapshot = refreshLibraryForHeadlessBrowser()
                             ?: return@libraryResultFuture LibraryResult.ofError(
-                                LibraryResult.RESULT_ERROR_BAD_VALUE,
+                                SessionError.ERROR_BAD_VALUE,
                             )
                         AndroidAutoMediaLibraryProjection.filterChoiceItem(snapshot, mediaId)
                             ?.let { LibraryResult.ofItem(it, null) }
-                            ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                            ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
                     }
 
                 else -> libraryResultFuture {
@@ -189,7 +190,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                         ?.itemsByMediaId
                         ?.get(mediaId)
                     item?.let { LibraryResult.ofItem(it, null) }
-                        ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                        ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
                 }
             }
 
@@ -521,7 +522,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 )
                 future.set(
                     LibraryResult.ofError<T>(
-                        LibraryResult.RESULT_ERROR_UNKNOWN,
+                        SessionError.ERROR_UNKNOWN,
                     ),
                 )
             }
