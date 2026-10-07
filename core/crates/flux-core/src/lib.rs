@@ -27,6 +27,11 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
+use media_metadata::{
+    REMOTE_MEDIA_INITIAL_PROBE_BYTES, REMOTE_MEDIA_MAX_ID3_BYTES,
+    REMOTE_MEDIA_MP4_PREFIX_BYTES, REMOTE_MEDIA_MP4_TAIL_BYTES,
+    id3_probe_total_bytes, probe_id3_artwork, probe_mp4_artwork,
+};
 use domain::{
     ArticleAudioActionProjection, ArticleQuery, ArticleSummary, ArticleThumbnailResult,
     ContinueListeningItem, CoreError, CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult,
@@ -890,6 +895,96 @@ impl FluxCore {
     ) -> Result<Option<domain::MediaArtworkSource>, CoreError> {
         self.store.media_artwork_source(enclosure_id)
     }
+    pub fn probe_media_artwork(&self, enclosure_id: i64) -> Result<bool, CoreError> {
+        let enclosure = self
+            .store
+            .enclosure(enclosure_id)?
+            .ok_or_else(|| CoreError::data(format!("enclosure {enclosure_id} does not exist")))?;
+
+        if self
+            .store
+            .media_metadata(enclosure_id)?
+            .and_then(|metadata| metadata.embedded_artwork_reference)
+            .is_some()
+        {
+            return Ok(false);
+        }
+
+        if self
+            .store
+            .media_download(enclosure_id)?
+            .is_some_and(|download| {
+                matches!(
+                    download.state,
+                    DownloadState::Requested
+                        | DownloadState::Downloaded
+                        | DownloadState::DeleteRequested
+                )
+            })
+        {
+            return Ok(false);
+        }
+
+        let url = enclosure.enclosure.url.trim();
+        let mime = enclosure.enclosure.mime_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let lower_url = url.to_ascii_lowercase();
+        let mp4_like = matches!(
+            mime.as_str(),
+            "audio/mp4" | "audio/x-m4a" | "video/mp4"
+        ) || lower_url.ends_with(".m4a")
+            || lower_url.ends_with(".mp4")
+            || lower_url.ends_with(".m4v");
+
+        let artwork = if mp4_like {
+            let prefix_end = REMOTE_MEDIA_MP4_PREFIX_BYTES.saturating_sub(1);
+            let prefix = self.remote.fetch_media_range(
+                url,
+                &format!("bytes=0-{prefix_end}"),
+                REMOTE_MEDIA_MP4_PREFIX_BYTES,
+            )?;
+            probe_mp4_artwork(&prefix).or_else(|| {
+                self.remote
+                    .fetch_media_range(
+                        url,
+                        &format!("bytes=-{}", REMOTE_MEDIA_MP4_TAIL_BYTES),
+                        REMOTE_MEDIA_MP4_TAIL_BYTES,
+                    )
+                    .ok()
+                    .and_then(|tail| probe_mp4_artwork(&tail))
+            })
+        } else {
+            let initial_end = REMOTE_MEDIA_INITIAL_PROBE_BYTES.saturating_sub(1);
+            let mut bytes = self.remote.fetch_media_range(
+                url,
+                &format!("bytes=0-{initial_end}"),
+                REMOTE_MEDIA_INITIAL_PROBE_BYTES,
+            )?;
+            if let Some(total) = id3_probe_total_bytes(&bytes) {
+                if total > bytes.len() && total <= REMOTE_MEDIA_MAX_ID3_BYTES {
+                    let start = bytes.len();
+                    let end = total.saturating_sub(1);
+                    let remainder = self.remote.fetch_media_range(
+                        url,
+                        &format!("bytes={start}-{end}"),
+                        total.saturating_sub(start),
+                    )?;
+                    bytes.extend_from_slice(&remainder);
+                }
+            }
+            probe_id3_artwork(&bytes)
+        };
+
+        let Some(artwork) = artwork else {
+            return Ok(false);
+        };
+        self.store.persist_probed_media_artwork(enclosure_id, artwork)
+    }
+
     pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
         self.store.media_artwork(reference)
     }
