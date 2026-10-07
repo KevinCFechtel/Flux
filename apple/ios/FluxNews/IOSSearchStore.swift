@@ -236,7 +236,7 @@ final class IOSSearchStore: ObservableObject {
         articleID: Int64,
         isInListeningList: Bool
     ) async -> Result<Void, Error> {
-        await mutateArticleMedia(
+        let result = await mutateArticleMedia(
             articleID: articleID,
             operation: { core in
                 if isInListeningList {
@@ -247,6 +247,10 @@ final class IOSSearchStore: ObservableObject {
             },
             reconcileTransfers: true
         )
+        if isInListeningList, case .success = result {
+            requestMediaArtworkProbe(articleID: articleID)
+        }
+        return result
     }
 
     func requestArticleDownload(
@@ -351,6 +355,31 @@ final class IOSSearchStore: ObservableObject {
                 )
             case .failure:
                 self.articleAudioActionStates = [:]
+            }
+        }
+    }
+
+    private func requestMediaArtworkProbe(articleID: Int64) {
+        guard let core else { return }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                {
+                    var changed = false
+                    for enclosure in try core.articleEnclosures(articleId: articleID)
+                    where enclosure.mediaKind == .audio {
+                        if (try? core.probeMediaArtwork(enclosureId: enclosure.id)) == true {
+                            changed = true
+                        }
+                    }
+                    return changed
+                }
+            ) else { return }
+
+            guard let self, self.core === core else { return }
+            if case .success(true) = result {
+                self.loadArticleAudioActionStates(for: [articleID])
             }
         }
     }
