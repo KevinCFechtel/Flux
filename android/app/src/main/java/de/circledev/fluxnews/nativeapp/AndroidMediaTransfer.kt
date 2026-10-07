@@ -113,12 +113,20 @@ internal class AndroidMediaTransferCoordinator(
         probeScope.launch {
             val changed = runCatching {
                 coreRuntime.remoteForGeneration(sessionGeneration) { core ->
+                    var anyChanged = false
                     core.articleEnclosures(articleId = articleId)
                         .asSequence()
                         .filter { it.mediaKind == MediaKind.AUDIO }
-                        .any { enclosure ->
-                            core.probeMediaArtwork(enclosureId = enclosure.id)
+                        .forEach { enclosure ->
+                            if (
+                                runCatching {
+                                    core.probeMediaArtwork(enclosureId = enclosure.id)
+                                }.getOrDefault(false)
+                            ) {
+                                anyChanged = true
+                            }
                         }
+                    anyChanged
                 }
             }.getOrDefault(false)
 
