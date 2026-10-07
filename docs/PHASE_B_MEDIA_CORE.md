@@ -870,7 +870,7 @@ The core may perform optional bounded HTTP Range probes against remote media.
 
 A complete local file remains the strongest metadata source.
 
-Remote probing is optional for Phase B completion and must not block the rest of the architecture.
+The shared Core now provides a bounded best-effort artwork probe used by Android E6 when media is added to the Listening List. MP3/ID3 starts with a 256 KiB prefix and may fetch only the remainder of the declared ID3 tag up to an 8 MiB hard ceiling. MP4/M4A probes at most 1 MiB from the start and 1 MiB from the end and accepts artwork only when a complete `covr/data` payload is present in one sampled region. Range-ignoring large responses, timeouts, unsupported layouts, and decode failures are treated as metadata-unavailable rather than download/playback failures. A requested or completed full download suppresses probing because local file analysis remains authoritative.
 
 ---
 
