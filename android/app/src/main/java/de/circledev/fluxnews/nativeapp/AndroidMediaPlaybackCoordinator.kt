@@ -43,6 +43,18 @@ internal enum class AndroidMediaPlaybackPresentationStatus {
     Completed,
 }
 
+internal object AndroidMediaPlaybackSyncPolicy {
+    fun shouldAdopt(status: AndroidMediaPlaybackPresentationStatus): Boolean =
+        status != AndroidMediaPlaybackPresentationStatus.Playing
+
+    fun targetPositionMs(playbackState: uniffi.flux_uniffi.PlaybackState): Long =
+        if (playbackState.status == PlaybackStatus.COMPLETED) {
+            (playbackState.durationMs ?: playbackState.positionMs).toLong()
+        } else {
+            playbackState.positionMs.toLong()
+        }.coerceAtLeast(0L)
+}
+
 internal data class AndroidMediaPlaybackState(
     val enclosureId: Long? = null,
     val articleId: Long? = null,
@@ -473,7 +485,7 @@ internal class AndroidMediaPlaybackCoordinator(
         val enclosureId = before.enclosureId ?: return@withLock
         if (
             coreRuntime.activeSessionGeneration() != generation ||
-            before.status == AndroidMediaPlaybackPresentationStatus.Playing
+            !AndroidMediaPlaybackSyncPolicy.shouldAdopt(before.status)
         ) {
             return@withLock
         }
@@ -487,16 +499,12 @@ internal class AndroidMediaPlaybackCoordinator(
         if (
             coreRuntime.activeSessionGeneration() != generation ||
             mutableState.value.enclosureId != enclosureId ||
-            mutableState.value.status == AndroidMediaPlaybackPresentationStatus.Playing
+            !AndroidMediaPlaybackSyncPolicy.shouldAdopt(mutableState.value.status)
         ) {
             return@withLock
         }
 
-        val targetPositionMs = if (playbackState.status == PlaybackStatus.COMPLETED) {
-            (playbackState.durationMs ?: playbackState.positionMs).toLong()
-        } else {
-            playbackState.positionMs.toLong()
-        }
+        val targetPositionMs = AndroidMediaPlaybackSyncPolicy.targetPositionMs(playbackState)
         val targetDurationMs = playbackState.durationMs?.toLong()
 
         controller?.let { mediaController ->
@@ -513,7 +521,7 @@ internal class AndroidMediaPlaybackCoordinator(
         if (
             coreRuntime.activeSessionGeneration() != generation ||
             mutableState.value.enclosureId != enclosureId ||
-            mutableState.value.status == AndroidMediaPlaybackPresentationStatus.Playing
+            !AndroidMediaPlaybackSyncPolicy.shouldAdopt(mutableState.value.status)
         ) {
             return@withLock
         }
