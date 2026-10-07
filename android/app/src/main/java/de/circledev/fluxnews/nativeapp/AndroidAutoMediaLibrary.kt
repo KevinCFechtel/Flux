@@ -23,6 +23,7 @@ internal object AndroidAutoMediaLibraryProjection {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle("Listening List")
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .build(),
@@ -36,6 +37,17 @@ internal object AndroidAutoMediaLibraryProjection {
             }
             ?: item.audioEnclosures.firstOrNull()
 
+    fun matchesSearch(item: MediaItem, query: String): Boolean {
+        val normalized = query.trim()
+        if (normalized.isEmpty()) return false
+        return item.mediaMetadata.title
+            ?.toString()
+            ?.contains(normalized, ignoreCase = true) == true ||
+            item.mediaMetadata.artist
+                ?.toString()
+                ?.contains(normalized, ignoreCase = true) == true
+    }
+
     fun mediaItem(item: ListeningListItem): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
         return MediaItem.Builder()
@@ -46,6 +58,8 @@ internal object AndroidAutoMediaLibraryProjection {
                 MediaMetadata.Builder()
                     .setTitle(item.title.ifBlank { "Untitled News" })
                     .setArtist(item.feedTitle.ifBlank { "Unknown Feed" })
+                    .setAlbumTitle(item.feedTitle.ifBlank { "Unknown Feed" })
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
                     .build(),
