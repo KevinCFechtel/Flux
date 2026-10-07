@@ -2,6 +2,7 @@ package de.circledev.fluxnews.nativeapp
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.session.MediaConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -12,6 +13,8 @@ import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.MediaKind
+import uniffi.flux_uniffi.PlaybackState
+import uniffi.flux_uniffi.PlaybackStatus
 
 class AndroidAutoMediaLibraryProjectionTest {
     @Test
@@ -159,6 +162,64 @@ class AndroidAutoMediaLibraryProjectionTest {
         assertEquals(null, AndroidAutoMediaLibraryProjection.filterFeedId(filterItems.first().mediaId))
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    @Test
+    fun partiallyPlayedItemPublishesCompletionPercentage() {
+        val projected = requireNotNull(
+            AndroidAutoMediaLibraryProjection.mediaItem(
+                item(
+                    activeEnclosureId = 51L,
+                    enclosureIds = listOf(51L),
+                    playbackState = PlaybackState(
+                        enclosureId = 51L,
+                        positionMs = 30_000uL,
+                        durationMs = 120_000uL,
+                        status = PlaybackStatus.IN_PROGRESS,
+                        updatedAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        val extras = requireNotNull(projected.mediaMetadata.extras)
+        assertEquals(
+            MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED,
+            extras.getInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS),
+        )
+        assertEquals(
+            0.25,
+            extras.getDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE),
+            0.0001,
+        )
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    @Test
+    fun completedItemPublishesFullyPlayedStatus() {
+        val projected = requireNotNull(
+            AndroidAutoMediaLibraryProjection.mediaItem(
+                item(
+                    activeEnclosureId = 52L,
+                    enclosureIds = listOf(52L),
+                    playbackState = PlaybackState(
+                        enclosureId = 52L,
+                        positionMs = 120_000uL,
+                        durationMs = 120_000uL,
+                        status = PlaybackStatus.COMPLETED,
+                        updatedAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        val extras = requireNotNull(projected.mediaMetadata.extras)
+        assertEquals(
+            MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_FULLY_PLAYED,
+            extras.getInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS),
+        )
+        assertFalse(extras.containsKey(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE))
+    }
+
     @Test
     fun itemWithoutAudioDoesNotCreateAutomotiveBrowseEntry() {
         val item = item(activeEnclosureId = null, enclosureIds = emptyList())
@@ -169,6 +230,7 @@ class AndroidAutoMediaLibraryProjectionTest {
     private fun item(
         activeEnclosureId: Long?,
         enclosureIds: List<Long>,
+        playbackState: PlaybackState? = null,
     ) = ListeningListItem(
         articleId = 7L,
         feedId = 9L,
@@ -189,7 +251,7 @@ class AndroidAutoMediaLibraryProjectionTest {
                     mediaKind = MediaKind.AUDIO,
                 ),
                 remotePresent = true,
-                playbackState = null,
+                playbackState = playbackState?.takeIf { it.enclosureId == id },
                 download = null,
                 durationMs = null,
             )
