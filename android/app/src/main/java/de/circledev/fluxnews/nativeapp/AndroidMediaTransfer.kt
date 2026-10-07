@@ -105,6 +105,7 @@ internal class AndroidMediaTransferCoordinator(
     private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
+        playbackCoordinator.reconcileAfterSuccessfulSync(sessionGeneration)
         reconcileAndSignal(sessionGeneration)
     }
 
