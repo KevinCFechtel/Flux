@@ -42,7 +42,7 @@ pub(crate) fn probe_id3_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
 pub(crate) fn probe_mp4_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut offset = 4usize;
     while offset.saturating_add(4) <= bytes.len() {
-        if bytes.get(offset..offset + 4) == Some(b"covr") {
+        if bytes.get(offset..offset + 4) == Some(&b"covr"[..]) {
             let atom_start = offset - 4;
             let size = u32::from_be_bytes(bytes.get(atom_start..offset)?.try_into().ok()?) as usize;
             let atom_end = atom_start.checked_add(size)?;
@@ -58,7 +58,7 @@ pub(crate) fn probe_mp4_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
                     if child_end > atom_end {
                         break;
                     }
-                    if bytes.get(child + 4..child + 8) == Some(b"data") {
+                    if bytes.get(child + 4..child + 8) == Some(&b"data"[..]) {
                         let payload = bytes.get(child + 16..child_end)?;
                         if is_supported_artwork(payload) {
                             return Some(payload.to_vec());
@@ -77,7 +77,7 @@ fn is_supported_artwork(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xFF, 0xD8, 0xFF])
         || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
         || bytes.starts_with(b"RIFF")
-            && bytes.get(8..12) == Some(b"WEBP")
+            && bytes.get(8..12) == Some(&b"WEBP"[..])
 }
 
 pub(crate) fn resolve_media_reference(root: &Path, reference: &str) -> Option<PathBuf> {
