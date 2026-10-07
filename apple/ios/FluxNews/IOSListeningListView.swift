@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct IOSListeningListView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -54,7 +55,15 @@ struct IOSListeningListView: View {
     @ViewBuilder
     private func row(_ item: ListeningListItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                let artworkEnclosure = artworkEnclosure(item)
+                IOSListeningListArtworkView(
+                    enclosureID: artworkEnclosure?.enclosure.id,
+                    refreshToken: artworkRefreshToken(artworkEnclosure),
+                    playbackCoordinator: playbackCoordinator
+                )
+                .frame(width: 56, height: 56)
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text(
                         IOSListeningListPresentation.textOrFallback(
@@ -64,6 +73,7 @@ struct IOSListeningListView: View {
                     )
                     .font(.headline)
                     .foregroundStyle(.primary)
+                    .lineLimit(2)
 
                     HStack(spacing: 6) {
                         FeedIconView(
@@ -87,6 +97,8 @@ struct IOSListeningListView: View {
                                 fallback: String(localized: "Unknown Feed")
                             )
                         )
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         if let date = Self.isoFormatter.date(
                             from: item.publishedAt
                         ) {
@@ -97,6 +109,7 @@ struct IOSListeningListView: View {
                                     time: .omitted
                                 )
                             )
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                     .font(.subheadline)
@@ -108,8 +121,6 @@ struct IOSListeningListView: View {
                     onOpenPlayer(item.articleId)
                 }
 
-                Spacer(minLength: 8)
-                itemMenu(item)
             }
 
             if let progress = IOSListeningListPresentation.progress(
@@ -159,7 +170,10 @@ struct IOSListeningListView: View {
                     onOpenPlayer(item.articleId)
                 }
 
-                primaryPlayControl(item)
+                HStack(spacing: 4) {
+                    primaryPlayControl(item)
+                    itemMenu(item)
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -210,16 +224,19 @@ struct IOSListeningListView: View {
                     enclosureID: enclosure.enclosure.id
                 )
             } label: {
-                Label(
-                    action == .pause
-                        ? String(localized: "Pause")
-                        : String(localized: "Play"),
-                    systemImage: action == .pause
+                Image(
+                    systemName: action == .pause
                         ? "pause.fill"
                         : "play.fill"
                 )
+                .frame(width: 22, height: 22)
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel(
+                action == .pause
+                    ? String(localized: "Pause")
+                    : String(localized: "Play")
+            )
         } else if !item.audioEnclosures.isEmpty {
             Menu {
                 ForEach(
@@ -241,9 +258,11 @@ struct IOSListeningListView: View {
                     }
                 }
             } label: {
-                Label("Play", systemImage: "play.fill")
+                Image(systemName: "play.fill")
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel(String(localized: "Play"))
         }
     }
 
@@ -309,12 +328,39 @@ struct IOSListeningListView: View {
                 )
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.title3)
-                .frame(width: 44, height: 44)
+            Image(systemName: "ellipsis")
+                .font(.body.weight(.semibold))
+                .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "Listening List actions"))
+    }
+
+    private func artworkEnclosure(
+        _ item: ListeningListItem
+    ) -> ListeningListEnclosure? {
+        if let loadedID = playbackState.loadedEnclosure?.id,
+           let loaded = item.audioEnclosures.first(
+            where: { $0.enclosure.id == loadedID }
+           ) {
+            return loaded
+        }
+        if let activeID = item.activeEnclosureId,
+           let active = item.audioEnclosures.first(
+            where: { $0.enclosure.id == activeID }
+           ) {
+            return active
+        }
+        return item.audioEnclosures.first
+    }
+
+    private func artworkRefreshToken(
+        _ enclosure: ListeningListEnclosure?
+    ) -> String {
+        guard let enclosure else { return "none" }
+        let state = enclosure.download.map { String(describing: $0.state) } ?? "none"
+        let downloadedAt = enclosure.download?.downloadedAt ?? ""
+        return [String(enclosure.enclosure.id), state, downloadedAt].joined(separator: "|")
     }
 
     private func performPlaybackAction(
@@ -400,6 +446,51 @@ struct IOSListeningListView: View {
                 }
             } label: {
                 Label("Download", systemImage: "arrow.down.circle")
+            }
+        }
+    }
+
+    private struct IOSListeningListArtworkView: View {
+        let enclosureID: Int64?
+        let refreshToken: String
+        let playbackCoordinator: IOSMediaPlaybackCoordinator
+
+        @State private var image: UIImage?
+
+        var body: some View {
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if let fallbackData = AppleFallbackArtwork.data(),
+                          let fallback = UIImage(data: fallbackData) {
+                    Image(uiImage: fallback)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "waveform")
+                        .resizable()
+                        .scaledToFit()
+                        .padding(12)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .task(id: refreshToken) {
+                guard let enclosureID else {
+                    image = nil
+                    return
+                }
+                let source = await playbackCoordinator.previewArtworkSource(
+                    enclosureID: enclosureID
+                )
+                guard let data = await playbackCoordinator.artwork(source: source),
+                      let loaded = UIImage(data: data) else {
+                    image = nil
+                    return
+                }
+                image = loaded
             }
         }
     }
