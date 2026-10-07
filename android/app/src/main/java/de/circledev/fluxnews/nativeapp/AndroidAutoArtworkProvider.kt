@@ -21,7 +21,8 @@ import uniffi.flux_uniffi.MediaArtworkSource
  *
  * Car media browsers require artwork URIs that resolve locally. Core keeps artwork ownership,
  * while this provider exposes only the selected enclosure artwork through per-item content URIs.
- * Missing or failed artwork resolves to the app's normal fallback artwork.
+ * Browse requests keep the normal Listening List fallback. Now Playing requests use the dedicated
+ * padded Now Playing fallback so system surfaces can crop it independently without changing rows.
  */
 class AndroidAutoArtworkProvider : ContentProvider() {
     private val artworkCache = object : LruCache<String, ByteArray>(16 * 1024) {
@@ -43,12 +44,17 @@ class AndroidAutoArtworkProvider : ContentProvider() {
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         if (mode != "r") throw FileNotFoundException("Artwork provider is read-only.")
-        val enclosureId = uri.pathSegments
-            .takeIf { it.size == 2 && it[0] == ENCLOSURE_PATH }
-            ?.get(1)
-            ?.toLongOrNull()
+        val pathSegments = uri.pathSegments
+        val artworkPath = pathSegments
+            .takeIf { it.size == 2 }
+            ?.firstOrNull()
+            ?.takeIf { it == ENCLOSURE_PATH || it == NOW_PLAYING_PATH }
+            ?: throw FileNotFoundException("Invalid artwork URI.")
+        val enclosureId = pathSegments[1]
+            .toLongOrNull()
             ?.takeIf { it > 0L }
             ?: throw FileNotFoundException("Invalid artwork URI.")
+        val nowPlaying = artworkPath == NOW_PLAYING_PATH
 
         return openPipeHelper(
             uri,
@@ -56,7 +62,7 @@ class AndroidAutoArtworkProvider : ContentProvider() {
             Bundle.EMPTY,
             enclosureId,
         ) { output, _, _, _, id ->
-            val bytes = resolveArtworkBytes(id) ?: fallbackArtworkBytes()
+            val bytes = resolveArtworkBytes(id) ?: fallbackArtworkBytes(nowPlaying)
             ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
                 stream.write(bytes)
             }
@@ -151,26 +157,49 @@ class AndroidAutoArtworkProvider : ContentProvider() {
         }.getOrNull()
     }
 
-    private fun fallbackArtworkBytes(): ByteArray {
-        artworkCache.get(FALLBACK_CACHE_KEY)?.let { return it }
+    private fun fallbackArtworkBytes(nowPlaying: Boolean): ByteArray {
+        val cacheKey = if (nowPlaying) {
+            NOW_PLAYING_FALLBACK_CACHE_KEY
+        } else {
+            BROWSE_FALLBACK_CACHE_KEY
+        }
+        artworkCache.get(cacheKey)?.let { return it }
+
+        val drawable = if (nowPlaying) {
+            R.drawable.fallback_artwork_now_playing
+        } else {
+            R.drawable.fallback_artwork
+        }
         val bytes = requireNotNull(context)
             .resources
-            .openRawResource(R.drawable.fallback_artwork)
+            .openRawResource(drawable)
             .use { it.readBytes() }
-        artworkCache.put(FALLBACK_CACHE_KEY, bytes)
+        artworkCache.put(cacheKey, bytes)
         return bytes
     }
 
     companion object {
         private const val ENCLOSURE_PATH = "enclosure"
-        private const val FALLBACK_CACHE_KEY = "fallback"
+        private const val NOW_PLAYING_PATH = "now-playing"
+        private const val BROWSE_FALLBACK_CACHE_KEY = "fallback:browse"
+        private const val NOW_PLAYING_FALLBACK_CACHE_KEY = "fallback:now-playing"
         private const val MAX_ARTWORK_BYTES = 8L * 1024L * 1024L
 
         fun uri(context: Context, enclosureId: Long): Uri =
+            artworkUri(context, ENCLOSURE_PATH, enclosureId)
+
+        fun nowPlayingUri(context: Context, enclosureId: Long): Uri =
+            artworkUri(context, NOW_PLAYING_PATH, enclosureId)
+
+        private fun artworkUri(
+            context: Context,
+            path: String,
+            enclosureId: Long,
+        ): Uri =
             Uri.Builder()
                 .scheme("content")
                 .authority(context.packageName + ".autoartwork")
-                .appendPath(ENCLOSURE_PATH)
+                .appendPath(path)
                 .appendPath(enclosureId.toString())
                 .build()
     }
