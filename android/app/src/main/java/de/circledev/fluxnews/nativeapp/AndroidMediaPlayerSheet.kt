@@ -103,12 +103,15 @@ internal fun AndroidMediaPlayerSheet(
     val displayedFeedTitle =
         if (isPreviewingInactiveItem) previewItem?.feedTitle else playback.feedTitle
     val displayedPositionMs =
-        if (isPreviewingInactiveItem) previewEnclosure.playbackState.positionMs.toLong()
-        else playback.positionMs
+        if (isPreviewingInactiveItem) {
+            previewEnclosure.playbackState?.positionMs?.toLong() ?: 0L
+        } else {
+            playback.positionMs
+        }
     val displayedDurationMs =
         if (isPreviewingInactiveItem) {
             previewEnclosure.durationMs?.toLong()
-                ?: previewEnclosure.playbackState.durationMs?.toLong()
+                ?: previewEnclosure.playbackState?.durationMs?.toLong()
         } else {
             playback.durationMs
         }
