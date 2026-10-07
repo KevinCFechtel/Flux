@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -162,9 +161,12 @@ internal fun AndroidCompactMiniPlayer(
             }
 
             IconButton(
-                onClick = { scope.launch { coordinator.skipBackward30Seconds() } },
+                onClick = { scope.launch { coordinator.skipBackward15Seconds() } },
             ) {
-                Icon(Icons.Rounded.Replay30, contentDescription = "Back 30 seconds")
+                Icon(
+                    painter = painterResource(androidx.media3.session.R.drawable.media3_icon_skip_back_15),
+                    contentDescription = "Back 15 seconds",
+                )
             }
 
             FilledIconButton(
