@@ -70,15 +70,27 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .build()
-            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                .buildUpon()
-                .add(
+            val customBrowseActionLimit = controller.maxCommandsForMediaItems
+            val supportsFeedFilter = customBrowseActionLimit > 0
+            app.diagnostics.record(
+                AndroidAppLogLevel.Info,
+                "android-auto",
+                "Media browser connected: package=" + controller.packageName +
+                    ", customBrowseActionLimit=" + customBrowseActionLimit +
+                    ", feedFilterSupported=" + supportsFeedFilter,
+            )
+
+            val sessionCommandsBuilder =
+                MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+            if (supportsFeedFilter) {
+                sessionCommandsBuilder.add(
                     SessionCommand(
                         AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION,
                         Bundle.EMPTY,
                     ),
                 )
-                .build()
+            }
+            val sessionCommands = sessionCommandsBuilder.build()
 
             return Futures.immediateFuture(
                 MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
@@ -94,7 +106,12 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> =
             com.google.common.util.concurrent.Futures.immediateFuture(
-                LibraryResult.ofItem(AndroidAutoMediaLibraryProjection.rootItem(), params),
+                LibraryResult.ofItem(
+                    AndroidAutoMediaLibraryProjection.rootItem(
+                        supportsFeedFilter = browser.maxCommandsForMediaItems > 0,
+                    ),
+                    params,
+                ),
             )
 
         override fun onGetChildren(
@@ -161,7 +178,9 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 mediaId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID ->
                     Futures.immediateFuture(
                         LibraryResult.ofItem(
-                            AndroidAutoMediaLibraryProjection.rootItem(),
+                            AndroidAutoMediaLibraryProjection.rootItem(
+                                supportsFeedFilter = browser.maxCommandsForMediaItems > 0,
+                            ),
                             null,
                         ),
                     )
@@ -243,6 +262,12 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION
             ) {
                 return super.onCustomCommand(session, controller, customCommand, args)
+            }
+
+            if (controller.maxCommandsForMediaItems <= 0) {
+                return Futures.immediateFuture(
+                    SessionResult(SessionError.ERROR_NOT_SUPPORTED),
+                )
             }
 
             val mediaId = args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)
