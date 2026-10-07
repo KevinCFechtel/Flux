@@ -67,6 +67,11 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
         <provider
+            android:name=".AndroidAutoArtworkProvider"
+            android:authorities="${applicationId}.autoartwork"
+            android:exported="true" />
+
+        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"

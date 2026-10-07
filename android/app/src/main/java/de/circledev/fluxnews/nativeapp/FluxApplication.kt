@@ -97,7 +97,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidListeningListStore(coreRuntime, mediaTransferCoordinator)
     }
     internal val autoMediaLibraryStore: AndroidAutoMediaLibraryStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidAutoMediaLibraryStore(coreRuntime, diagnostics)
+        AndroidAutoMediaLibraryStore(applicationContext, coreRuntime, diagnostics)
     }
     internal val readerStore: AndroidReaderStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidReaderStore(coreRuntime) }
     internal val articleOpenResolver: AndroidArticleOpenResolver by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticleOpenResolver(coreRuntime) }
