@@ -529,6 +529,7 @@ struct IOSArticleAudioActionState {
     private(set) var feedCounts: [Int64: UInt64] = [:]
     private(set) var articleAudioActionStates: [Int64: IOSArticleAudioActionState] = [:]
     var onMediaTransferReconciliationRequested: (() async -> Void)?
+    var onMediaArtworkProbeChanged: (() -> Void)?
     @ObservationIgnored private var feedIconPresentationStates: [IOSFeedIconKey: IOSFeedIconPresentationState] = [:]
     private(set) var isLoading = false
     private(set) var manualSyncState: IOSManualSyncState = .idle
@@ -956,6 +957,7 @@ struct IOSArticleAudioActionState {
             guard let self, self.core === core else { return }
             if case .success(true) = result {
                 self.refreshArticleAudioActionState(articleID: articleID)
+                self.onMediaArtworkProbeChanged?()
             }
         }
     }
