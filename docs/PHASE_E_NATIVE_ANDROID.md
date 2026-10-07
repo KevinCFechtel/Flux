@@ -1140,6 +1140,8 @@ Current E7 implementation status:
 
 E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
 
+Runtime acceptance on 7 October 2026 has proven Android Auto browsing of the direct Listening List root, selecting/playing episodes and remote playback controls on a physical Android Auto host. Follow-up presentation work publishes every browse episode with a local artwork URI backed by Core/remote artwork and the normal Flux fallback, plus Media3 completion status/percentage from the Core playback state so compatible Auto hosts can show per-item playback progress. Re-accept artwork/fallback/progress presentation after this metadata change.
+
 ## 19. E8 — Reserved / no artificial iOS counterpart
 
 E8 has no planned implementation.
