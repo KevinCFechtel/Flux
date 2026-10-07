@@ -482,10 +482,10 @@ struct IOSListeningListView: View {
                     image = nil
                     return
                 }
-                let source = await playbackCoordinator.previewArtworkSource(
+                guard let source = await playbackCoordinator.previewArtworkSource(
                     enclosureID: enclosureID
-                )
-                guard let data = await playbackCoordinator.artwork(source: source),
+                ),
+                      let data = await playbackCoordinator.artwork(source: source),
                       let loaded = UIImage(data: data) else {
                     image = nil
                     return
