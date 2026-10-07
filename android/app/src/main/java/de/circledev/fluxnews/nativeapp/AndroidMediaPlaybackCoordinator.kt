@@ -522,7 +522,7 @@ internal class AndroidMediaPlaybackCoordinator(
         seekTo((current + deltaMs).coerceAtLeast(0L))
     }
 
-    suspend fun skipBackward30Seconds() = skipBy(-30)
+    suspend fun skipBackward15Seconds() = skipBy(-15)
 
     suspend fun skipForward30Seconds() = skipBy(30)
 
