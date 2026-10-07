@@ -798,7 +798,7 @@ struct IOSArticleAudioActionState {
         articleID: Int64,
         isInListeningList: Bool
     ) async -> Result<Void, Error> {
-        await mutateArticleMedia(
+        let result = await mutateArticleMedia(
             articleID: articleID,
             operation: { core in
                 if isInListeningList {
@@ -809,6 +809,10 @@ struct IOSArticleAudioActionState {
             },
             reconcileTransfers: true
         )
+        if isInListeningList, case .success = result {
+            requestMediaArtworkProbe(articleID: articleID)
+        }
+        return result
     }
 
     func requestArticleDownload(
@@ -927,6 +931,31 @@ struct IOSArticleAudioActionState {
                 if replacing {
                     self.articleAudioActionStates = [:]
                 }
+            }
+        }
+    }
+
+    private func requestMediaArtworkProbe(articleID: Int64) {
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.blockingResult(
+                for: core,
+                {
+                    var changed = false
+                    for enclosure in try core.articleEnclosures(articleId: articleID)
+                    where enclosure.mediaKind == .audio {
+                        if (try? core.probeMediaArtwork(enclosureId: enclosure.id)) == true {
+                            changed = true
+                        }
+                    }
+                    return changed
+                }
+            ) else { return }
+
+            guard let self, self.core === core else { return }
+            if case .success(true) = result {
+                self.refreshArticleAudioActionState(articleID: articleID)
             }
         }
     }
