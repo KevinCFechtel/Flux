@@ -1480,6 +1480,14 @@ impl RemoteSource for MinifluxClient {
     fn fetch_article_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
         self.download_image(url, max_bytes)
     }
+    fn fetch_media_range(
+        &self,
+        url: &str,
+        range: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, CoreError> {
+        MinifluxClient::fetch_media_range(self, url, range, max_bytes)
+    }
     fn miniflux_capabilities(&self) -> Result<Vec<MinifluxCapability>, CoreError> {
         let version: VersionDto = self.get("/v1/version", &[])?;
         Ok(MinifluxCapability::all_supported_by(&version.version))
