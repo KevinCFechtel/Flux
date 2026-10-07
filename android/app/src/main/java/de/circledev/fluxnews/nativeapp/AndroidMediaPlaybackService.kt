@@ -329,7 +329,10 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             return null
         }
         val generation = app.coreRuntime.activeSessionGeneration() ?: return null
-        return libraryStore.refresh(generation)
+        val selectedFeedId = libraryStore.snapshot()
+            .takeIf { it.sessionGeneration == generation }
+            ?.selectedFeedId
+        return libraryStore.refresh(generation, selectedFeedId)
     }
 
     private fun mediaSessionItemsFuture(
