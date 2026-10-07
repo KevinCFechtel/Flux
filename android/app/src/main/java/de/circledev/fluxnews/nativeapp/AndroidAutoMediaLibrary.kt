@@ -178,15 +178,16 @@ internal object AndroidAutoMediaLibraryProjection {
         return Bundle().apply {
             putInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS, status)
             if (status == MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED) {
-                val durationMs = playback?.durationMs
-                    ?: selected.durationMs
-                val percentage = durationMs
-                    ?.takeIf { it > 0uL }
-                    ?.let { duration ->
-                        playback.positionMs.toDouble()
-                            .div(duration.toDouble())
-                            .coerceIn(0.0, 1.0)
-                    }
+                val percentage = playback?.let { state ->
+                    val durationMs = state.durationMs ?: selected.durationMs
+                    durationMs
+                        ?.takeIf { it > 0uL }
+                        ?.let { duration ->
+                            state.positionMs.toDouble()
+                                .div(duration.toDouble())
+                                .coerceIn(0.0, 1.0)
+                        }
+                }
                 if (percentage != null) {
                     putDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE, percentage)
                 }
