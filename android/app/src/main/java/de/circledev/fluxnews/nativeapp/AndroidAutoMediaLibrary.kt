@@ -68,6 +68,25 @@ internal object AndroidAutoMediaLibraryProjection {
     }
 }
 
+internal object AndroidAutoMediaRequestPolicy {
+    fun resolve(
+        snapshot: AndroidAutoMediaLibrarySnapshot,
+        mediaId: String,
+        searchQuery: String?,
+    ): MediaItem? =
+        mediaId.toLongOrNull()
+            ?.takeIf { it > 0L }
+            ?.let { snapshot.itemsByMediaId[it.toString()] }
+            ?: searchQuery
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let { query ->
+                    snapshot.items.firstOrNull { item ->
+                        AndroidAutoMediaLibraryProjection.matchesSearch(item, query)
+                    }
+                }
+}
+
 internal data class AndroidAutoMediaLibrarySnapshot(
     val sessionGeneration: Long? = null,
     val selectedFeedId: Long? = null,
