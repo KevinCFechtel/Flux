@@ -15,6 +15,17 @@ import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.ListeningListSort
 import uniffi.flux_uniffi.PlaybackStatus
 
+internal enum class AndroidAutoPlaybackCompletion {
+    NotStarted,
+    PartiallyPlayed,
+    FullyPlayed,
+}
+
+internal data class AndroidAutoPlaybackProgress(
+    val completion: AndroidAutoPlaybackCompletion,
+    val percentage: Double? = null,
+)
+
 /**
  * Android Auto / system-media browse projection over the Core-owned Listening List.
  *
@@ -140,57 +151,75 @@ internal object AndroidAutoMediaLibraryProjection {
         artworkUri: Uri? = null,
     ): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
-        val progressExtras = playbackProgressExtras(selected)
+        val metadata = MediaMetadata.Builder()
+            .setTitle(item.title.ifBlank { "Untitled News" })
+            .setArtist(item.feedTitle.ifBlank { "Unknown Feed" })
+            .setAlbumTitle(item.feedTitle.ifBlank { "Unknown Feed" })
+            .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
+            .setArtworkUri(artworkUri)
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .apply {
+                if (selected.playbackState != null) {
+                    setExtras(playbackProgressExtras(selected))
+                }
+            }
+            .build()
+
         return MediaItem.Builder()
             // Keep the canonical enclosure ID as Media3 identity. E6 checkpointing already reads
             // this ID from the player, and later E7 playback dispatch can therefore reuse it.
             .setMediaId(selected.enclosure.id.toString())
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(item.title.ifBlank { "Untitled News" })
-                    .setArtist(item.feedTitle.ifBlank { "Unknown Feed" })
-                    .setAlbumTitle(item.feedTitle.ifBlank { "Unknown Feed" })
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
-                    .setArtworkUri(artworkUri)
-                    .setExtras(progressExtras)
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .build(),
-            )
+            .setMediaMetadata(metadata)
             .build()
+    }
+
+    fun playbackProgress(
+        selected: ListeningListEnclosure,
+    ): AndroidAutoPlaybackProgress {
+        val playback = selected.playbackState
+            ?: return AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.NotStarted)
+
+        return when (playback.status) {
+            PlaybackStatus.NOT_STARTED ->
+                AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.NotStarted)
+            PlaybackStatus.COMPLETED ->
+                AndroidAutoPlaybackProgress(AndroidAutoPlaybackCompletion.FullyPlayed)
+            PlaybackStatus.IN_PROGRESS -> {
+                val durationMs = playback.durationMs ?: selected.durationMs
+                val percentage = durationMs
+                    ?.takeIf { it > 0uL }
+                    ?.let { duration ->
+                        playback.positionMs.toDouble()
+                            .div(duration.toDouble())
+                            .coerceIn(0.0, 1.0)
+                    }
+                AndroidAutoPlaybackProgress(
+                    completion = AndroidAutoPlaybackCompletion.PartiallyPlayed,
+                    percentage = percentage,
+                )
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)
     private fun playbackProgressExtras(
         selected: ListeningListEnclosure,
     ): Bundle {
-        val playback = selected.playbackState
-        val status = when (playback?.status) {
-            PlaybackStatus.IN_PROGRESS ->
+        val progress = playbackProgress(selected)
+        val status = when (progress.completion) {
+            AndroidAutoPlaybackCompletion.NotStarted ->
+                MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_NOT_PLAYED
+            AndroidAutoPlaybackCompletion.PartiallyPlayed ->
                 MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED
-            PlaybackStatus.COMPLETED ->
+            AndroidAutoPlaybackCompletion.FullyPlayed ->
                 MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_FULLY_PLAYED
-            PlaybackStatus.NOT_STARTED,
-            null,
-            -> MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_NOT_PLAYED
         }
 
         return Bundle().apply {
             putInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS, status)
-            if (status == MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED) {
-                val percentage = playback?.let { state ->
-                    val durationMs = state.durationMs ?: selected.durationMs
-                    durationMs
-                        ?.takeIf { it > 0uL }
-                        ?.let { duration ->
-                            state.positionMs.toDouble()
-                                .div(duration.toDouble())
-                                .coerceIn(0.0, 1.0)
-                        }
-                }
-                if (percentage != null) {
-                    putDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE, percentage)
-                }
+            progress.percentage?.let { percentage ->
+                putDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE, percentage)
             }
         }
     }
