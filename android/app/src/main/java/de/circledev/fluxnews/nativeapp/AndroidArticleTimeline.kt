@@ -498,6 +498,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 if (enabled) core.addToListeningList(articleId = articleId)
                 else core.removeFromListeningList(articleId = articleId)
             }
+            if (enabled) {
+                transferCoordinator?.requestArtworkProbe(generation, articleId)
+            }
             Unit
         },
         mediaDownloadWriter = { generation, enclosureId, state ->
