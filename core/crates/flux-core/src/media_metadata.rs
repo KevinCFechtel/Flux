@@ -20,6 +20,66 @@ pub(crate) struct MediaChapterInput {
     pub end_ms: Option<u64>,
 }
 
+pub(crate) const REMOTE_MEDIA_INITIAL_PROBE_BYTES: usize = 256 * 1024;
+pub(crate) const REMOTE_MEDIA_MP4_PREFIX_BYTES: usize = 1024 * 1024;
+pub(crate) const REMOTE_MEDIA_MP4_TAIL_BYTES: usize = 1024 * 1024;
+pub(crate) const REMOTE_MEDIA_MAX_ID3_BYTES: usize = 8 * 1024 * 1024;
+
+pub(crate) fn id3_probe_total_bytes(prefix: &[u8]) -> Option<usize> {
+    if prefix.len() < 10 || &prefix[0..3] != b"ID3" || !(prefix[3] == 3 || prefix[3] == 4) {
+        return None;
+    }
+    let payload = syncsafe(&prefix[6..10])?;
+    10usize
+        .checked_add(payload)
+        .filter(|total| *total <= REMOTE_MEDIA_MAX_ID3_BYTES)
+}
+
+pub(crate) fn probe_id3_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
+    parse_id3_artwork(bytes)
+}
+
+pub(crate) fn probe_mp4_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut offset = 4usize;
+    while offset.saturating_add(4) <= bytes.len() {
+        if bytes.get(offset..offset + 4) == Some(b"covr") {
+            let atom_start = offset - 4;
+            let size = u32::from_be_bytes(bytes.get(atom_start..offset)?.try_into().ok()?) as usize;
+            let atom_end = atom_start.checked_add(size)?;
+            if size >= 16 && atom_end <= bytes.len() {
+                let mut child = offset + 4;
+                while child.saturating_add(16) <= atom_end {
+                    let child_size =
+                        u32::from_be_bytes(bytes.get(child..child + 4)?.try_into().ok()?) as usize;
+                    if child_size < 16 {
+                        break;
+                    }
+                    let child_end = child.checked_add(child_size)?;
+                    if child_end > atom_end {
+                        break;
+                    }
+                    if bytes.get(child + 4..child + 8) == Some(b"data") {
+                        let payload = bytes.get(child + 16..child_end)?;
+                        if is_supported_artwork(payload) {
+                            return Some(payload.to_vec());
+                        }
+                    }
+                    child = child_end;
+                }
+            }
+        }
+        offset += 1;
+    }
+    None
+}
+
+fn is_supported_artwork(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"RIFF")
+            && bytes.get(8..12) == Some(b"WEBP")
+}
+
 pub(crate) fn resolve_media_reference(root: &Path, reference: &str) -> Option<PathBuf> {
     let path = Path::new(reference);
     if path.is_absolute()
@@ -95,6 +155,69 @@ fn bounded_file_prefix(path: &Path) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     file.take(MAX_ID3_BYTES).read_to_end(&mut bytes).ok()?;
     Some(bytes)
+}
+
+fn parse_id3_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 10 || &bytes[0..3] != b"ID3" || !(bytes[3] == 3 || bytes[3] == 4) {
+        return None;
+    }
+    let tag_size = syncsafe(&bytes[6..10]).unwrap_or(0);
+    let end = 10usize.saturating_add(tag_size).min(bytes.len());
+    let mut offset = 10usize;
+    let mut first_picture = None;
+
+    while offset.saturating_add(10) <= end {
+        let header = &bytes[offset..offset + 10];
+        if header.iter().all(|byte| *byte == 0) {
+            break;
+        }
+        let frame_size = if bytes[3] == 4 {
+            syncsafe(&header[4..8])
+        } else {
+            Some(u32::from_be_bytes([header[4], header[5], header[6], header[7]]) as usize)
+        }?;
+        let frame_end = offset
+            .checked_add(10)
+            .and_then(|value| value.checked_add(frame_size))?;
+        if frame_end > end {
+            break;
+        }
+        if &header[0..4] == b"APIC"
+            && let Some((picture_type, data)) = parse_apic(&bytes[offset + 10..frame_end])
+        {
+            if picture_type == 3 {
+                return Some(data);
+            }
+            if first_picture.is_none() {
+                first_picture = Some(data);
+            }
+        }
+        offset = frame_end;
+    }
+    first_picture
+}
+
+fn parse_apic(payload: &[u8]) -> Option<(u8, Vec<u8>)> {
+    let (&encoding, rest) = payload.split_first()?;
+    let mime_end = rest.iter().position(|byte| *byte == 0)?;
+    let after_mime = rest.get(mime_end + 1..)?;
+    let (&picture_type, description_and_data) = after_mime.split_first()?;
+    let data_start = match encoding {
+        0 | 3 => description_and_data
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|index| index + 1)?,
+        1 | 2 => description_and_data
+            .windows(2)
+            .position(|pair| pair == [0, 0])
+            .map(|index| index + 2)?,
+        _ => return None,
+    };
+    let data = description_and_data.get(data_start..)?;
+    if data.is_empty() || data.len() > REMOTE_MEDIA_MAX_ID3_BYTES || !is_supported_artwork(data) {
+        return None;
+    }
+    Some((picture_type, data.to_vec()))
 }
 
 fn parse_id3_chapters(bytes: &[u8]) -> Vec<MediaChapterInput> {
