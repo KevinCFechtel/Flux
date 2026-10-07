@@ -7,6 +7,12 @@ import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.DownloadOrigin
 import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ListeningListSort
+import uniffi.flux_uniffi.MediaArtworkSource
+
+internal sealed interface AndroidListeningListArtwork {
+    data class RemoteUrl(val url: String) : AndroidListeningListArtwork
+    data class LocalBytes(val bytes: ByteArray) : AndroidListeningListArtwork
+}
 
 internal data class AndroidListeningListState(
     val items: List<ListeningListItem> = emptyList(),
@@ -15,6 +21,7 @@ internal data class AndroidListeningListState(
     val sort: ListeningListSort = ListeningListSort.RECENTLY_ADDED,
     val feedIconVariant: FeedIconVariant = FeedIconVariant.NORMAL,
     val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
+    val artworkByEnclosureId: Map<Long, AndroidListeningListArtwork> = emptyMap(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -55,17 +62,37 @@ internal class AndroidListeningListStore(
                     feedId = selectedFeedId,
                     sort = requested.sort,
                 )
-                Triple(feeds, selectedFeedId, items)
+                val artworkByEnclosureId = buildMap {
+                    items
+                        .flatMap { it.audioEnclosures }
+                        .map { it.enclosure.id }
+                        .distinct()
+                        .forEach { enclosureId ->
+                            when (val source = core.mediaArtworkSource(enclosureId = enclosureId)) {
+                                is MediaArtworkSource.LocalReference -> {
+                                    core.mediaArtwork(reference = source.reference)?.let { bytes ->
+                                        put(enclosureId, AndroidListeningListArtwork.LocalBytes(bytes))
+                                    }
+                                }
+                                is MediaArtworkSource.RemoteUrl -> {
+                                    put(enclosureId, AndroidListeningListArtwork.RemoteUrl(source.url))
+                                }
+                                null -> Unit
+                            }
+                        }
+                }
+                Quadruple(feeds, selectedFeedId, items, artworkByEnclosureId)
             }
         }
 
         if (sessionGeneration != generation) return
         result.fold(
-            onSuccess = { (feeds, selectedFeedId, items) ->
+            onSuccess = { (feeds, selectedFeedId, items, artworkByEnclosureId) ->
                 mutableState.value = mutableState.value.copy(
                     items = items,
                     feeds = feeds,
                     selectedFeedId = selectedFeedId,
+                    artworkByEnclosureId = artworkByEnclosureId,
                     isLoading = false,
                     errorMessage = null,
                 )
@@ -172,4 +199,17 @@ internal class AndroidListeningListStore(
         }
         result
     }
+}
+
+
+private data class Quadruple<A, B, C, D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D,
+) {
+    operator fun component1(): A = first
+    operator fun component2(): B = second
+    operator fun component3(): C = third
+    operator fun component4(): D = fourth
 }
