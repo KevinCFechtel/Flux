@@ -1120,6 +1120,20 @@ There remains exactly one native Android player/media runtime per app process.
 
 Initial E7 implementation starts by extending the existing E6 playback service to one `MediaLibraryService` / `MediaLibrarySession`, adding Android Auto manifest discovery and exposing a process-scoped, disposable Core-backed Listening List projection. Headless service startup must restore the existing account/Core session through `AndroidAccountBootstrap`; it must not require `MainActivity` to have run first.
 
+Current E7 implementation status:
+
+- the E6 service is now the single `MediaLibraryService` / `MediaLibrarySession`, still owning the same ExoPlayer;
+- both Media3 and legacy `android.media.browse.MediaBrowserService` discovery are declared, together with the Android Auto media descriptor;
+- the automotive root projects direct playable Listening List items and keeps feed data only as filter metadata;
+- external item selection and legacy `playFromMediaId` resolve through Core `preparePlayback`, retaining local-download preference, remote fallback and Core resume position;
+- legacy/system `playFromSearch` resolves only within the current Listening List, matching article title or feed title in visible Listening List order;
+- system media metadata includes article title, feed title, duration, MIME type and Core/remote artwork;
+- system seek-back/seek-forward are fixed at 30 seconds and media-button preferences request those actions instead of episode navigation;
+- Next/Previous episode commands are removed from connected-controller command availability; E7 still has no queue or autoplay semantics;
+- external seeks update the shared presentation state and checkpoint through the existing E6 coordinator, while external Stop is reflected back into Flux playback state;
+- the process-scoped automotive projection retains an optional validated feed filter across reloads without introducing feed browse nodes;
+- Android Auto search provides the host-native title/feed narrowing path. A dedicated feed-picker affordance must be accepted against Android Auto/DHU host capabilities; do not emulate it by adding feed branches to the root.
+
 E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
 
 ## 19. E8 — Reserved / no artificial iOS counterpart
