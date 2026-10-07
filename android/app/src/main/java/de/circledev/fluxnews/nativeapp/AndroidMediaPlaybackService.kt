@@ -283,25 +283,32 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             app.mediaTransferCoordinator.revision
                 .drop(1)
                 .collectLatest {
-                    invalidateListeningList()
+                    refreshAndInvalidateListeningList()
                 }
         }
         serviceScope.launch {
             app.coreRuntime.sessionGeneration
                 .drop(1)
-                .collectLatest {
+                .collectLatest { generation ->
                     libraryStore.clear()
-                    invalidateListeningList()
+                    if (generation == null) {
+                        notifyListeningListChanged(0)
+                    } else {
+                        refreshAndInvalidateListeningList()
+                    }
                 }
         }
     }
 
-    private fun invalidateListeningList() {
-        val session = mediaSession ?: return
-        val itemCount = libraryStore.snapshot().items.size
-        session.notifyChildrenChanged(
+    private suspend fun refreshAndInvalidateListeningList() {
+        val refreshed = refreshLibraryForHeadlessBrowser()
+        notifyListeningListChanged(refreshed?.items?.size ?: 0)
+    }
+
+    private fun notifyListeningListChanged(itemCount: Int) {
+        mediaSession?.notifyChildrenChanged(
             AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID,
-            itemCount,
+            itemCount.coerceAtLeast(0),
             null,
         )
     }
