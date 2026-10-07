@@ -1040,6 +1040,13 @@ The initial E6 foundation is implemented on branch `android-e6-media-runtime`:
 - the currently loaded Listening List item is marked `Now Playing` while playing or paused so the relationship between the preview item and active playback stays visible;
 - policy-driven media mutations now reconcile immediately: Listening List add/remove, Downloaded Data deletion, media-policy changes, playback completion/restart and retention evaluation all fan into one `reconcileAndSignal` path;
 - changing download retention immediately runs `evaluateMediaCleanup()` before Android schedules resulting deletion work, while playback completion immediately surfaces Core-owned Delete-after-playback and Remove-completed-Listening-List effects;
+- successful Core sync now reconciles an already loaded but idle Android player to the Core playback position, matching the proven iOS cross-device rule; actively playing audio is never force-seeked by sync;
+- Listening List reload publication is request-generation guarded so stale filter/sort/media refresh work cannot overwrite a newer snapshot;
+- media artwork no longer uses a second Android HTTP image stack: remote artwork goes through the app Coil pipeline, while embedded Core artwork is loaded lazily and held only in a bounded process cache instead of eagerly storing all artwork bytes in Listening List state;
+- media transfer workers use fast IPv6/IPv4 fallback, bounded network timeouts, cooperative body-copy cancellation and explicit OkHttp-call cancellation when WorkManager stops the worker;
+- foreground-to-background Activity transition checkpoints the current playback position without pausing background playback;
+- Player Show Notes publication is request-generation guarded so a stale Reader load cannot publish into a different preview item;
+- focused JVM guards cover idle-vs-playing playback sync policy and latest-request Listening List publication;
 - physical background/process-death acceptance and final E6 real-device refinement remain subsequent E6 work.
 
 E6 consumes the frozen Phase B media domain.
