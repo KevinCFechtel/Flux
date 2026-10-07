@@ -101,8 +101,7 @@ internal fun AndroidCompactMiniPlayer(
     ) {
         value = when (val source = playback.artworkSource) {
             is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
-            is MediaArtworkSource.RemoteUrl ->
-                source.url.takeIf(AndroidArticleActionPolicy::validWebUrl)
+            is MediaArtworkSource.RemoteUrl -> AndroidMediaArtworkLoader.loadRemote(source.url)
             null -> null
         }
     }
