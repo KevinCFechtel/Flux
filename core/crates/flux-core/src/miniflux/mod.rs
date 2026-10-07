@@ -21,6 +21,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 const READ_TIMEOUT: Duration = Duration::from_secs(80);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const MEDIA_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+const MEDIA_PROBE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const MEDIA_PROBE_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CUSTOM_HEADERS: usize = 32;
 const MAX_HEADER_NAME_BYTES: usize = 256;
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
@@ -388,6 +391,14 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_article_by_id(&self, _article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
         Err(CoreError::data("article lookup is unavailable"))
     }
+    fn fetch_media_range(
+        &self,
+        _url: &str,
+        _range: &str,
+        _max_bytes: usize,
+    ) -> Result<Vec<u8>, CoreError> {
+        Err(CoreError::data("media range probing is unavailable"))
+    }
     fn miniflux_capabilities(&self) -> Result<Vec<MinifluxCapability>, CoreError> {
         Err(CoreError::data("Miniflux capabilities are unavailable"))
     }
@@ -447,6 +458,7 @@ pub trait RemoteSource: Send + Sync {
 
 pub struct MinifluxClient {
     agent: ureq::Agent,
+    media_probe_agent: ureq::Agent,
     installation_base: String,
     api_base: String,
     api_key: String,
@@ -485,12 +497,20 @@ impl MinifluxClient {
             .timeout_read(READ_TIMEOUT)
             .timeout_write(WRITE_TIMEOUT)
             .redirects(10);
+        let mut media_probe_builder = ureq::AgentBuilder::new()
+            .timeout(MEDIA_PROBE_TIMEOUT)
+            .timeout_connect(MEDIA_PROBE_CONNECT_TIMEOUT)
+            .timeout_read(MEDIA_PROBE_READ_TIMEOUT)
+            .timeout_write(MEDIA_PROBE_READ_TIMEOUT)
+            .redirects(5);
         #[cfg(any(target_vendor = "apple", target_os = "android"))]
         {
             agent_builder = agent_builder.tls_config(platform_tls_config());
+            media_probe_builder = media_probe_builder.tls_config(platform_tls_config());
         }
         Ok(Self {
             agent: agent_builder.build(),
+            media_probe_agent: media_probe_builder.build(),
             installation_base,
             api_base,
             api_key: api_key.to_string(),
@@ -1025,6 +1045,58 @@ impl MinifluxClient {
         let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
         entry_to_saved_media_article(entry)
     }
+    fn fetch_media_range(
+        &self,
+        url: &str,
+        range: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, CoreError> {
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        let parsed = url::Url::parse(url)
+            .map_err(|_| CoreError::data("media probe URL is invalid"))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(CoreError::data("media probe URL must use HTTP(S)"));
+        }
+
+        let response = self
+            .media_probe_agent
+            .get(url)
+            .set("Accept", "audio/*,video/*,application/octet-stream;q=0.8,*/*;q=0.1")
+            .set("Range", range)
+            .call()
+            .map_err(map_http_error)?;
+
+        let status = response.status();
+        if status != 206 {
+            let length = response
+                .header("Content-Length")
+                .and_then(|value| value.parse::<usize>().ok());
+            if status != 200 || length.is_none_or(|length| length > max_bytes) {
+                return Err(CoreError::data("media server ignored bounded Range request"));
+            }
+        }
+
+        if response
+            .header("Content-Length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|length| length > max_bytes)
+        {
+            return Err(CoreError::data("media probe response exceeds byte budget"));
+        }
+
+        let mut reader = response.into_reader().take((max_bytes + 1) as u64);
+        let mut bytes = Vec::with_capacity(max_bytes.min(256 * 1024));
+        reader.read_to_end(&mut bytes).map_err(|error| {
+            CoreError::connectivity(format!("media probe read failed: {error}"))
+        })?;
+        if bytes.len() > max_bytes {
+            return Err(CoreError::data("media probe response exceeds byte budget"));
+        }
+        Ok(bytes)
+    }
+
     fn search_articles(
         &self,
         request: SearchArticlesRequest,
