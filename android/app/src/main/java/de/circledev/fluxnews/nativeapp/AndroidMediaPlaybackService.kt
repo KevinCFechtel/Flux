@@ -365,13 +365,13 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
-            .setSeekBackIncrementMs(30_000L)
+            .setSeekBackIncrementMs(15_000L)
             .setSeekForwardIncrementMs(30_000L)
             .build()
 
         val mediaButtonPreferences = listOf(
-            CommandButton.Builder(CommandButton.ICON_SKIP_BACK_30)
-                .setDisplayName("Back 30 seconds")
+            CommandButton.Builder(CommandButton.ICON_SKIP_BACK_15)
+                .setDisplayName("Back 15 seconds")
                 .setPlayerCommand(Player.COMMAND_SEEK_BACK)
                 .setSlots(CommandButton.SLOT_BACK)
                 .build(),
