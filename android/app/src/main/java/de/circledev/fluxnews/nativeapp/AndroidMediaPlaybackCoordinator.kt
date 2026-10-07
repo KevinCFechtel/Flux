@@ -146,6 +146,11 @@ internal sealed interface AndroidResolvedPlaybackSource {
     data class Remote(val url: String) : AndroidResolvedPlaybackSource
 }
 
+internal data class AndroidMediaSessionPreparation(
+    val mediaItem: MediaItem,
+    val startPositionMs: Long,
+)
+
 internal class AndroidMediaSourceResolver(
     private val mediaRoot: File,
 ) {
@@ -276,6 +281,19 @@ internal class AndroidMediaPlaybackCoordinator(
             }
         }
 
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            mutableState.value = mutableState.value.copy(
+                positionMs = newPosition.positionMs.coerceAtLeast(0L),
+            )
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                scope.launch { checkpointCurrent() }
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             mutableState.value = mutableState.value.copy(
                 isLoading = false,
@@ -289,6 +307,45 @@ internal class AndroidMediaPlaybackCoordinator(
     }
 
     suspend fun prepare(enclosureId: Long): PlaybackPreparation = commandMutex.withLock {
+        val resolved = resolvePlaybackPreparationLocked(enclosureId)
+        val mediaController = controller()
+
+        withContext(Dispatchers.Main.immediate) {
+            mediaController.pause()
+            mediaController.setMediaItem(resolved.mediaItem, resolved.startPositionMs)
+            mediaController.setPlaybackSpeed(mutableState.value.playbackRate)
+            mediaController.prepare()
+        }
+
+        resolved.preparation
+    }
+
+    /**
+     * Resolves an Android Auto / external MediaSession selection through the exact same Core source
+     * and resume rules as the in-app player, but leaves Media3 to execute the requested set/play
+     * command after the session callback returns.
+     */
+    suspend fun prepareForMediaSession(enclosureId: Long): AndroidMediaSessionPreparation =
+        commandMutex.withLock {
+            val resolved = resolvePlaybackPreparationLocked(enclosureId)
+            // External playback still needs the process-scoped coordinator listener so pause/seek,
+            // completion and periodic checkpoint semantics stay identical to in-app playback.
+            controller()
+            AndroidMediaSessionPreparation(
+                mediaItem = resolved.mediaItem,
+                startPositionMs = resolved.startPositionMs,
+            )
+        }
+
+    private data class ResolvedPlaybackPreparation(
+        val preparation: PlaybackPreparation,
+        val mediaItem: MediaItem,
+        val startPositionMs: Long,
+    )
+
+    private suspend fun resolvePlaybackPreparationLocked(
+        enclosureId: Long,
+    ): ResolvedPlaybackPreparation {
         require(enclosureId > 0L)
         val generation = coreRuntime.activeSessionGeneration()
             ?: error("No active Core session.")
@@ -307,7 +364,6 @@ internal class AndroidMediaPlaybackCoordinator(
         val preparation = prepared.first
         val chapters = prepared.second
         val source = sourceResolver.resolve(preparation)
-        val mediaController = controller()
 
         activeGeneration = generation
         completionSent = false
@@ -316,7 +372,7 @@ internal class AndroidMediaPlaybackCoordinator(
             ?.toLong()
 
         val startPositionMs = if (preparation.playbackState.status == PlaybackStatus.IN_PROGRESS) {
-            preparation.playbackState.positionMs.toLong()
+            preparation.playbackState.positionMs.toLong().coerceAtLeast(0L)
         } else {
             0L
         }
@@ -340,13 +396,6 @@ internal class AndroidMediaPlaybackCoordinator(
             )
             .build()
 
-        withContext(Dispatchers.Main.immediate) {
-            mediaController.pause()
-            mediaController.setMediaItem(mediaItem, startPositionMs.coerceAtLeast(0L))
-            mediaController.setPlaybackSpeed(mutableState.value.playbackRate)
-            mediaController.prepare()
-        }
-
         mutableState.value = mutableState.value.copy(
             enclosureId = enclosureId,
             articleId = preparation.enclosure.articleId,
@@ -369,7 +418,12 @@ internal class AndroidMediaPlaybackCoordinator(
             artworkSource = preparation.artworkSource,
             errorMessage = null,
         )
-        preparation
+
+        return ResolvedPlaybackPreparation(
+            preparation = preparation,
+            mediaItem = mediaItem,
+            startPositionMs = startPositionMs,
+        )
     }
 
     suspend fun play(enclosureId: Long) {
@@ -406,6 +460,17 @@ internal class AndroidMediaPlaybackCoordinator(
             withContext(Dispatchers.Main.immediate) {
                 mediaController.pause()
             }
+            mutableState.value = mutableState.value.copy(
+                status = AndroidMediaPlaybackPresentationStatus.Stopped,
+            )
+            stopRuntimeJobs()
+            checkpointCurrent()
+        }
+    }
+
+    suspend fun handleExternalStop() {
+        commandMutex.withLock {
+            if (mutableState.value.enclosureId == null) return@withLock
             mutableState.value = mutableState.value.copy(
                 status = AndroidMediaPlaybackPresentationStatus.Stopped,
             )
