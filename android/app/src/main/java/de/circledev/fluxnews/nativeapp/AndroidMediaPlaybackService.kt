@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -382,6 +383,11 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         )
         val filterButton = CommandButton.Builder(CommandButton.ICON_PLAYLIST_ADD)
             .setDisplayName("Filter by Feed")
+            .setIconUri(
+                Uri.parse(
+                    "android.resource://$packageName/drawable/ic_filter",
+                ),
+            )
             .setSessionCommand(
                 SessionCommand(
                     AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION,
