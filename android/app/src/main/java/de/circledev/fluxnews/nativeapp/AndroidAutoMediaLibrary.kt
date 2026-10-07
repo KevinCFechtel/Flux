@@ -17,6 +17,10 @@ import uniffi.flux_uniffi.ListeningListSort
  */
 internal object AndroidAutoMediaLibraryProjection {
     const val ROOT_MEDIA_ID = "flux:listening-list"
+    const val FILTER_ROOT_MEDIA_ID = "flux:listening-list:filter"
+    const val FILTER_ALL_MEDIA_ID = "flux:listening-list:filter:all"
+    const val FILTER_COMMAND_ACTION = "flux:auto:filter-by-feed"
+    private const val FILTER_FEED_PREFIX = "flux:listening-list:filter:feed:"
 
     fun rootItem(): MediaItem =
         MediaItem.Builder()
@@ -24,6 +28,79 @@ internal object AndroidAutoMediaLibraryProjection {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle("Listening List")
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
+                    .setSupportedCommands(listOf(FILTER_COMMAND_ACTION))
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .build(),
+            )
+            .build()
+
+    fun filterRootItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(FILTER_ROOT_MEDIA_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("Filter by Feed")
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .build(),
+            )
+            .build()
+
+    fun filterItems(snapshot: AndroidAutoMediaLibrarySnapshot): List<MediaItem> =
+        buildList {
+            add(
+                filterChoiceItem(
+                    mediaId = FILTER_ALL_MEDIA_ID,
+                    title = "All Feeds",
+                    selected = snapshot.selectedFeedId == null,
+                    count = snapshot.feeds.sumOf { it.itemCount },
+                ),
+            )
+            snapshot.feeds.forEach { feed ->
+                add(
+                    filterChoiceItem(
+                        mediaId = FILTER_FEED_PREFIX + feed.feedId,
+                        title = feed.feedTitle.ifBlank { "Unknown Feed" },
+                        selected = snapshot.selectedFeedId == feed.feedId,
+                        count = feed.itemCount,
+                    ),
+                )
+            }
+        }
+
+    fun filterFeedId(mediaId: String): Long? = when {
+        mediaId == FILTER_ALL_MEDIA_ID -> null
+        mediaId.startsWith(FILTER_FEED_PREFIX) ->
+            mediaId.removePrefix(FILTER_FEED_PREFIX).toLongOrNull()?.takeIf { it > 0L }
+        else -> null
+    }
+
+    fun isFilterChoice(mediaId: String): Boolean =
+        mediaId == FILTER_ALL_MEDIA_ID || mediaId.startsWith(FILTER_FEED_PREFIX)
+
+    fun filterChoiceItem(
+        snapshot: AndroidAutoMediaLibrarySnapshot,
+        mediaId: String,
+    ): MediaItem? =
+        filterItems(snapshot).firstOrNull { it.mediaId == mediaId }
+
+    private fun filterChoiceItem(
+        mediaId: String,
+        title: String,
+        selected: Boolean,
+        count: ULong,
+    ): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(if (selected) "✓ $title" else title)
+                    .setSubtitle(
+                        if (count == 1uL) "1 item" else "$count items",
+                    )
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
