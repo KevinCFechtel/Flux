@@ -79,6 +79,7 @@ import uniffi.flux_uniffi.ReaderDocument
 internal fun AndroidMediaPlayerSheet(
     coordinator: AndroidMediaPlaybackCoordinator,
     previewItem: ListeningListItem? = null,
+    mediaRevision: Long = 0L,
     onDismiss: () -> Unit,
 ) {
     val playback by coordinator.state.collectAsState()
@@ -144,6 +145,7 @@ internal fun AndroidMediaPlayerSheet(
         key1 = displayedEnclosureId,
         key2 = isPreviewingInactiveItem,
         key3 = playback.artworkSource,
+        key4 = mediaRevision,
     ) {
         value = if (isPreviewingInactiveItem) {
             displayedEnclosureId?.let { coordinator.artworkSource(it) }
@@ -156,6 +158,7 @@ internal fun AndroidMediaPlayerSheet(
         key1 = displayedEnclosureId,
         key2 = isPreviewingInactiveItem,
         key3 = playback.chapters,
+        key4 = mediaRevision,
     ) {
         value = if (isPreviewingInactiveItem) {
             displayedEnclosureId?.let { coordinator.chapters(it) }.orEmpty()
