@@ -363,6 +363,7 @@ private fun AndroidListeningListRow(
                     )
                     Text(
                         item.feedTitle.ifBlank { "Unknown Feed" },
+                        modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
