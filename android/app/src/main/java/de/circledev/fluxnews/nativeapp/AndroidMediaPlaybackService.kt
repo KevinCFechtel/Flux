@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -8,10 +9,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -33,6 +37,11 @@ import kotlinx.coroutines.withContext
  * Core-backed Listening List without introducing a second player, queue, database or cache.
  */
 class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackHost {
+    private companion object {
+        const val CUSTOM_BROWSER_RESULT_BROWSE_NODE_KEY =
+            "androidx.media.utils.extras.KEY_CUSTOM_BROWSER_ACTION_RESULT_BROWSE_NODE"
+    }
+
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -59,10 +68,20 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .build()
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .add(
+                    SessionCommand(
+                        AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION,
+                        Bundle.EMPTY,
+                    ),
+                )
+                .build()
 
             return Futures.immediateFuture(
                 MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
                     .setAvailablePlayerCommands(playerCommands)
+                    .setAvailableSessionCommands(sessionCommands)
                     .build(),
             )
         }
@@ -83,35 +102,88 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             page: Int,
             pageSize: Int,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            if (parentId != AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID) {
-                return com.google.common.util.concurrent.Futures.immediateFuture(
-                    LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE, params),
-                )
-            }
-
-            return libraryResultFuture {
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
+            libraryResultFuture {
                 val snapshot = refreshLibraryForHeadlessBrowser()
                     ?: return@libraryResultFuture LibraryResult.ofItemList(emptyList(), params)
+
+                val items = when {
+                    parentId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID -> snapshot.items
+
+                    parentId == AndroidAutoMediaLibraryProjection.FILTER_ROOT_MEDIA_ID ->
+                        AndroidAutoMediaLibraryProjection.filterItems(snapshot)
+
+                    AndroidAutoMediaLibraryProjection.isFilterChoice(parentId) -> {
+                        val requestedFeedId =
+                            AndroidAutoMediaLibraryProjection.filterFeedId(parentId)
+                        if (
+                            requestedFeedId != null &&
+                            snapshot.feeds.none { it.feedId == requestedFeedId }
+                        ) {
+                            return@libraryResultFuture LibraryResult.ofError(
+                                LibraryResult.RESULT_ERROR_BAD_VALUE,
+                                params,
+                            )
+                        }
+                        val filtered = libraryStore.refresh(
+                            generation = snapshot.sessionGeneration
+                                ?: return@libraryResultFuture LibraryResult.ofItemList(
+                                    emptyList(),
+                                    params,
+                                ),
+                            feedId = requestedFeedId,
+                        )
+                        notifyListeningListChanged(filtered.items.size)
+                        filtered.items
+                    }
+
+                    else -> return@libraryResultFuture LibraryResult.ofError(
+                        LibraryResult.RESULT_ERROR_BAD_VALUE,
+                        params,
+                    )
+                }
+
                 val from = (page.toLong() * pageSize.toLong())
-                    .coerceAtMost(snapshot.items.size.toLong())
+                    .coerceAtMost(items.size.toLong())
                     .toInt()
-                val to = (from + pageSize).coerceAtMost(snapshot.items.size)
-                LibraryResult.ofItemList(snapshot.items.subList(from, to), params)
+                val to = (from + pageSize).coerceAtMost(items.size)
+                LibraryResult.ofItemList(items.subList(from, to), params)
             }
-        }
 
         override fun onGetItem(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> =
-            if (mediaId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID) {
-                Futures.immediateFuture(
-                    LibraryResult.ofItem(AndroidAutoMediaLibraryProjection.rootItem(), null),
-                )
-            } else {
-                libraryResultFuture {
+            when {
+                mediaId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID ->
+                    Futures.immediateFuture(
+                        LibraryResult.ofItem(
+                            AndroidAutoMediaLibraryProjection.rootItem(),
+                            null,
+                        ),
+                    )
+
+                mediaId == AndroidAutoMediaLibraryProjection.FILTER_ROOT_MEDIA_ID ->
+                    Futures.immediateFuture(
+                        LibraryResult.ofItem(
+                            AndroidAutoMediaLibraryProjection.filterRootItem(),
+                            null,
+                        ),
+                    )
+
+                AndroidAutoMediaLibraryProjection.isFilterChoice(mediaId) ->
+                    libraryResultFuture {
+                        val snapshot = refreshLibraryForHeadlessBrowser()
+                            ?: return@libraryResultFuture LibraryResult.ofError(
+                                LibraryResult.RESULT_ERROR_BAD_VALUE,
+                            )
+                        AndroidAutoMediaLibraryProjection.filterChoiceItem(snapshot, mediaId)
+                            ?.let { LibraryResult.ofItem(it, null) }
+                            ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                    }
+
+                else -> libraryResultFuture {
                     val cached = libraryStore.snapshot().itemsByMediaId[mediaId]
                     val item = cached ?: refreshLibraryForHeadlessBrowser()
                         ?.itemsByMediaId
@@ -155,6 +227,41 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 val to = (from + pageSize).coerceAtMost(results.size)
                 LibraryResult.ofItemList(results.subList(from, to), params)
             }
+
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (
+                customCommand.customAction !=
+                AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION
+            ) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+
+            val mediaId = args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)
+            if (
+                mediaId != null &&
+                mediaId != AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID
+            ) {
+                return Futures.immediateFuture(
+                    SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE),
+                )
+            }
+
+            val resultExtras = Bundle().apply {
+                putString(
+                    CUSTOM_BROWSER_RESULT_BROWSE_NODE_KEY,
+                    AndroidAutoMediaLibraryProjection.FILTER_ROOT_MEDIA_ID,
+                )
+            }
+            return Futures.immediateFuture(
+                SessionResult(SessionResult.RESULT_SUCCESS, resultExtras),
+            )
+        }
 
 
         /**
@@ -271,8 +378,19 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 .setSlots(CommandButton.SLOT_FORWARD)
                 .build(),
         )
+        val filterButton = CommandButton.Builder(CommandButton.ICON_PLAYLIST_ADD)
+            .setDisplayName("Filter by Feed")
+            .setSessionCommand(
+                SessionCommand(
+                    AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION,
+                    Bundle.EMPTY,
+                ),
+            )
+            .build()
+
         mediaSession = MediaLibrarySession.Builder(this, player, libraryCallback)
             .setMediaButtonPreferences(mediaButtonPreferences)
+            .setCommandButtonsForMediaItems(listOf(filterButton))
             .build()
         mediaRuntime.attachPlaybackHost(this)
         observeLibraryChanges()
