@@ -393,7 +393,7 @@ internal class AndroidMediaPlaybackCoordinator(
             .setTitle(preparation.articleTitle)
             .setArtist(preparation.feedTitle)
             .setAlbumTitle(preparation.feedTitle)
-            .setArtworkUri(AndroidAutoArtworkProvider.uri(applicationContext, enclosureId))
+            .setArtworkUri(AndroidAutoArtworkProvider.nowPlayingUri(applicationContext, enclosureId))
             .apply {
                 preparedDurationMs
                     ?.takeIf { it >= 0L }
