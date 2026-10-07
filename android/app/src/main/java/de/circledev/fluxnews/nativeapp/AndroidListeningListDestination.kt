@@ -356,7 +356,7 @@ private fun AndroidListeningListRow(
             AndroidListeningListArtwork(
                 artwork = artwork,
                 playbackCoordinator = playbackCoordinator,
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier.size(88.dp),
             )
 
             Column(
