@@ -63,7 +63,7 @@ struct IOSListeningListView: View {
                     refreshToken: artworkRefreshToken(artworkEnclosure),
                     playbackCoordinator: playbackCoordinator
                 )
-                .frame(width: 56, height: 56)
+                .frame(width: 88, height: 88)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(
@@ -100,21 +100,23 @@ struct IOSListeningListView: View {
                         )
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        if let date = Self.isoFormatter.date(
-                            from: item.publishedAt
-                        ) {
-                            Text("·")
-                            Text(
-                                date.formatted(
-                                    date: .abbreviated,
-                                    time: .omitted
-                                )
-                            )
-                            .fixedSize(horizontal: true, vertical: false)
-                        }
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                    if let date = Self.isoFormatter.date(
+                        from: item.publishedAt
+                    ) {
+                        Text(
+                            date.formatted(
+                                date: .abbreviated,
+                                time: .omitted
+                            )
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
