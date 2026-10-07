@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -451,11 +452,19 @@ struct IOSListeningListView: View {
     }
 
     private struct IOSListeningListArtworkView: View {
+        private static let cache = NSCache<NSString, UIImage>()
+        private static let fallbackImage: UIImage? = AppleFallbackArtwork.data()
+            .flatMap(UIImage.init(data:))
+
         let enclosureID: Int64?
         let refreshToken: String
         let playbackCoordinator: IOSMediaPlaybackCoordinator
 
         @State private var image: UIImage?
+
+        private var cacheKey: NSString? {
+            enclosureID.map { "\($0)|\(refreshToken)" as NSString }
+        }
 
         var body: some View {
             Group {
@@ -463,8 +472,7 @@ struct IOSListeningListView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                } else if let fallbackData = AppleFallbackArtwork.data(),
-                          let fallback = UIImage(data: fallbackData) {
+                } else if let fallback = Self.fallbackImage {
                     Image(uiImage: fallback)
                         .resizable()
                         .scaledToFill()
@@ -477,21 +485,65 @@ struct IOSListeningListView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .task(id: refreshToken) {
-                guard let enclosureID else {
+            .task(id: refreshToken, priority: .utility) {
+                guard let enclosureID, let cacheKey else {
                     image = nil
                     return
                 }
+                if let cached = Self.cache.object(forKey: cacheKey) {
+                    image = cached
+                    return
+                }
+
+                // Avoid starting network/Core work for rows that only flash by
+                // during a fast scroll. SwiftUI cancels the task when the row
+                // leaves the hierarchy.
+                try? await Task.sleep(nanoseconds: 90_000_000)
+                guard !Task.isCancelled else { return }
+
                 guard let source = await playbackCoordinator.previewArtworkSource(
                     enclosureID: enclosureID
                 ),
                       let data = await playbackCoordinator.artwork(source: source),
-                      let loaded = UIImage(data: data) else {
+                      !Task.isCancelled,
+                      let prepared = await Self.prepareThumbnail(data) else {
                     image = nil
                     return
                 }
-                image = loaded
+
+                Self.cache.setObject(prepared, forKey: cacheKey, cost: prepared.pixelCost)
+                image = prepared
             }
+        }
+
+        private static func prepareThumbnail(_ data: Data) async -> UIImage? {
+            await Task.detached(priority: .utility) {
+                let maxPixelSize = Int((56 * max(UIScreen.main.scale, 1)).rounded(.up))
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+                    return nil
+                }
+                let options: CFDictionary = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary
+                guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                    source,
+                    0,
+                    options
+                ) else {
+                    return nil
+                }
+                return UIImage(cgImage: thumbnail)
+            }.value
+        }
+    }
+
+    private extension UIImage {
+        var pixelCost: Int {
+            guard let cgImage else { return 0 }
+            return cgImage.bytesPerRow * cgImage.height
         }
     }
 
