@@ -267,12 +267,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         if (normalized.isEmpty()) return emptyList()
         val snapshot = refreshLibraryForHeadlessBrowser() ?: return emptyList()
         return snapshot.items.filter { item ->
-            item.mediaMetadata.title
-                ?.toString()
-                ?.contains(normalized, ignoreCase = true) == true ||
-                item.mediaMetadata.artist
-                    ?.toString()
-                    ?.contains(normalized, ignoreCase = true) == true
+            AndroidAutoMediaLibraryProjection.matchesSearch(item, normalized)
         }
     }
 
