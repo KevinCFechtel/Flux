@@ -460,6 +460,69 @@ internal class AndroidMediaPlaybackCoordinator(
         }
     }
 
+    suspend fun reconcileAfterSuccessfulSync(
+        sessionGeneration: Long? = coreRuntime.activeSessionGeneration(),
+    ) = commandMutex.withLock {
+        val generation = sessionGeneration ?: return@withLock
+        val before = mutableState.value
+        val enclosureId = before.enclosureId ?: return@withLock
+        if (
+            coreRuntime.activeSessionGeneration() != generation ||
+            before.status == AndroidMediaPlaybackPresentationStatus.Playing
+        ) {
+            return@withLock
+        }
+
+        val playbackState = runCatching {
+            coreRuntime.localForGeneration(generation) { core ->
+                core.playbackState(enclosureId = enclosureId)
+            }
+        }.getOrNull() ?: return@withLock
+
+        if (
+            coreRuntime.activeSessionGeneration() != generation ||
+            mutableState.value.enclosureId != enclosureId ||
+            mutableState.value.status == AndroidMediaPlaybackPresentationStatus.Playing
+        ) {
+            return@withLock
+        }
+
+        val targetPositionMs = if (playbackState.status == PlaybackStatus.COMPLETED) {
+            (playbackState.durationMs ?: playbackState.positionMs).toLong()
+        } else {
+            playbackState.positionMs.toLong()
+        }
+        val targetDurationMs = playbackState.durationMs?.toLong()
+
+        controller?.let { mediaController ->
+            withContext(Dispatchers.Main.immediate) {
+                if (
+                    !mediaController.isPlaying &&
+                    mediaController.currentPosition.coerceAtLeast(0L) != targetPositionMs
+                ) {
+                    mediaController.seekTo(targetPositionMs.coerceAtLeast(0L))
+                }
+            }
+        }
+
+        if (
+            coreRuntime.activeSessionGeneration() != generation ||
+            mutableState.value.enclosureId != enclosureId ||
+            mutableState.value.status == AndroidMediaPlaybackPresentationStatus.Playing
+        ) {
+            return@withLock
+        }
+
+        preparedStatus = playbackState.status
+        targetDurationMs?.let {
+            lastObservedDurationMs = it
+        }
+        mutableState.value = mutableState.value.copy(
+            positionMs = targetPositionMs.coerceAtLeast(0L),
+            durationMs = targetDurationMs ?: mutableState.value.durationMs,
+        )
+    }
+
     suspend fun artworkSource(enclosureId: Long): MediaArtworkSource? {
         val generation = activeGeneration ?: coreRuntime.activeSessionGeneration() ?: return null
         return runCatching {
