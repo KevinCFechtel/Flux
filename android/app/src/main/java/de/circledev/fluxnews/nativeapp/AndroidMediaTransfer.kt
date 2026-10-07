@@ -21,7 +21,10 @@ import java.io.FileOutputStream
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -287,7 +290,13 @@ internal class AndroidMediaDownloadWorker(
 ) : CoroutineWorker(appContext, parameters) {
     private val application = appContext.applicationContext as FluxApplication
     private val enclosureId = AndroidMediaTransferWorkerInput.enclosureId(parameters)
-    private val httpClient = OkHttpClient.Builder().build()
+    private val httpClient = OkHttpClient.Builder()
+        .fastFallback(true)
+        .retryOnConnectionFailure(true)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .build()
 
     override suspend fun doWork(): Result {
         if (enclosureId <= 0L) return Result.failure()
@@ -359,6 +368,7 @@ internal class AndroidMediaDownloadWorker(
                             var downloaded = 0L
                             var lastReported = 0L
                             while (true) {
+                                currentCoroutineContext().ensureActive()
                                 val read = input.read(buffer)
                                 if (read < 0) break
                                 output.write(buffer, 0, read)
