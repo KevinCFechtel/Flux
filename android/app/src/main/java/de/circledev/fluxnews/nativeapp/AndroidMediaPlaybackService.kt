@@ -344,7 +344,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         return future
     }
 
-    private fun <T> libraryResultFuture(
+    private fun <T : Any> libraryResultFuture(
         block: suspend () -> LibraryResult<T>,
     ): ListenableFuture<LibraryResult<T>> {
         val future = SettableFuture.create<LibraryResult<T>>()
@@ -357,7 +357,11 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                     "android-auto",
                     "Media library request failed: ${failure.javaClass.simpleName}",
                 )
-                future.set(LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN))
+                future.set(
+                    LibraryResult.ofError<T>(
+                        LibraryResult.RESULT_ERROR_UNKNOWN,
+                    ),
+                )
             }
         }
         return future
