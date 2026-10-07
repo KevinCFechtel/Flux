@@ -22,6 +22,7 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import uniffi.flux_uniffi.DownloadFailureKind
@@ -297,6 +299,12 @@ internal class AndroidMediaDownloadWorker(
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(60, TimeUnit.SECONDS)
         .build()
+    private val activeCall = AtomicReference<Call?>(null)
+
+    override fun onStopped() {
+        activeCall.getAndSet(null)?.cancel()
+        super.onStopped()
+    }
 
     override suspend fun doWork(): Result {
         if (enclosureId <= 0L) return Result.failure()
@@ -345,8 +353,12 @@ internal class AndroidMediaDownloadWorker(
                 application.mediaTransferCoordinator.clearProgress(enclosureId)
                 return Result.success()
             }
-            val response = withContext(Dispatchers.IO) {
-                httpClient.newCall(Request.Builder().url(work.url).build()).execute()
+            val call = httpClient.newCall(Request.Builder().url(work.url).build())
+            activeCall.set(call)
+            val response = try {
+                withContext(Dispatchers.IO) { call.execute() }
+            } finally {
+                activeCall.compareAndSet(call, null)
             }
             response.use { result ->
                 if (!result.isSuccessful) {
@@ -419,6 +431,10 @@ internal class AndroidMediaDownloadWorker(
             throw cancelled
         } catch (failure: Throwable) {
             temporary.delete()
+            if (isStopped) {
+                application.mediaTransferCoordinator.clearProgress(enclosureId)
+                return Result.success()
+            }
             val kind = when (failure) {
                 is java.io.IOException -> DownloadFailureKind.NETWORK
                 is SecurityException -> DownloadFailureKind.STORAGE
