@@ -186,23 +186,13 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 val snapshot = refreshLibraryForHeadlessBrowser()
                     ?: throw IllegalStateException("FluxNews media library is unavailable.")
 
-                val requestedMediaItem = requested.mediaId
-                    .toLongOrNull()
-                    ?.takeIf { it > 0L }
-                    ?.let { enclosureId ->
-                        snapshot.itemsByMediaId[enclosureId.toString()]
-                    }
-                    ?: requested.requestMetadata.searchQuery
-                        ?.trim()
-                        ?.takeIf(String::isNotEmpty)
-                        ?.let { query ->
-                            snapshot.items.firstOrNull { item ->
-                                AndroidAutoMediaLibraryProjection.matchesSearch(item, query)
-                            }
-                        }
-                    ?: throw IllegalArgumentException(
-                        "Requested media is not in the Listening List.",
-                    )
+                val requestedMediaItem = AndroidAutoMediaRequestPolicy.resolve(
+                    snapshot = snapshot,
+                    mediaId = requested.mediaId,
+                    searchQuery = requested.requestMetadata.searchQuery,
+                ) ?: throw IllegalArgumentException(
+                    "Requested media is not in the Listening List.",
+                )
 
                 val enclosureId = requestedMediaItem.mediaId
                     .toLongOrNull()
