@@ -9,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.flux_uniffi.Enclosure
 import uniffi.flux_uniffi.ListeningListEnclosure
+import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.MediaKind
 
@@ -126,6 +127,36 @@ class AndroidAutoMediaLibraryProjectionTest {
                 searchQuery = "episode",
             )?.mediaId,
         )
+    }
+
+    @Test
+    fun feedFilterChoicesStayOutsideTheEpisodeRoot() {
+        val episode = requireNotNull(
+            AndroidAutoMediaLibraryProjection.mediaItem(
+                item(activeEnclosureId = 41L, enclosureIds = listOf(41L)),
+            ),
+        )
+        val snapshot = AndroidAutoMediaLibrarySnapshot(
+            selectedFeedId = 9L,
+            items = listOf(episode),
+            itemsByMediaId = mapOf(episode.mediaId to episode),
+            feeds = listOf(
+                ListeningListFeed(feedId = 9L, feedTitle = "Feed", itemCount = 3uL),
+                ListeningListFeed(feedId = 10L, feedTitle = "Other Feed", itemCount = 2uL),
+            ),
+        )
+
+        assertEquals(listOf(episode), snapshot.items)
+
+        val filterItems = AndroidAutoMediaLibraryProjection.filterItems(snapshot)
+        assertEquals(3, filterItems.size)
+        assertEquals(
+            AndroidAutoMediaLibraryProjection.FILTER_ALL_MEDIA_ID,
+            filterItems.first().mediaId,
+        )
+        assertTrue(filterItems[1].mediaMetadata.title.toString().startsWith("✓ "))
+        assertEquals(9L, AndroidAutoMediaLibraryProjection.filterFeedId(filterItems[1].mediaId))
+        assertEquals(null, AndroidAutoMediaLibraryProjection.filterFeedId(filterItems.first().mediaId))
     }
 
     @Test
