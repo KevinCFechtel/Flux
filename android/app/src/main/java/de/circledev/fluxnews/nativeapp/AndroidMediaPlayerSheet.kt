@@ -412,15 +412,10 @@ private fun AndroidMediaPlayerTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, top = 10.dp, end = 8.dp, bottom = 8.dp),
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
     ) {
-        Text(
-            "Player",
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
         if (completed) {
             Box {
                 IconButton(onClick = { onOverflowChange(true) }) {
