@@ -179,7 +179,7 @@ internal fun AndroidMediaPlayerSheet(
     ) {
         value = when (val source = displayedArtworkSource) {
             is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
-            is MediaArtworkSource.RemoteUrl -> AndroidMediaArtworkLoader.loadRemote(source.url)
+            is MediaArtworkSource.RemoteUrl -> source.url
             null -> null
         }
     }
