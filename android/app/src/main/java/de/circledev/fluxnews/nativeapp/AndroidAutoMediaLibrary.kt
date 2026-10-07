@@ -13,6 +13,7 @@ import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListFeed
 import uniffi.flux_uniffi.ListeningListItem
 import uniffi.flux_uniffi.ListeningListSort
+import uniffi.flux_uniffi.PlaybackStatus
 
 /**
  * Android Auto / system-media browse projection over the Core-owned Listening List.
