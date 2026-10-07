@@ -61,8 +61,8 @@ class AndroidAutoArtworkProvider : ContentProvider() {
             getType(uri),
             Bundle.EMPTY,
             enclosureId,
-        ) { output, _, _, _, id ->
-            val bytes = resolveArtworkBytes(id) ?: fallbackArtworkBytes(nowPlaying)
+        ) { output, _, _, _, _ ->
+            val bytes = resolveArtworkBytes(enclosureId) ?: fallbackArtworkBytes(nowPlaying)
             ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
                 stream.write(bytes)
             }
