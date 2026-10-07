@@ -32,13 +32,13 @@ internal object AndroidMediaArtworkLoader {
             .build()
 
         runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
+            client.newCall(request).execute().use responseUse@{ response ->
+                if (!response.isSuccessful) return@responseUse null
                 val body = response.body
                 val contentLength = body.contentLength()
-                if (contentLength > MaxArtworkBytes) return@use null
+                if (contentLength > MaxArtworkBytes.toLong()) return@responseUse null
 
-                body.byteStream().use { input ->
+                body.byteStream().use inputUse@{ input ->
                     val output = java.io.ByteArrayOutputStream(
                         if (contentLength in 1..MaxArtworkBytes.toLong()) {
                             contentLength.toInt()
@@ -52,7 +52,7 @@ internal object AndroidMediaArtworkLoader {
                         val read = input.read(buffer)
                         if (read < 0) break
                         total += read
-                        if (total > MaxArtworkBytes) return@use null
+                        if (total > MaxArtworkBytes) return@inputUse null
                         output.write(buffer, 0, read)
                     }
                     output.toByteArray().takeIf { it.isNotEmpty() }
