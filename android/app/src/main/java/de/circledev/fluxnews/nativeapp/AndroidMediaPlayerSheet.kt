@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -861,9 +862,18 @@ private fun AndroidMediaChapterSection(
             if (expanded) {
                 HorizontalDivider()
                 chapters.forEachIndexed { index, chapter ->
+                    val isActive = index == activeIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                } else {
+                                    androidx.compose.ui.graphics.Color.Transparent
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                            )
                             .clickable { onSelect(chapter.startMs.toLong()) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -872,16 +882,25 @@ private fun AndroidMediaChapterSection(
                             Text(
                                 chapter.title.takeIf { it.isNotBlank() }
                                     ?: "Chapter " + (index + 1),
-                                fontWeight = if (index == activeIndex) {
+                                fontWeight = if (isActive) {
                                     FontWeight.SemiBold
                                 } else {
                                     FontWeight.Normal
+                                },
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
                                 },
                             )
                             Text(
                                 androidPlayerTime(chapter.startMs.toLong()),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                     }
