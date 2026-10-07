@@ -53,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -125,6 +126,7 @@ internal fun AndroidMediaPlayerSheet(
     var showNotesLoading by remember { mutableStateOf(false) }
     var showNotesError by remember { mutableStateOf<String?>(null) }
     var showNotesDocument by remember { mutableStateOf<ReaderDocument?>(null) }
+    var showNotesRequestGeneration by remember { mutableLongStateOf(0L) }
     var seeking by remember { mutableStateOf(false) }
     var seekValue by remember(displayedEnclosureId) {
         mutableFloatStateOf(displayedPositionMs.toFloat())
@@ -134,6 +136,7 @@ internal fun AndroidMediaPlayerSheet(
         if (!seeking) seekValue = displayedPositionMs.toFloat()
     }
     LaunchedEffect(displayedArticleId) {
+        showNotesRequestGeneration += 1L
         showNotesExpanded = false
         showNotesLoading = false
         showNotesError = null
@@ -181,6 +184,29 @@ internal fun AndroidMediaPlayerSheet(
             is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
             is MediaArtworkSource.RemoteUrl -> source.url
             null -> null
+        }
+    }
+
+    fun requestShowNotes(articleId: Long) {
+        val requestGeneration = showNotesRequestGeneration + 1L
+        showNotesRequestGeneration = requestGeneration
+        showNotesLoading = true
+        showNotesError = null
+        scope.launch {
+            coordinator.showNotes(articleId).fold(
+                onSuccess = { document ->
+                    if (showNotesRequestGeneration == requestGeneration) {
+                        showNotesDocument = document
+                        showNotesLoading = false
+                    }
+                },
+                onFailure = {
+                    if (showNotesRequestGeneration == requestGeneration) {
+                        showNotesError = "Show Notes could not be loaded."
+                        showNotesLoading = false
+                    }
+                },
+            )
         }
     }
 
@@ -267,39 +293,13 @@ internal fun AndroidMediaPlayerSheet(
                                     showNotesExpanded = expanded
                                     if (expanded && showNotesDocument == null && !showNotesLoading) {
                                         displayedArticleId?.let { articleId ->
-                                            showNotesLoading = true
-                                            showNotesError = null
-                                            scope.launch {
-                                                coordinator.showNotes(articleId).fold(
-                                                    onSuccess = {
-                                                        showNotesDocument = it
-                                                        showNotesLoading = false
-                                                    },
-                                                    onFailure = {
-                                                        showNotesError = "Show Notes could not be loaded."
-                                                        showNotesLoading = false
-                                                    },
-                                                )
-                                            }
+                                            requestShowNotes(articleId)
                                         }
                                     }
                                 },
                                 onRetryShowNotes = {
                                     displayedArticleId?.let { articleId ->
-                                        showNotesLoading = true
-                                        showNotesError = null
-                                        scope.launch {
-                                            coordinator.showNotes(articleId).fold(
-                                                onSuccess = {
-                                                    showNotesDocument = it
-                                                    showNotesLoading = false
-                                                },
-                                                onFailure = {
-                                                    showNotesError = "Show Notes could not be loaded."
-                                                    showNotesLoading = false
-                                                },
-                                            )
-                                        }
+                                        requestShowNotes(articleId)
                                     }
                                 },
                                 modifier = Modifier.weight(1.15f),
