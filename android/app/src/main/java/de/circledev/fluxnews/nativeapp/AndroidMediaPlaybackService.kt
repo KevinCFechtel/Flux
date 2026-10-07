@@ -230,6 +230,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             }
 
 
+        @UnstableApi
         override fun onCustomCommand(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
