@@ -24,6 +24,17 @@ class AndroidAutoMediaLibraryProjectionTest {
         assertEquals("Listening List", root.mediaMetadata.title?.toString())
         assertTrue(root.mediaMetadata.isBrowsable == true)
         assertFalse(root.mediaMetadata.isPlayable == true)
+        assertTrue(root.mediaMetadata.supportedCommands.isEmpty())
+    }
+
+    @Test
+    fun rootExposesFeedFilterOnlyWhenHostSupportsBrowseActions() {
+        val root = AndroidAutoMediaLibraryProjection.rootItem(supportsFeedFilter = true)
+
+        assertEquals(
+            listOf(AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION),
+            root.mediaMetadata.supportedCommands,
+        )
     }
 
     @Test
@@ -204,7 +215,23 @@ class AndroidAutoMediaLibraryProjectionTest {
 
         val progress = AndroidAutoMediaLibraryProjection.playbackProgress(selected)
         assertEquals(AndroidAutoPlaybackCompletion.FullyPlayed, progress.completion)
-        assertEquals(null, progress.percentage)
+        assertEquals(1.0, progress.percentage ?: error("Missing completion percentage"), 0.0001)
+    }
+
+    @Test
+    fun notStartedItemPublishesZeroCompletionPercentage() {
+        val selected = requireNotNull(
+            AndroidAutoMediaLibraryProjection.selectedEnclosure(
+                item(
+                    activeEnclosureId = 53L,
+                    enclosureIds = listOf(53L),
+                ),
+            ),
+        )
+
+        val progress = AndroidAutoMediaLibraryProjection.playbackProgress(selected)
+        assertEquals(AndroidAutoPlaybackCompletion.NotStarted, progress.completion)
+        assertEquals(0.0, progress.percentage ?: error("Missing initial percentage"), 0.0001)
     }
 
     @Test
