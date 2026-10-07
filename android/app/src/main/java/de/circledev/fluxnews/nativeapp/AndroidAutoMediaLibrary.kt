@@ -1,9 +1,13 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.content.Context
+import android.net.Uri
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaConstants
 import java.util.concurrent.atomic.AtomicLong
 import uniffi.flux_uniffi.ListeningListEnclosure
 import uniffi.flux_uniffi.ListeningListFeed
@@ -129,8 +133,13 @@ internal object AndroidAutoMediaLibraryProjection {
                 ?.contains(normalized, ignoreCase = true) == true
     }
 
-    fun mediaItem(item: ListeningListItem): MediaItem? {
+    @OptIn(UnstableApi::class)
+    fun mediaItem(
+        item: ListeningListItem,
+        artworkUri: Uri? = null,
+    ): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
+        val progressExtras = playbackProgressExtras(selected)
         return MediaItem.Builder()
             // Keep the canonical enclosure ID as Media3 identity. E6 checkpointing already reads
             // this ID from the player, and later E7 playback dispatch can therefore reuse it.
@@ -141,11 +150,47 @@ internal object AndroidAutoMediaLibraryProjection {
                     .setArtist(item.feedTitle.ifBlank { "Unknown Feed" })
                     .setAlbumTitle(item.feedTitle.ifBlank { "Unknown Feed" })
                     .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
+                    .setArtworkUri(artworkUri)
+                    .setExtras(progressExtras)
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
                     .build(),
             )
             .build()
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun playbackProgressExtras(
+        selected: ListeningListEnclosure,
+    ): Bundle {
+        val playback = selected.playbackState
+        val status = when (playback?.status) {
+            PlaybackStatus.IN_PROGRESS ->
+                MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED
+            PlaybackStatus.COMPLETED ->
+                MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_FULLY_PLAYED
+            PlaybackStatus.NOT_STARTED,
+            null,
+            -> MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_NOT_PLAYED
+        }
+
+        return Bundle().apply {
+            putInt(MediaConstants.EXTRAS_KEY_COMPLETION_STATUS, status)
+            if (status == MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_PARTIALLY_PLAYED) {
+                val durationMs = playback?.durationMs
+                    ?: selected.durationMs
+                val percentage = durationMs
+                    ?.takeIf { it > 0uL }
+                    ?.let { duration ->
+                        playback.positionMs.toDouble()
+                            .div(duration.toDouble())
+                            .coerceIn(0.0, 1.0)
+                    }
+                if (percentage != null) {
+                    putDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE, percentage)
+                }
+            }
+        }
     }
 }
 
@@ -185,9 +230,11 @@ internal data class AndroidAutoMediaLibrarySnapshot(
  * Core after process death.
  */
 internal class AndroidAutoMediaLibraryStore(
+    context: Context,
     private val coreRuntime: AndroidCoreRuntime,
     private val diagnostics: AndroidAppDiagnostics,
 ) {
+    private val applicationContext = context.applicationContext
     @Volatile
     private var currentSnapshot = AndroidAutoMediaLibrarySnapshot()
     private val nextRefreshGeneration = AtomicLong(0L)
@@ -214,7 +261,17 @@ internal class AndroidAutoMediaLibraryStore(
                     feedId = validFeedId,
                     sort = ListeningListSort.RECENTLY_ADDED,
                 )
-                val mediaItems = items.mapNotNull(AndroidAutoMediaLibraryProjection::mediaItem)
+                val mediaItems = items.mapNotNull { item ->
+                    val selected = AndroidAutoMediaLibraryProjection.selectedEnclosure(item)
+                        ?: return@mapNotNull null
+                    AndroidAutoMediaLibraryProjection.mediaItem(
+                        item = item,
+                        artworkUri = AndroidAutoArtworkProvider.uri(
+                            applicationContext,
+                            selected.enclosure.id,
+                        ),
+                    )
+                }
                 AndroidAutoMediaLibrarySnapshot(
                     sessionGeneration = generation,
                     selectedFeedId = validFeedId,
