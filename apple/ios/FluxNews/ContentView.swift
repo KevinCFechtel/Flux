@@ -825,17 +825,25 @@ struct ContentView: View {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
                 }
+                newsreaderStore.onMediaArtworkProbeChanged = {
+                    listeningListStore.reload()
+                }
                 searchStore.onMediaTransferReconciliationRequested = {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
                 }
+                searchStore.onMediaArtworkProbeChanged = {
+                    listeningListStore.reload()
+                }
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
             } else {
                 searchStore.onMediaTransferReconciliationRequested = nil
+                searchStore.onMediaArtworkProbeChanged = nil
                 searchStore.detach()
                 listeningListStore.onTransferReconciliationRequested = nil
                 IOSAppRuntime.shared.mediaRuntime.transferCoordinator.onWorkChanged = nil
                 newsreaderStore.onMediaTransferReconciliationRequested = nil
+                newsreaderStore.onMediaArtworkProbeChanged = nil
                 listeningListStore.detach()
             }
             consumePendingWidgetActionIfReady()
