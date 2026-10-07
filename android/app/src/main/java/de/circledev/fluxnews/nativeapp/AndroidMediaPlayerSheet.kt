@@ -140,12 +140,15 @@ internal fun AndroidMediaPlayerSheet(
         showNotesDocument = null
     }
 
+    val artworkRefreshKey = listOf(
+        displayedEnclosureId,
+        isPreviewingInactiveItem,
+        playback.artworkSource,
+        mediaRevision,
+    )
     val displayedArtworkSource by produceState<MediaArtworkSource?>(
         initialValue = if (isPreviewingInactiveItem) null else playback.artworkSource,
-        key1 = displayedEnclosureId,
-        key2 = isPreviewingInactiveItem,
-        key3 = playback.artworkSource,
-        key4 = mediaRevision,
+        key1 = artworkRefreshKey,
     ) {
         value = if (isPreviewingInactiveItem) {
             displayedEnclosureId?.let { coordinator.artworkSource(it) }
@@ -153,12 +156,15 @@ internal fun AndroidMediaPlayerSheet(
             playback.artworkSource
         }
     }
+    val chapterRefreshKey = listOf(
+        displayedEnclosureId,
+        isPreviewingInactiveItem,
+        playback.chapters,
+        mediaRevision,
+    )
     val displayedChapters by produceState(
         initialValue = if (isPreviewingInactiveItem) emptyList() else playback.chapters,
-        key1 = displayedEnclosureId,
-        key2 = isPreviewingInactiveItem,
-        key3 = playback.chapters,
-        key4 = mediaRevision,
+        key1 = chapterRefreshKey,
     ) {
         value = if (isPreviewingInactiveItem) {
             displayedEnclosureId?.let { coordinator.chapters(it) }.orEmpty()
