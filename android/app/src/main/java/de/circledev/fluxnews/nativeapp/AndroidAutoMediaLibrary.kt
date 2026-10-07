@@ -70,6 +70,7 @@ internal object AndroidAutoMediaLibraryProjection {
 
 internal data class AndroidAutoMediaLibrarySnapshot(
     val sessionGeneration: Long? = null,
+    val selectedFeedId: Long? = null,
     val items: List<MediaItem> = emptyList(),
     val itemsByMediaId: Map<String, MediaItem> = emptyMap(),
     val feeds: List<ListeningListFeed> = emptyList(),
@@ -113,6 +114,7 @@ internal class AndroidAutoMediaLibraryStore(
                 val mediaItems = items.mapNotNull(AndroidAutoMediaLibraryProjection::mediaItem)
                 AndroidAutoMediaLibrarySnapshot(
                     sessionGeneration = generation,
+                    selectedFeedId = validFeedId,
                     items = mediaItems,
                     itemsByMediaId = mediaItems.associateBy(MediaItem::mediaId),
                     feeds = feeds,
