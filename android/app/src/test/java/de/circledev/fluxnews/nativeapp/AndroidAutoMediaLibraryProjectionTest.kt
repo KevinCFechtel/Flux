@@ -52,6 +52,19 @@ class AndroidAutoMediaLibraryProjectionTest {
     }
 
     @Test
+    fun searchMatchesEpisodeTitleAndFeedWithoutCreatingBrowseBranches() {
+        val projected = AndroidAutoMediaLibraryProjection.mediaItem(
+            item(activeEnclosureId = 22L, enclosureIds = listOf(22L)),
+        )
+        requireNotNull(projected)
+
+        assertTrue(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "episode"))
+        assertTrue(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "feed"))
+        assertFalse(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "other"))
+        assertFalse(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "   "))
+    }
+
+    @Test
     fun itemWithoutAudioDoesNotCreateAutomotiveBrowseEntry() {
         val item = item(activeEnclosureId = null, enclosureIds = emptyList())
 
