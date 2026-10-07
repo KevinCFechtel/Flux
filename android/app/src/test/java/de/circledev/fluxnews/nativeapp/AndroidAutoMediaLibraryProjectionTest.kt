@@ -1,0 +1,91 @@
+package de.circledev.fluxnews.nativeapp
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import uniffi.flux_uniffi.Enclosure
+import uniffi.flux_uniffi.ListeningListEnclosure
+import uniffi.flux_uniffi.ListeningListItem
+import uniffi.flux_uniffi.MediaKind
+
+class AndroidAutoMediaLibraryProjectionTest {
+    @Test
+    fun rootRepresentsListeningListAndIsNotPlayable() {
+        val root = AndroidAutoMediaLibraryProjection.rootItem()
+
+        assertEquals(AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID, root.mediaId)
+        assertEquals("Listening List", root.mediaMetadata.title?.toString())
+        assertTrue(root.mediaMetadata.isBrowsable == true)
+        assertFalse(root.mediaMetadata.isPlayable == true)
+    }
+
+    @Test
+    fun directRootChildUsesActiveEnclosureAsCanonicalMediaIdentity() {
+        val item = item(
+            activeEnclosureId = 22L,
+            enclosureIds = listOf(11L, 22L),
+        )
+
+        val projected = AndroidAutoMediaLibraryProjection.mediaItem(item)
+
+        assertNotNull(projected)
+        assertEquals("22", projected?.mediaId)
+        assertEquals("Episode", projected?.mediaMetadata?.title?.toString())
+        assertEquals("Feed", projected?.mediaMetadata?.artist?.toString())
+        assertTrue(projected?.mediaMetadata?.isPlayable == true)
+        assertFalse(projected?.mediaMetadata?.isBrowsable == true)
+    }
+
+    @Test
+    fun firstEnclosureIsDeterministicFallbackWhenNoActiveEnclosureExists() {
+        val item = item(
+            activeEnclosureId = null,
+            enclosureIds = listOf(31L, 32L),
+        )
+
+        assertEquals(
+            31L,
+            AndroidAutoMediaLibraryProjection.selectedEnclosure(item)?.enclosure?.id,
+        )
+    }
+
+    @Test
+    fun itemWithoutAudioDoesNotCreateAutomotiveBrowseEntry() {
+        val item = item(activeEnclosureId = null, enclosureIds = emptyList())
+
+        assertEquals(null, AndroidAutoMediaLibraryProjection.mediaItem(item))
+    }
+
+    private fun item(
+        activeEnclosureId: Long?,
+        enclosureIds: List<Long>,
+    ) = ListeningListItem(
+        articleId = 7L,
+        feedId = 9L,
+        title = "Episode",
+        feedTitle = "Feed",
+        publishedAt = "2026-10-07T10:00:00Z",
+        addedAt = "2026-10-07T11:00:00Z",
+        remotePresent = true,
+        audioEnclosures = enclosureIds.map { id ->
+            ListeningListEnclosure(
+                enclosure = Enclosure(
+                    id = id,
+                    articleId = 7L,
+                    url = "https://media.example/episode-$id.mp3",
+                    mimeType = "audio/mpeg",
+                    sizeBytes = null,
+                    remoteMediaProgressionSeconds = 0uL,
+                    mediaKind = MediaKind.AUDIO,
+                ),
+                remotePresent = true,
+                playbackState = null,
+                download = null,
+                durationMs = null,
+            )
+        },
+        activeEnclosureId = activeEnclosureId,
+    )
+}
