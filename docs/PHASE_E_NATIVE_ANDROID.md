@@ -1132,7 +1132,10 @@ Current E7 implementation status:
 - Next/Previous episode commands are removed from connected-controller command availability; E7 still has no queue or autoplay semantics;
 - external seeks update the shared presentation state and checkpoint through the existing E6 coordinator, while external Stop is reflected back into Flux playback state;
 - the process-scoped automotive projection retains an optional validated feed filter across reloads without introducing feed browse nodes;
-- Android Auto search provides the host-native title/feed narrowing path. A dedicated feed-picker affordance must be accepted against Android Auto/DHU host capabilities; do not emulate it by adding feed branches to the root.
+- Android Auto search provides the host-native title/feed narrowing path. A dedicated feed-picker affordance must be accepted against Android Auto/DHU host capabilities; do not emulate it by adding feed branches to the root;
+- the root item is returned by `onGetItem` as browsable so Android Auto/legacy MediaBrowser root subscriptions are accepted by Media3's default subscription path;
+- Core/media revision and Core-session changes refresh the automotive snapshot and notify subscribed browsers through `notifyChildrenChanged`;
+- automotive snapshot publication is request-generation guarded so an older browse/search/filter refresh cannot overwrite a newer projection.
 
 E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
 
