@@ -942,38 +942,48 @@ impl FluxCore {
 
         let artwork = if mp4_like {
             let prefix_end = REMOTE_MEDIA_MP4_PREFIX_BYTES.saturating_sub(1);
-            let prefix = self.remote.fetch_media_range(
-                url,
-                &format!("bytes=0-{prefix_end}"),
-                REMOTE_MEDIA_MP4_PREFIX_BYTES,
-            )?;
-            probe_mp4_artwork(&prefix).or_else(|| {
-                self.remote
-                    .fetch_media_range(
-                        url,
-                        &format!("bytes=-{}", REMOTE_MEDIA_MP4_TAIL_BYTES),
-                        REMOTE_MEDIA_MP4_TAIL_BYTES,
-                    )
-                    .ok()
-                    .and_then(|tail| probe_mp4_artwork(&tail))
-            })
+            self.remote
+                .fetch_media_range(
+                    url,
+                    &format!("bytes=0-{prefix_end}"),
+                    REMOTE_MEDIA_MP4_PREFIX_BYTES,
+                )
+                .ok()
+                .and_then(|prefix| probe_mp4_artwork(&prefix))
+                .or_else(|| {
+                    self.remote
+                        .fetch_media_range(
+                            url,
+                            &format!("bytes=-{}", REMOTE_MEDIA_MP4_TAIL_BYTES),
+                            REMOTE_MEDIA_MP4_TAIL_BYTES,
+                        )
+                        .ok()
+                        .and_then(|tail| probe_mp4_artwork(&tail))
+                })
         } else {
             let initial_end = REMOTE_MEDIA_INITIAL_PROBE_BYTES.saturating_sub(1);
-            let mut bytes = self.remote.fetch_media_range(
-                url,
-                &format!("bytes=0-{initial_end}"),
-                REMOTE_MEDIA_INITIAL_PROBE_BYTES,
-            )?;
+            let Some(mut bytes) = self
+                .remote
+                .fetch_media_range(
+                    url,
+                    &format!("bytes=0-{initial_end}"),
+                    REMOTE_MEDIA_INITIAL_PROBE_BYTES,
+                )
+                .ok()
+            else {
+                return Ok(false);
+            };
             if let Some(total) = id3_probe_total_bytes(&bytes) {
                 if total > bytes.len() && total <= REMOTE_MEDIA_MAX_ID3_BYTES {
                     let start = bytes.len();
                     let end = total.saturating_sub(1);
-                    let remainder = self.remote.fetch_media_range(
+                    if let Ok(remainder) = self.remote.fetch_media_range(
                         url,
                         &format!("bytes={start}-{end}"),
                         total.saturating_sub(start),
-                    )?;
-                    bytes.extend_from_slice(&remainder);
+                    ) {
+                        bytes.extend_from_slice(&remainder);
+                    }
                 }
             }
             probe_id3_artwork(&bytes)
