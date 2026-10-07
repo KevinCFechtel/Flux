@@ -3,6 +3,8 @@ package de.circledev.fluxnews.nativeapp
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -10,6 +12,7 @@ import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -88,6 +91,87 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 item?.let { LibraryResult.ofItem(it, null) }
                     ?: LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
             }
+
+
+        /**
+         * Resolve Android Auto / legacy MediaBrowser selections through Core. The in-app
+         * coordinator already supplies a fully resolved URI, so its own MediaController commands
+         * pass through unchanged and cannot recursively re-enter Core preparation.
+         */
+        @UnstableApi
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            if (mediaItems.size != 1) {
+                return Futures.immediateFailedFuture(
+                    UnsupportedOperationException("FluxNews does not expose a durable media queue."),
+                )
+            }
+
+            val requested = mediaItems.single()
+            if (
+                controller.packageName == packageName &&
+                requested.localConfiguration != null
+            ) {
+                return Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(
+                        mediaItems,
+                        startIndex,
+                        startPositionMs,
+                    ),
+                )
+            }
+
+            val enclosureId = requested.mediaId.toLongOrNull()?.takeIf { it > 0L }
+                ?: return Futures.immediateFailedFuture(
+                    IllegalArgumentException("Unknown FluxNews media item."),
+                )
+
+            return mediaSessionItemsFuture {
+                val snapshot = refreshLibraryForHeadlessBrowser()
+                    ?: throw IllegalStateException("FluxNews media library is unavailable.")
+                if (snapshot.itemsByMediaId[requested.mediaId] == null) {
+                    throw IllegalArgumentException("Media item is not in the Listening List.")
+                }
+
+                val resolved = app.mediaPlaybackCoordinator.prepareForMediaSession(enclosureId)
+                val requestedStart = startPositionMs
+                    .takeIf { it != C.TIME_UNSET && it >= 0L }
+                    ?: resolved.startPositionMs
+
+                MediaSession.MediaItemsWithStartPosition(
+                    listOf(resolved.mediaItem),
+                    0,
+                    requestedStart,
+                )
+            }
+        }
+
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> =
+            Futures.immediateFailedFuture(
+                UnsupportedOperationException("FluxNews does not expose a durable media queue."),
+            )
+
+        @UnstableApi
+        override fun onPlayerInteractionFinished(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            playerCommands: Player.Commands,
+        ) {
+            if (playerCommands.contains(Player.COMMAND_STOP)) {
+                serviceScope.launch {
+                    app.mediaPlaybackCoordinator.handleExternalStop()
+                }
+            }
+        }
     }
 
     override fun onCreate() {
@@ -149,6 +233,25 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
         }
         val generation = app.coreRuntime.activeSessionGeneration() ?: return null
         return libraryStore.refresh(generation)
+    }
+
+    private fun mediaSessionItemsFuture(
+        block: suspend () -> MediaSession.MediaItemsWithStartPosition,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+        serviceScope.launch {
+            try {
+                future.set(block())
+            } catch (failure: Throwable) {
+                app.diagnostics.record(
+                    AndroidAppLogLevel.Warning,
+                    "android-auto",
+                    "Playback selection failed: ${failure.javaClass.simpleName}",
+                )
+                future.setException(failure)
+            }
+        }
+        return future
     }
 
     private fun <T> libraryResultFuture(
