@@ -32,7 +32,6 @@ import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
@@ -549,7 +548,7 @@ private fun AndroidMediaPlayerControls(
             playback = playback,
             previewingInactiveItem = previewingInactiveItem,
             hasDisplayedEnclosure = displayedEnclosureId != null,
-            onBack = { scope.launch { coordinator.skipBackward30Seconds() } },
+            onBack = { scope.launch { coordinator.skipBackward15Seconds() } },
             onPlayPause = {
                 displayedEnclosureId?.let { id ->
                     scope.launch {
@@ -707,8 +706,8 @@ private fun AndroidMediaTransportControls(
             enabled = hasDisplayedEnclosure && !previewingInactiveItem,
         ) {
             Icon(
-                Icons.Rounded.Replay30,
-                contentDescription = "Back 30 seconds",
+                painter = painterResource(androidx.media3.session.R.drawable.media3_icon_skip_back_15),
+                contentDescription = "Back 15 seconds",
                 modifier = Modifier.size(30.dp),
             )
         }
