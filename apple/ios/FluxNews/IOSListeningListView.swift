@@ -63,7 +63,7 @@ struct IOSListeningListView: View {
                     refreshToken: artworkRefreshToken(artworkEnclosure),
                     playbackCoordinator: playbackCoordinator
                 )
-                .frame(width: 88, height: 88)
+                .frame(width: 80, height: 80)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(
