@@ -1,5 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -62,6 +64,68 @@ class AndroidAutoMediaLibraryProjectionTest {
         assertTrue(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "feed"))
         assertFalse(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "other"))
         assertFalse(AndroidAutoMediaLibraryProjection.matchesSearch(projected, "   "))
+    }
+
+    @Test
+    fun requestPolicyPrefersCanonicalMediaIdOverSearchQuery() {
+        val first = requireNotNull(
+            AndroidAutoMediaLibraryProjection.mediaItem(
+                item(activeEnclosureId = 11L, enclosureIds = listOf(11L)),
+            ),
+        )
+        val second = MediaItem.Builder()
+            .setMediaId("22")
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("Other Episode")
+                    .setArtist("Other Feed")
+                    .setIsPlayable(true)
+                    .build(),
+            )
+            .build()
+        val snapshot = AndroidAutoMediaLibrarySnapshot(
+            items = listOf(first, second),
+            itemsByMediaId = mapOf(first.mediaId to first, second.mediaId to second),
+        )
+
+        assertEquals(
+            "22",
+            AndroidAutoMediaRequestPolicy.resolve(
+                snapshot = snapshot,
+                mediaId = "22",
+                searchQuery = "Episode",
+            )?.mediaId,
+        )
+    }
+
+    @Test
+    fun requestPolicyResolvesVoiceSearchInVisibleListeningListOrder() {
+        val first = requireNotNull(
+            AndroidAutoMediaLibraryProjection.mediaItem(
+                item(activeEnclosureId = 31L, enclosureIds = listOf(31L)),
+            ),
+        )
+        val second = first.buildUpon()
+            .setMediaId("32")
+            .setMediaMetadata(
+                first.mediaMetadata.buildUpon()
+                    .setTitle("Episode Two")
+                    .build(),
+            )
+            .build()
+        val snapshot = AndroidAutoMediaLibrarySnapshot(
+            items = listOf(first, second),
+            itemsByMediaId = mapOf(first.mediaId to first, second.mediaId to second),
+        )
+
+        assertEquals(
+            first.mediaId,
+            AndroidAutoMediaRequestPolicy.resolve(
+                snapshot = snapshot,
+                mediaId = "",
+                searchQuery = "episode",
+            )?.mediaId,
+        )
     }
 
     @Test
