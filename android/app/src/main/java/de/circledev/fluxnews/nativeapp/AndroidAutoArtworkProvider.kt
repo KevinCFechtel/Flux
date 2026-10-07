@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
+import androidx.annotation.DrawableRes
 import java.io.ByteArrayOutputStream
 import java.io.FileNotFoundException
 import java.util.concurrent.TimeUnit
@@ -170,12 +171,25 @@ class AndroidAutoArtworkProvider : ContentProvider() {
         } else {
             R.drawable.fallback_artwork
         }
-        val bytes = requireNotNull(context)
-            .resources
-            .openRawResource(drawable)
-            .use { it.readBytes() }
+        val bytes = drawableResourceBytes(drawable)
         artworkCache.put(cacheKey, bytes)
         return bytes
+    }
+
+    private fun drawableResourceBytes(
+        @DrawableRes drawable: Int,
+    ): ByteArray {
+        val appContext = requireNotNull(context)
+        val uri = Uri.Builder()
+            .scheme("android.resource")
+            .authority(appContext.packageName)
+            .appendPath("drawable")
+            .appendPath(appContext.resources.getResourceEntryName(drawable))
+            .build()
+
+        return requireNotNull(appContext.contentResolver.openInputStream(uri)) {
+            "Unable to open fallback artwork resource."
+        }.use { it.readBytes() }
     }
 
     companion object {
