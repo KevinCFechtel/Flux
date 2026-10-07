@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.SyncReason
 
 class MainActivity : ComponentActivity() {
@@ -51,6 +53,16 @@ class MainActivity : ComponentActivity() {
         if (!isBaselineProfileTimelineLaunch()) {
             (application as FluxApplication).backgroundSync.requestResumeIfNeeded()
         }
+    }
+
+    override fun onStop() {
+        if (!isBaselineProfileTimelineLaunch()) {
+            val application = application as FluxApplication
+            lifecycleScope.launch {
+                application.mediaPlaybackCoordinator.checkpointCurrent()
+            }
+        }
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
