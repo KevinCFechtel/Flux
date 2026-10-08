@@ -132,6 +132,7 @@ dependencies {
     implementation("androidx.media3:media3-session:1.11.1")
     add("developmentImplementation", "androidx.car.app:app:1.9.0-alpha03")
     add("developmentImplementation", "androidx.car.app:app-projected:1.9.0-alpha03")
+    add("developmentImplementation", "androidx.media:media:1.8.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
