@@ -39,14 +39,9 @@ import kotlinx.coroutines.withContext
  * Core-backed Listening List without introducing a second player, queue, database or cache.
  */
 class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackHost {
-    companion object {
-        private const val CUSTOM_BROWSER_RESULT_BROWSE_NODE_KEY =
+    private companion object {
+        const val CUSTOM_BROWSER_RESULT_BROWSE_NODE_KEY =
             "androidx.media.utils.extras.KEY_CUSTOM_BROWSER_ACTION_RESULT_BROWSE_NODE"
-
-        internal const val CAR_APP_PLATFORM_TOKEN_ACTION =
-            "flux:car-app:platform-token"
-        internal const val CAR_APP_PLATFORM_TOKEN_KEY =
-            "flux:car-app:platform-token:value"
     }
 
     private lateinit var player: ExoPlayer
@@ -91,14 +86,6 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 sessionCommandsBuilder.add(
                     SessionCommand(
                         AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION,
-                        Bundle.EMPTY,
-                    ),
-                )
-            }
-            if (BuildConfig.FLAVOR == "development") {
-                sessionCommandsBuilder.add(
-                    SessionCommand(
-                        CAR_APP_PLATFORM_TOKEN_ACTION,
                         Bundle.EMPTY,
                     ),
                 )
@@ -271,23 +258,6 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             args: Bundle,
         ): ListenableFuture<SessionResult> {
             if (
-                BuildConfig.FLAVOR == "development" &&
-                customCommand.customAction == CAR_APP_PLATFORM_TOKEN_ACTION
-            ) {
-                return Futures.immediateFuture(
-                    SessionResult(
-                        SessionResult.RESULT_SUCCESS,
-                        Bundle().apply {
-                            putParcelable(
-                                CAR_APP_PLATFORM_TOKEN_KEY,
-                                session.platformToken,
-                            )
-                        },
-                    ),
-                )
-            }
-
-            if (
                 customCommand.customAction !=
                 AndroidAutoMediaLibraryProjection.FILTER_COMMAND_ACTION
             ) {
@@ -455,6 +425,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
             .setMediaButtonPreferences(mediaButtonPreferences)
             .setCommandButtonsForMediaItems(listOf(filterButton))
             .build()
+        app.carAppPlatformToken = mediaSession?.platformToken
         mediaRuntime.attachPlaybackHost(this)
         observeLibraryChanges()
     }
@@ -594,6 +565,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
     }
 
     override fun onDestroy() {
+        app.carAppPlatformToken = null
         mediaRuntime.detachPlaybackHost(this)
         serviceScope.cancel()
         libraryStore.clear()
