@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
  * the native credential store when an app or future headless entry point requests readiness.
  */
 class FluxApplication : Application(), SingletonImageLoader.Factory {
+    @Volatile
+    internal var carAppPlatformToken: android.media.session.MediaSession.Token? = null
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidStoragePaths.create(applicationContext) }
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
