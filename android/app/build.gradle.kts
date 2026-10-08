@@ -130,6 +130,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
+    developmentImplementation("androidx.car.app:app:1.9.0-alpha03")
+    developmentImplementation("androidx.car.app:app-projected:1.9.0-alpha03")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
