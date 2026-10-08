@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.annotation.OptIn
 import androidx.car.app.CarAppService
@@ -40,7 +41,13 @@ import kotlinx.coroutines.launch
  */
 class FluxCarAppService : CarAppService() {
     override fun createHostValidator(): HostValidator =
-        HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+        } else {
+            HostValidator.Builder(applicationContext)
+                .addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample)
+                .build()
+        }
 
     override fun onCreateSession(sessionInfo: SessionInfo): Session =
         FluxCarAppSession()
@@ -48,11 +55,11 @@ class FluxCarAppService : CarAppService() {
 
 private class FluxCarAppSession : Session() {
     override fun onCreateScreen(intent: Intent): Screen =
-        FluxListeningListCarScreen(carContext).also { screen ->
-            registerPlaybackTokenWhenAvailable(screen)
+        FluxListeningListCarScreen(carContext).also {
+            registerPlaybackTokenWhenAvailable()
         }
 
-    private fun registerPlaybackTokenWhenAvailable(screen: Screen, attempt: Int = 0) {
+    private fun registerPlaybackTokenWhenAvailable(attempt: Int = 0) {
         val app = carContext.applicationContext as FluxApplication
         val platformToken = app.carAppPlatformToken
         if (platformToken != null) {
@@ -63,12 +70,10 @@ private class FluxCarAppSession : Session() {
         }
 
         if (attempt >= 20) return
-        screen.carContext.mainExecutor.execute {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-                { registerPlaybackTokenWhenAvailable(screen, attempt + 1) },
-                250L,
-            )
-        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+            { registerPlaybackTokenWhenAvailable(attempt + 1) },
+            250L,
+        )
     }
 }
 
@@ -118,15 +123,17 @@ private class FluxListeningListCarScreen(
                             Row.IMAGE_TYPE_LARGE,
                         )
                     }
-                    metadata.extras
-                        ?.takeIf {
-                            it.containsKey(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE)
-                        }
-                        ?.getDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE)
-                        ?.toFloat()
-                        ?.let { progress ->
-                            setProgressBar(CarProgressBar.Builder(progress).build())
-                        }
+                    if (carContext.carAppApiLevel >= 9) {
+                        metadata.extras
+                            ?.takeIf {
+                                it.containsKey(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE)
+                            }
+                            ?.getDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE)
+                            ?.toFloat()
+                            ?.let { progress ->
+                                setProgressBar(CarProgressBar.Builder(progress).build())
+                            }
+                    }
                     item.mediaId.toLongOrNull()?.let { enclosureId ->
                         setOnClickListener {
                             scope.launch {
