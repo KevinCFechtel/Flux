@@ -74,10 +74,13 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val widgetRouting: AndroidWidgetRouting by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidWidgetRouting()
     }
+    internal val legacySettingsMigration: AndroidLegacySettingsMigration by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacySettingsMigration(applicationContext, preferenceStore, credentialStore, coreRuntime)
+    }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
-            effects = listOf(systemNotifications, widgetProjection, mediaTransferCoordinator),
+            effects = listOf(legacySettingsMigration, systemNotifications, widgetProjection, mediaTransferCoordinator),
             onEffectError = { effect, error ->
                 diagnostics.record(
                     AndroidAppLogLevel.Error,
