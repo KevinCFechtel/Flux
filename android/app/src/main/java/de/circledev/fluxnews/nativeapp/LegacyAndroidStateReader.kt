@@ -463,6 +463,31 @@ internal data class LegacyAndroidSettingsImport(
     val retentionDays: Int?,
     val deleteAfterPlayback: Boolean?,
     val openInMinifluxFeedIds: List<Long>,
+    val local: LegacyAndroidLocalSettingsImport,
+    val widget: LegacyAndroidWidgetSeed?,
+)
+
+internal data class LegacyAndroidLocalSettingsImport(
+    val showArticleCount: Boolean?,
+    val hideEmptyNavigation: Boolean?,
+    val markReadOnScrollover: Boolean?,
+    val removeWhenRead: Boolean?,
+    val openArticleInReader: Boolean?,
+    val leadingFull: String?,
+    val leadingAdditional: String?,
+    val trailingFull: String?,
+    val trailingAdditional: String?,
+    val startupMode: Int?,
+    val startupCategoryId: Long?,
+    val startupFeedId: Long?,
+    val actionBar: List<String>?,
+)
+
+internal data class LegacyAndroidWidgetSeed(
+    val scope: String,
+    val scopeId: Long?,
+    val unreadOnly: Boolean,
+    val oldestFirst: Boolean,
 )
 
 internal data class LegacyAndroidAccountImport(
@@ -515,6 +540,69 @@ internal object LegacyAndroidImportParsing {
         }.sortedBy { it.articleId }
     }
 
+    private fun legacySwipe(raw: String?): String? = when (raw) {
+        "readUnread" -> "readUnread"
+        "bookmark" -> "starUnstar"
+        "open" -> "openOriginal"
+        "openMiniflux" -> "openMiniflux"
+        "openComments" -> "comments"
+        "share" -> "share"
+        "saveToThirdParty" -> "saveToService"
+        "downloadAudio" -> "downloadAudio"
+        "none" -> ""
+        else -> null
+    }
+
+    private fun legacyActionBar(values: Map<String, String>): List<String>? {
+        val selectedRaw = values["androidFloatingToolbarActions"] ?: return null
+        fun strings(raw: String): List<String>? = runCatching {
+            val array = org.json.JSONArray(raw)
+            List(array.length()) { array.getString(it) }
+        }.getOrNull()
+        val selected = strings(selectedRaw) ?: return null
+        val order = values["androidFloatingToolbarActionOrder"]?.let(::strings) ?: selected
+        val mapping = mapOf(
+            "search" to "search",
+            "newsStatus" to "toggleReadFilter",
+            "sortOrder" to "toggleSortOrder",
+            "markAsRead" to "markAllRead",
+            "markAsReadAndNext" to "markAllReadAndNext",
+            "podcasts" to "listeningList",
+            "settings" to "settings",
+        )
+        return (order + selected).distinct().filter { it in selected }
+            .mapNotNull(mapping::get).distinct()
+    }
+
+    private fun legacyWidgetSeed(values: Map<String, String>): LegacyAndroidWidgetSeed? {
+        val keys = setOf("widgetNewsStatus", "widgetUnreadOnly", "widgetFilterType", "widgetFilterId", "widgetSortOrder")
+        if (keys.none(values::containsKey)) return null
+        val oldStatus = values["widgetNewsStatus"]
+        val rawScope = values["widgetFilterType"] ?: when (oldStatus) {
+            "bookmarked" -> "bookmarked"
+            else -> "all"
+        }
+        val scope = when (rawScope) {
+            "bookmarked" -> "bookmarks"
+            "feed" -> "feed"
+            "category" -> "category"
+            else -> "all"
+        }
+        val scopeId = values["widgetFilterId"]?.toLongOrNull()?.takeIf { it > 0 }
+        val safeScope = if (scope in setOf("feed", "category") && scopeId == null) "all" else scope
+        val unread = when (values["widgetUnreadOnly"]) {
+            "true" -> true
+            "false" -> false
+            else -> oldStatus != "all" && oldStatus != "bookmarked"
+        }
+        return LegacyAndroidWidgetSeed(
+            scope = safeScope,
+            scopeId = if (safeScope == "all") null else scopeId,
+            unreadOnly = unread,
+            oldestFirst = values["widgetSortOrder"] == "Oldest first",
+        )
+    }
+
     fun settings(values: Map<String, String>): LegacyAndroidSettingsImport {
         fun boolean(key: String) = when (values[key]?.trim()) {
             "true" -> true
@@ -532,6 +620,21 @@ internal object LegacyAndroidImportParsing {
                 ) id else null
             }.sorted().toList()
         }.getOrDefault(emptyList())
+        val local = LegacyAndroidLocalSettingsImport(
+            showArticleCount = boolean("multilineAppBarText"),
+            hideEmptyNavigation = boolean("showOnlyFeedCategoriesWithNewNews"),
+            markReadOnScrollover = boolean("markAsReadOnScrollOver"),
+            removeWhenRead = boolean("removeNewsFromListWhenRead"),
+            openArticleInReader = if (values["tabAction"] == "expand") true else null,
+            leadingFull = legacySwipe(values["rightSwipeAction"]),
+            leadingAdditional = legacySwipe(values["secondRightSwipeAction"]),
+            trailingFull = legacySwipe(values["leftSwipeAction"]),
+            trailingAdditional = legacySwipe(values["secondLeftSwipeAction"]),
+            startupMode = values["startupCategorie"]?.toIntOrNull()?.takeIf { it in 0..3 },
+            startupCategoryId = values["startupCategorieSelection"]?.toLongOrNull()?.takeIf { it > 0 },
+            startupFeedId = values["startupFeedSelection"]?.toLongOrNull()?.takeIf { it > 0 },
+            actionBar = legacyActionBar(values),
+        )
         return LegacyAndroidSettingsImport(
             backgroundSyncEnabled = interval?.takeIf { it >= 0 }?.let { it > 0 },
             autoDownloadListeningList = boolean("autoDownloadAudioAfterSync"),
@@ -540,6 +643,8 @@ internal object LegacyAndroidImportParsing {
                 ?.takeIf { it in setOf(7, 30, 90) },
             deleteAfterPlayback = boolean("deleteAudioAfterPlayback"),
             openInMinifluxFeedIds = feedIds,
+            local = local,
+            widget = legacyWidgetSeed(values),
         )
     }
 
