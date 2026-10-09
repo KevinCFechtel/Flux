@@ -1,0 +1,195 @@
+package de.circledev.fluxnews.nativeapp
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+
+/**
+ * Read-only, privacy-safe presentation of durable E9 stage markers. The UI never
+ * reads Flutter secrets, filenames, server URLs, article titles, or API keys.
+ * "Checked" is intentional: an import step can finish with no legacy data or
+ * when existing native/Core values correctly take precedence.
+ */
+internal data class AndroidLegacyMigrationNotice(
+    val importedServer: String = "",
+    val acknowledged: Boolean = false,
+    val settingsComplete: Boolean = false,
+    val localComplete: Boolean = false,
+    val feedsComplete: Boolean = false,
+    val startupComplete: Boolean = false,
+    val playbackComplete: Boolean = false,
+    val downloadsComplete: Boolean = false,
+    val widgetsComplete: Boolean = false,
+) {
+    val steps: List<AndroidLegacyMigrationNoticeStep>
+        get() = listOf(
+            AndroidLegacyMigrationNoticeStep("Konto", true, "Zugangsdaten sicher übernommen"),
+            AndroidLegacyMigrationNoticeStep(
+                "Einstellungen",
+                settingsComplete && localComplete,
+                "App- und Medien-Einstellungen geprüft",
+            ),
+            AndroidLegacyMigrationNoticeStep(
+                "Feeds & Startansicht",
+                feedsComplete && startupComplete,
+                "Feed-Vorgaben und Startansicht geprüft",
+            ),
+            AndroidLegacyMigrationNoticeStep("Wiedergabefortschritt", playbackComplete, "Audio-Positionen geprüft"),
+            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, "Offline-Audios geprüft"),
+            AndroidLegacyMigrationNoticeStep("Widgets", widgetsComplete, "Widget-Vorgaben geprüft"),
+        )
+
+    val completedSteps: Int get() = steps.count { it.complete }
+    val complete: Boolean get() = steps.all { it.complete }
+
+    fun appliesTo(serverUrl: String?): Boolean =
+        importedServer.isNotBlank() && serverUrl != null && importedServer == serverUrl && !acknowledged
+}
+
+internal data class AndroidLegacyMigrationNoticeStep(
+    val title: String,
+    val complete: Boolean,
+    val description: String,
+)
+
+internal class AndroidLegacyMigrationNoticeStore(private val preferences: AndroidPreferenceStore) {
+    private val account = preferences.observe(AndroidLegacyMigrationCoordinator.IMPORTED_ACCOUNT_SERVER, "")
+    private val acknowledged = preferences.observe(ACKNOWLEDGED, false)
+    private val completionFlags: Flow<Array<Boolean>> = combine(
+        listOf(
+            preferences.observe(AndroidLegacySettingsMigration.SETTINGS_DONE, false),
+            preferences.observe(AndroidLegacySettingsMigration.LOCAL_DONE, false),
+            preferences.observe(AndroidLegacySettingsMigration.FEEDS_DONE, false),
+            preferences.observe(AndroidLegacySettingsMigration.STARTUP_DONE, false),
+            preferences.observe(AndroidLegacyPlaybackMigration.PLAYBACK_DONE, false),
+            preferences.observe(AndroidLegacyDownloadMigration.DOWNLOADS_DONE, false),
+            preferences.observe(AndroidLegacySettingsMigration.WIDGET_DONE, false),
+        ),
+    ) { values -> values }
+
+    val state: Flow<AndroidLegacyMigrationNotice> = combine(
+        account,
+        acknowledged,
+        completionFlags,
+    ) { server, dismissed, flags ->
+        AndroidLegacyMigrationNotice(
+            importedServer = server,
+            acknowledged = dismissed,
+            settingsComplete = flags[0],
+            localComplete = flags[1],
+            feedsComplete = flags[2],
+            startupComplete = flags[3],
+            playbackComplete = flags[4],
+            downloadsComplete = flags[5],
+            widgetsComplete = flags[6],
+        )
+    }
+
+    suspend fun acknowledge() {
+        preferences.write(ACKNOWLEDGED, true)
+    }
+
+    companion object {
+        internal val ACKNOWLEDGED = AndroidPreferenceKey.boolean("migration-e9-summary-acknowledged")
+    }
+}
+
+@Composable
+internal fun AndroidLegacyMigrationNoticeDialog(
+    state: AndroidLegacyMigrationNotice,
+    syncing: Boolean,
+    onSync: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val steps = state.steps
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(if (state.complete) "Datenübernahme abgeschlossen" else "Datenübernahme aus FluxNews") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    if (state.complete) {
+                        "Die Übernahme wurde überprüft. Vorhandene native Daten hatten Vorrang."
+                    } else {
+                        "Wir übernehmen die bisherigen Einstellungen und Mediendaten. Einzelne Schritte werden nach der Synchronisierung geprüft."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                LinearProgressIndicator(
+                    progress = { state.completedSteps.toFloat() / steps.size },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "${state.completedSteps} von ${steps.size} Bereichen geprüft",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                steps.forEach { step ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            if (step.complete) "✓" else "○",
+                            color = if (step.complete) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Column {
+                            Text(step.title, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (step.complete) step.description else "Noch offen – nächster erfolgreicher Sync",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (!state.complete) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (syncing) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(4.dp))
+                        Text(
+                            if (syncing) "Synchronisierung läuft …"
+                            else "Offene Schritte werden automatisch erneut versucht.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onClose) {
+                Text(if (state.complete) "Fertig" else "Im Hintergrund fortsetzen")
+            }
+        },
+        dismissButton = {
+            if (!state.complete) {
+                TextButton(onClick = onSync, enabled = !syncing) { Text("Jetzt synchronisieren") }
+            }
+        },
+    )
+}
