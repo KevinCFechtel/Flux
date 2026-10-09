@@ -40,20 +40,20 @@ internal data class AndroidLegacyMigrationNotice(
 ) {
     val steps: List<AndroidLegacyMigrationNoticeStep>
         get() = listOf(
-            AndroidLegacyMigrationNoticeStep("Konto", true, "Zugangsdaten sicher übernommen"),
+            AndroidLegacyMigrationNoticeStep("Account", true, "Credentials transferred securely"),
             AndroidLegacyMigrationNoticeStep(
-                "Einstellungen",
+                "Settings",
                 settingsComplete && localComplete,
-                "App- und Medien-Einstellungen geprüft",
+                "App- und Medien-Settings geprüft",
             ),
             AndroidLegacyMigrationNoticeStep(
-                "Feeds & Startansicht",
+                "Feeds & startup view",
                 feedsComplete && startupComplete,
-                "Feed-Vorgaben und Startansicht geprüft",
+                "Feed preferences and startup view checked",
             ),
-            AndroidLegacyMigrationNoticeStep("Wiedergabefortschritt", playbackComplete, "Audio-Positionen geprüft"),
-            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, "Offline-Audios geprüft"),
-            AndroidLegacyMigrationNoticeStep("Widgets", widgetsComplete, "Widget-Vorgaben geprüft"),
+            AndroidLegacyMigrationNoticeStep("Playback progress", playbackComplete, "Audio positions checked"),
+            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, "Offline audio checked"),
+            AndroidLegacyMigrationNoticeStep("Widgets", widgetsComplete, "Widget preferences checked"),
         )
 
     val completedSteps: Int get() = steps.count { it.complete }
@@ -121,7 +121,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     val steps = state.steps
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (state.complete) "Datenübernahme abgeschlossen" else "Datenübernahme aus FluxNews") },
+        title = { Text(if (state.complete) "Migration complete" else "Import from FluxNews") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -129,9 +129,9 @@ internal fun AndroidLegacyMigrationNoticeDialog(
             ) {
                 Text(
                     if (state.complete) {
-                        "Die Übernahme wurde überprüft. Vorhandene native Daten hatten Vorrang."
+                        "Your previous data has been checked. Existing native data was preserved."
                     } else {
-                        "Wir übernehmen die bisherigen Einstellungen und Mediendaten. Einzelne Schritte werden nach der Synchronisierung geprüft."
+                        "Wir übernehmen die bisherigen Settings und Mediendaten. Einzelne Schritte werden nach der Synchronisierung geprüft."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -140,7 +140,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "${state.completedSteps} von ${steps.size} Bereichen geprüft",
+                    "${state.completedSteps} von ${steps.size} areas checked",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -159,7 +159,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                         Column {
                             Text(step.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (step.complete) step.description else "Noch offen – nächster erfolgreicher Sync",
+                                if (step.complete) step.description else "Pending – checked after the next successful sync",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -173,8 +173,8 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     ) {
                         if (syncing) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(4.dp))
                         Text(
-                            if (syncing) "Synchronisierung läuft …"
-                            else "Offene Schritte werden automatisch erneut versucht.",
+                            if (syncing) "Sync in progress…"
+                            else "Pending steps will be retried after synchronization.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -183,12 +183,12 @@ internal fun AndroidLegacyMigrationNoticeDialog(
         },
         confirmButton = {
             Button(onClick = onClose) {
-                Text(if (state.complete) "Fertig" else "Im Hintergrund fortsetzen")
+                Text(if (state.complete) "Done" else "Continue in background")
             }
         },
         dismissButton = {
             if (!state.complete) {
-                TextButton(onClick = onSync, enabled = !syncing) { Text("Jetzt synchronisieren") }
+                TextButton(onClick = onSync, enabled = !syncing) { Text("Sync now") }
             }
         },
     )
