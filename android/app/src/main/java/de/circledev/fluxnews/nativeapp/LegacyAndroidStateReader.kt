@@ -42,6 +42,17 @@ internal class LegacyAndroidStateReader(private val context: Context) {
         return LegacyAndroidSettingsReadResult.Found(LegacyAndroidImportParsing.settings(values.values))
     }
 
+    internal fun readPlaybackImports(): LegacyAndroidPlaybackReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidPlaybackReadResult.Unavailable
+        val secure = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!secure.readable) return LegacyAndroidPlaybackReadResult.Unavailable
+        val shared = context.getSharedPreferences(FLUTTER_SHARED_PREFERENCES, Context.MODE_PRIVATE).all
+            .mapNotNull { (key, value) -> (value as? String)?.let { key to it } }.toMap()
+        return LegacyAndroidPlaybackReadResult.Found(
+            LegacyAndroidImportParsing.playback(shared, secure.values),
+        )
+    }
+
     internal fun readProbe(): LegacyMigrationProbeResult {
         val before = LegacySourceFingerprints.capture(context)
         val aliasesBefore = legacyAliases()
@@ -405,6 +416,16 @@ internal sealed interface LegacyAndroidAccountReadResult {
     data class Found(val account: LegacyAndroidAccountImport) : LegacyAndroidAccountReadResult
 }
 
+internal data class LegacyAndroidPlaybackProgressImport(
+    val articleId: Long,
+    val positionMs: ULong,
+)
+
+internal sealed interface LegacyAndroidPlaybackReadResult {
+    data object Unavailable : LegacyAndroidPlaybackReadResult
+    data class Found(val records: List<LegacyAndroidPlaybackProgressImport>) : LegacyAndroidPlaybackReadResult
+}
+
 internal sealed interface LegacyAndroidSettingsReadResult {
     data object Unavailable : LegacyAndroidSettingsReadResult
     data class Found(val settings: LegacyAndroidSettingsImport) : LegacyAndroidSettingsReadResult
@@ -432,6 +453,23 @@ internal data class LegacyAndroidHeaderImport(
 
 /** Pure retained-state parsing kept separate from Android/Keystore access for regression tests. */
 internal object LegacyAndroidImportParsing {
+    fun playback(
+        sharedPreferences: Map<String, String>,
+        legacySecure: Map<String, String>,
+    ): List<LegacyAndroidPlaybackProgressImport> {
+        // Flutter's AudioProgressStore uses SharedPreferences first and only
+        // falls back to secure storage for article IDs absent there.
+        val combined = legacySecure + sharedPreferences
+        return combined.mapNotNull { (key, value) ->
+            val id = key.takeIf { it.startsWith("audio_progress_") }
+                ?.removePrefix("audio_progress_")?.toLongOrNull()?.takeIf { it > 0L }
+                ?: return@mapNotNull null
+            val position = value.trim().toULongOrNull()?.takeIf { it > 0uL }
+                ?: return@mapNotNull null
+            LegacyAndroidPlaybackProgressImport(id, position)
+        }.sortedBy { it.articleId }
+    }
+
     fun settings(values: Map<String, String>): LegacyAndroidSettingsImport {
         fun boolean(key: String) = when (values[key]?.trim()) {
             "true" -> true
