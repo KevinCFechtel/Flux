@@ -407,11 +407,11 @@ internal object LegacyAndroidImportParsing {
         val serverUrl = values["minifluxURL"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
         val apiKey = values["minifluxAPIKey"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
         val headers = legacyCustomHeaders(values)
-            .entries
+            .toSortedMap()
+            .values
             .mapNotNull { (name, value) ->
                 name.trim().takeIf(String::isNotEmpty)?.let { LegacyAndroidHeaderImport(it, value) }
             }
-            .sortedBy { it.name.lowercase() }
         return LegacyAndroidAccountImport(serverUrl, apiKey, headers)
     }
 }
