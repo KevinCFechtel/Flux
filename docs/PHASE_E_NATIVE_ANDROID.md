@@ -1166,7 +1166,9 @@ Current E9 implementation status:
 - account migration writes non-secret provenance before the native credential copy, so termination cannot leave an unmarked migrated account; failed copies clear the provisional marker and partial native copy while leaving Flutter sources untouched;
 - parser/coordinator regression tests cover credential requirements, custom-header extraction, native-wins behavior, retryable unreadable storage and failed-copy cleanup;
 - the E9 post-sync adapter now imports compatible Core policy/media settings and positive per-feed Open in Miniflux overrides exclusively for the migrated account. Separate completion flags make a missing feed retry on subsequent successful syncs; explicit native/Core state retains precedence;
-- article playback, downloaded-media imports, widget seed and remaining local presentation settings are pending. These require their own retryable follow-ups after a successful native sync rather than treating an initially empty Core catalog as authoritative absence;
+- E9 playback imports positive article-keyed positions from Flutter SharedPreferences with secure-storage fallback; zero is omitted and Core owns unique-enclosure resolution, precedence and import outcomes. Missing/ambiguous records remain retryable;
+- E9 media migration checks primary attachment-ID path metadata against the cloned legacy SQLite enclosure catalog, verifies an accessible regular file under the original audio cache, copies it into a disjoint native media root using a staged file, and only then asks Core to adopt it. Existing Core downloads win; missing enclosures remain retryable; original Flutter media is never removed;
+- widget default seeds and remaining local presentation settings are pending;
 - the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
 
 By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
