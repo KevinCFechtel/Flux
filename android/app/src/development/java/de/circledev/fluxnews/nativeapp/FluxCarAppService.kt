@@ -151,7 +151,6 @@ private class FluxMediaPlaybackCarScreen(
 }
 
 @OptIn(ExperimentalCarApi::class)
-@UnstableApi
 private class FluxListeningListCarScreen(
     carContext: CarContext,
 ) : Screen(carContext), DefaultLifecycleObserver {
@@ -191,6 +190,7 @@ private class FluxListeningListCarScreen(
         scope.cancel()
     }
 
+    @UnstableApi
     override fun onGetTemplate(): Template {
         if (loading) {
             return SectionedItemTemplate.Builder()
