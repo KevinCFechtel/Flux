@@ -26,11 +26,13 @@ internal class LegacyAndroidStateReader(private val context: Context) {
      * Productive E9 reader for the one retained account identity. This reuses the
      * exact E1-F FlutterSecureStorage decoder and remains strictly read-only.
      */
-    internal fun readAccountImport(): LegacyAndroidAccountImport? {
-        if (context.packageName != PRODUCTION_PACKAGE) return null
+    internal fun readAccountImport(): LegacyAndroidAccountReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidAccountReadResult.Absent
         val secureValues = LegacyFlutterSecureStorageReader(context).readAll()
-        if (!secureValues.readable) return null
+        if (!secureValues.readable) return LegacyAndroidAccountReadResult.Unavailable
         return LegacyAndroidImportParsing.account(secureValues.values)
+            ?.let(LegacyAndroidAccountReadResult::Found)
+            ?: LegacyAndroidAccountReadResult.Absent
     }
 
     internal fun readProbe(): LegacyMigrationProbeResult {
@@ -389,6 +391,12 @@ internal data class LegacyMigrationProbeResult(
     }.toString()
 }
 
+
+internal sealed interface LegacyAndroidAccountReadResult {
+    data object Absent : LegacyAndroidAccountReadResult
+    data object Unavailable : LegacyAndroidAccountReadResult
+    data class Found(val account: LegacyAndroidAccountImport) : LegacyAndroidAccountReadResult
+}
 
 internal data class LegacyAndroidAccountImport(
     val serverUrl: String,
