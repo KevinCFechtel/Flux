@@ -81,4 +81,24 @@ class LegacyAndroidImportParsingTest {
             parsed,
         )
     }
+    @Test
+    fun downloadDiscoveryRequiresVerifiedLegacyFileAndEnclosureIdentity() {
+        val root = kotlin.io.path.createTempDirectory("legacy-audio-test").toFile()
+        try {
+            val valid = java.io.File(root, "audio_42.mp3").apply { writeText("media") }
+            java.io.File(root, "audio_43.mp3").apply { writeText("other") }
+            val imports = LegacyAndroidImportParsing.downloads(
+                secure = mapOf(
+                    "audio_download_path_42" to valid.absolutePath,
+                    "audio_download_path_43" to java.io.File(root, "audio_43.mp3").absolutePath,
+                    "audio_download_path_url_https://example.test/media" to valid.absolutePath,
+                ),
+                audioRoot = root,
+                knownLegacyEnclosureIds = setOf(42L),
+            )
+            assertEquals(listOf(LegacyAndroidDownloadImport(42L, valid.canonicalFile)), imports)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
