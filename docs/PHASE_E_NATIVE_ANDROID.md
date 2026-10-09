@@ -1152,9 +1152,21 @@ A future Android-specific capability may occupy E8 only after a distinct product
 
 ## 20. E9 — Flutter Replacement Completion and Production Acceptance
 
-**Status: next active Phase-E step after E7 completion.**
+**Status: E9 IN PROGRESS — productive Flutter replacement migration started 9 October 2026.**
 
 E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
+
+Current E9 implementation status:
+
+- the audited E1 FlutterSecureStorage/legacy-state reader now lives in the production source set and remains read-only;
+- normal and headless account bootstrap run the same migration preflight before reading native credentials;
+- an existing native account wins without reading or changing Flutter state;
+- production upgrades with readable Flutter credentials copy URL, API key and complete custom-header pairs into the native Keystore-backed credential envelope;
+- unavailable legacy secure storage is treated as retryable rather than as an empty/fresh installation;
+- account migration writes non-secret provenance before the native credential copy, so termination cannot leave an unmarked migrated account; failed copies clear the provisional marker and partial native copy while leaving Flutter sources untouched;
+- parser/coordinator regression tests cover credential requirements, custom-header extraction, native-wins behavior, retryable unreadable storage and failed-copy cleanup;
+- catalog-dependent settings, playback and downloaded-media imports remain pending and must retry after a successful native sync rather than treating an initially empty Core catalog as authoritative absence;
+- the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
 
 By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
 
