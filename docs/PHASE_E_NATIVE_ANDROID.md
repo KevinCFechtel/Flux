@@ -1171,6 +1171,7 @@ Current E9 implementation status:
 - E9 local presentation follow-up now imports compatible navigation visibility, article-count/read-on-scroll/remove-on-read, reader-opening and swipe semantics, and Android floating-toolbar actions using atomic native-presence-first DataStore writes;
 - startup category/feed imports are catalog-validated and remain independently retryable until the first successful sync contains the requested ID;
 - Flutter global widget scope/read-filter/sort values now seed only unconfigured native widgets; an existing per-widget native configuration remains authoritative. Obsolete item-limit/styling and widget-specific Miniflux-open preferences remain retired;
+- E9 presents an optional, non-blocking first-upgrade migration dialog after account restoration, using persisted completion markers for account, local/Core settings, feeds/start view, playback, downloads and widgets. It shows only categorical statuses (no URLs, secrets, filenames or article titles), offers an explicit sync action, remains retryable after dismissal, and is permanently acknowledged only once all stages complete;
 - signed production-identity physical upgrade, interruption/retry, widget host reconfiguration, and complete legacy-coexistence acceptance remain outstanding;
 - the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
 
