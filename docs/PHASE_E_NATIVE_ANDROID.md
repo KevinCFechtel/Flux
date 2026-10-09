@@ -1165,7 +1165,8 @@ Current E9 implementation status:
 - unavailable legacy secure storage is treated as retryable rather than as an empty/fresh installation;
 - account migration writes non-secret provenance before the native credential copy, so termination cannot leave an unmarked migrated account; failed copies clear the provisional marker and partial native copy while leaving Flutter sources untouched;
 - parser/coordinator regression tests cover credential requirements, custom-header extraction, native-wins behavior, retryable unreadable storage and failed-copy cleanup;
-- catalog-dependent settings, playback and downloaded-media imports remain pending and must retry after a successful native sync rather than treating an initially empty Core catalog as authoritative absence;
+- the E9 post-sync adapter now imports compatible Core policy/media settings and positive per-feed Open in Miniflux overrides exclusively for the migrated account. Separate completion flags make a missing feed retry on subsequent successful syncs; explicit native/Core state retains precedence;
+- article playback, downloaded-media imports, widget seed and remaining local presentation settings are pending. These require their own retryable follow-ups after a successful native sync rather than treating an initially empty Core catalog as authoritative absence;
 - the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
 
 By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
