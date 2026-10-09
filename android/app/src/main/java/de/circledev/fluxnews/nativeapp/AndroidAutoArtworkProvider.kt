@@ -64,8 +64,21 @@ class AndroidAutoArtworkProvider : ContentProvider() {
             enclosureId,
         ) { output, _, _, _, _ ->
             val bytes = resolveArtworkBytes(enclosureId) ?: fallbackArtworkBytes(nowPlaying)
-            ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
-                stream.write(bytes)
+            runCatching {
+                ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
+                    stream.write(bytes)
+                }
+            }.onFailure { failure ->
+                // Car hosts cancel artwork requests aggressively while rows leave the viewport.
+                // A closed consumer pipe is normal cancellation, not an app-fatal condition.
+                val app = context?.applicationContext as? FluxApplication
+                app?.diagnostics?.record(
+                    AndroidAppLogLevel.Debug,
+                    "android-auto-artwork",
+                    "Artwork pipe closed enclosure=" + enclosureId +
+                        " nowPlaying=" + nowPlaying +
+                        " error=" + failure.javaClass.simpleName,
+                )
             }
         }
     }
