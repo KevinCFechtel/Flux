@@ -23,6 +23,7 @@ class AndroidAccountBootstrap private constructor(
     private val serverVersionClearer: suspend () -> Unit,
     private val widgetStateClearer: () -> Unit,
     private val lifecycleParticipant: AndroidCoreLifecycleParticipant,
+    private val beforeCredentialRestore: suspend () -> Unit,
     storagePaths: AndroidStoragePaths,
 ) {
     internal constructor(
@@ -32,6 +33,7 @@ class AndroidAccountBootstrap private constructor(
         storagePaths: AndroidStoragePaths,
         onWidgetStateCleared: () -> Unit = {},
         lifecycleParticipant: AndroidCoreLifecycleParticipant = AndroidNoopCoreLifecycleParticipant,
+        beforeCredentialRestore: suspend () -> Unit = {},
     ) : this(
         credentialReader = credentialStore::read,
         credentialWriter = credentialStore::write,
@@ -66,6 +68,7 @@ class AndroidAccountBootstrap private constructor(
             onWidgetStateCleared()
         },
         lifecycleParticipant = lifecycleParticipant,
+        beforeCredentialRestore = beforeCredentialRestore,
         storagePaths = storagePaths,
     )
 
@@ -86,6 +89,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionClearer: suspend () -> Unit = {},
         widgetStateClearer: () -> Unit = {},
         lifecycleParticipant: AndroidCoreLifecycleParticipant = AndroidNoopCoreLifecycleParticipant,
+        beforeCredentialRestore: suspend () -> Unit = {},
         storagePaths: AndroidStoragePaths,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -104,6 +108,7 @@ class AndroidAccountBootstrap private constructor(
         serverVersionClearer,
         widgetStateClearer,
         lifecycleParticipant,
+        beforeCredentialRestore,
         storagePaths,
     )
 
@@ -142,6 +147,7 @@ class AndroidAccountBootstrap private constructor(
 
         state = State.Starting
         try {
+            beforeCredentialRestore()
             val credentials = credentialReader()
             if (credentials == null) {
                 state = State.AccountRequired
@@ -334,6 +340,7 @@ class AndroidAccountBootstrap private constructor(
 
     private fun safeStartupMessage(error: Exception): String = when (error) {
         is CredentialStorageException -> "Stored account credentials could not be read."
+        is AndroidLegacyMigrationException -> "The previous FluxNews account could not be migrated yet. Retry or configure the account manually."
         else -> "The stored account could not be started."
     }
 
