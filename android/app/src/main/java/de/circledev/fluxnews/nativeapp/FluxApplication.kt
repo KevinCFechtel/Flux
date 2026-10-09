@@ -30,6 +30,9 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidStoragePaths.create(applicationContext) }
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
+    internal val legacyMigrationNoticeStore: AndroidLegacyMigrationNoticeStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacyMigrationNoticeStore(preferenceStore)
+    }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
     internal val mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidMediaPlaybackCoordinator(
