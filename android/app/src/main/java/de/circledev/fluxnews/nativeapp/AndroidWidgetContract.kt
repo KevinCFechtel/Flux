@@ -50,11 +50,36 @@ internal class AndroidWidgetConfigurationStore(context: Context) {
 
     fun read(appWidgetId: Int): AndroidWidgetConfiguration {
         val prefix = prefix(appWidgetId)
+        if (!preferences.contains(prefix + SCOPE_TYPE) && !preferences.contains(prefix + READ_FILTER)) {
+            return readSeed() ?: AndroidWidgetConfiguration()
+        }
         return AndroidWidgetConfiguration(
             scopeType = AndroidWidgetScopeType.fromStored(preferences.getString(prefix + SCOPE_TYPE, null)),
             scopeId = preferences.getLong(prefix + SCOPE_ID, MISSING_ID).takeUnless { it == MISSING_ID },
             readFilter = AndroidWidgetReadFilter.fromStored(preferences.getString(prefix + READ_FILTER, null)),
             sortOrder = AndroidWidgetSortOrder.fromStored(preferences.getString(prefix + SORT_ORDER, null)),
+        )
+    }
+
+    fun hasSeed(): Boolean = preferences.contains("migration.seed.scope")
+
+    fun seedIfAbsent(configuration: AndroidWidgetConfiguration): Boolean {
+        if (hasSeed()) return false
+        return preferences.edit()
+            .putString("migration.seed.scope", configuration.scopeType.storedValue)
+            .putLong("migration.seed.id", configuration.scopeId ?: MISSING_ID)
+            .putString("migration.seed.read", configuration.readFilter.storedValue)
+            .putString("migration.seed.sort", configuration.sortOrder.storedValue)
+            .commit()
+    }
+
+    private fun readSeed(): AndroidWidgetConfiguration? {
+        if (!hasSeed()) return null
+        return AndroidWidgetConfiguration(
+            scopeType = AndroidWidgetScopeType.fromStored(preferences.getString("migration.seed.scope", null)),
+            scopeId = preferences.getLong("migration.seed.id", MISSING_ID).takeUnless { it == MISSING_ID },
+            readFilter = AndroidWidgetReadFilter.fromStored(preferences.getString("migration.seed.read", null)),
+            sortOrder = AndroidWidgetSortOrder.fromStored(preferences.getString("migration.seed.sort", null)),
         )
     }
 
