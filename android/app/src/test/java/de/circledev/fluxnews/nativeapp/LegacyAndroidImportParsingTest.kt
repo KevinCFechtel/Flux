@@ -41,4 +41,22 @@ class LegacyAndroidImportParsingTest {
             parsed.customHeaders,
         )
     }
+    @Test
+    fun settingsPreserveExplicitFalseAndOnlyPositiveFeedOverride() {
+        val settings = LegacyAndroidImportParsing.settings(
+            mapOf(
+                "backgroundSyncIntervalMinutes" to "0",
+                "autoDownloadAudioAfterSync" to "false",
+                "downloadAudioOnlyOnWifi" to "true",
+                "audioDownloadRetentionDays" to "30",
+                "feedSettingsOverrides" to """{"42":{"openMinifluxEntry":1},"43":{"openMinifluxEntry":0},"44":{"openMinifluxEntry":true}}""",
+            ),
+        )
+        assertEquals(false, settings.backgroundSyncEnabled)
+        assertEquals(false, settings.autoDownloadListeningList)
+        assertEquals(true, settings.unmeteredDownloadsOnly)
+        assertEquals(30, settings.retentionDays)
+        assertEquals(listOf(42L), settings.openInMinifluxFeedIds)
+    }
+
 }
