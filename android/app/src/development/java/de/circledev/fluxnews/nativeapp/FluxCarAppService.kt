@@ -31,6 +31,7 @@ import androidx.car.app.validation.HostValidator
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -150,6 +151,7 @@ private class FluxMediaPlaybackCarScreen(
 }
 
 @OptIn(ExperimentalCarApi::class)
+@UnstableApi
 private class FluxListeningListCarScreen(
     carContext: CarContext,
 ) : Screen(carContext), DefaultLifecycleObserver {
