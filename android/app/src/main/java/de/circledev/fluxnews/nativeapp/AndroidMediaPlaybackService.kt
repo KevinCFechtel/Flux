@@ -57,7 +57,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
     private val libraryStore: AndroidAutoMediaLibraryStore
         get() = app.autoMediaLibraryStore
 
-    @OptIn(UnstableApi::class)
+    @UnstableApi
     private val libraryCallback = object : MediaLibrarySession.Callback {
         @UnstableApi
         override fun onConnectAsync(
