@@ -53,6 +53,21 @@ internal class LegacyAndroidStateReader(private val context: Context) {
         )
     }
 
+    internal fun readDownloadImports(): LegacyAndroidDownloadReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidDownloadReadResult.Unavailable
+        val secure = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!secure.readable) return LegacyAndroidDownloadReadResult.Unavailable
+        val database = inspectDatabase()
+        if (database.present && !database.readable) return LegacyAndroidDownloadReadResult.Unavailable
+        return LegacyAndroidDownloadReadResult.Found(
+            LegacyAndroidImportParsing.downloads(
+                secure.values,
+                File(context.filesDir, "audio_cache"),
+                database.attachmentIds,
+            ),
+        )
+    }
+
     internal fun readProbe(): LegacyMigrationProbeResult {
         val before = LegacySourceFingerprints.capture(context)
         val aliasesBefore = legacyAliases()
@@ -416,6 +431,16 @@ internal sealed interface LegacyAndroidAccountReadResult {
     data class Found(val account: LegacyAndroidAccountImport) : LegacyAndroidAccountReadResult
 }
 
+internal data class LegacyAndroidDownloadImport(
+    val enclosureId: Long,
+    val sourceFile: File,
+)
+
+internal sealed interface LegacyAndroidDownloadReadResult {
+    data object Unavailable : LegacyAndroidDownloadReadResult
+    data class Found(val records: List<LegacyAndroidDownloadImport>) : LegacyAndroidDownloadReadResult
+}
+
 internal data class LegacyAndroidPlaybackProgressImport(
     val articleId: Long,
     val positionMs: ULong,
@@ -453,6 +478,26 @@ internal data class LegacyAndroidHeaderImport(
 
 /** Pure retained-state parsing kept separate from Android/Keystore access for regression tests. */
 internal object LegacyAndroidImportParsing {
+    fun downloads(
+        secure: Map<String, String>,
+        audioRoot: File,
+        knownLegacyEnclosureIds: Set<Long>,
+    ): List<LegacyAndroidDownloadImport> {
+        val root = audioRoot.canonicalFile
+        return secure.mapNotNull { (key, value) ->
+            val id = Regex("^audio_download_path_(\\d+)$").matchEntire(key)
+                ?.groupValues?.get(1)?.toLongOrNull()?.takeIf { it > 0L }
+                ?: return@mapNotNull null
+            if (id !in knownLegacyEnclosureIds) return@mapNotNull null
+            val source = runCatching { File(value).canonicalFile }.getOrNull()
+                ?: return@mapNotNull null
+            if (source.parentFile != root || !source.name.startsWith("audio_") ||
+                !source.isFile || !source.canRead() || source.length() <= 0L
+            ) return@mapNotNull null
+            LegacyAndroidDownloadImport(id, source)
+        }.distinctBy { it.enclosureId }.sortedBy { it.enclosureId }
+    }
+
     fun playback(
         sharedPreferences: Map<String, String>,
         legacySecure: Map<String, String>,
