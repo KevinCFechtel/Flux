@@ -1158,6 +1158,13 @@ E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
 
 Current E9 implementation status:
 
+### Play production bundle and F-Droid release handoff
+
+Build the production Google Play AAB with `./android/Build/build-app.sh productionBundle <versionCode> <versionName>`. Provide the gitignored `android/productionBundle-signing.properties`, containing `keyAlias`, `keyPassword`, `storeFile` (relative to `android/`) and `storePassword`. The upload key must match the key accepted by the existing Google Play application. The Play upload certificate is not necessarily the installed app signing certificate; this AAB does not validate an APK-side in-place Flutter upgrade. The normal `productionRelease` APK keeps its separate signing contract. Verify the bundle manifest's application ID and versions, upload-signing certificate and Play Console acceptance before release. Do not commit secrets or keystores.
+
+**F-Droid transition (after physical E9 acceptance):** Flutter's current F-Droid distribution and signature submission tooling live in `KevinCFechtel/FluxNews` (`.github/workflows/build-and-release.yml`, `.github/workflows/submit-fdroid-signatures.yml`, `.github/scripts/prepare_fdroid_metadata.py`). This is a distinct distribution pipeline, not the Play AAB. Move F-Droid build metadata/source references to the Rust/Kotlin `Flux` repo, ensure reproducible/offline-compatible build dependencies and supported architectures, carry forward the existing F-Droid package ID and developer signing/metadata policy, then validate a signed F-Droid update over its existing Flutter variant. Do not assume Play-signing and F-Droid-signing identities are interchangeable. Keep legacy releases and metadata in place until the native path passes F-Droid's build and installed-upgrade checks.
+
+
 - Android release versionName/versionCode now accept explicit parameters through `android/Build/build-app.sh <variant> <versionCode> <versionName>` with `--help` documentation; existing CI builds without parameters and the old developmentBundle versionCode-only form remain compatible. Production release signing and a larger-than-installed versionCode still require separate acceptance;
 
 - the audited E1 FlutterSecureStorage/legacy-state reader now lives in the production source set and remains read-only;
