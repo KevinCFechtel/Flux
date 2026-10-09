@@ -39,6 +39,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * Development-only Car App Library surface.
@@ -164,9 +166,22 @@ private class FluxListeningListCarScreen(
     private var selectedFeedId: Long? = null
     private var searchText = ""
     private var loading = true
+    private var playbackEnclosureId: Long? = app.mediaPlaybackCoordinator.state.value.enclosureId
+    private var playbackStatus: AndroidMediaPlaybackPresentationStatus =
+        app.mediaPlaybackCoordinator.state.value.status
 
     init {
         lifecycle.addObserver(this)
+        scope.launch {
+            app.mediaPlaybackCoordinator.state
+                .map { state -> state.enclosureId to state.status }
+                .distinctUntilChanged()
+                .collect { (enclosureId, status) ->
+                    playbackEnclosureId = enclosureId
+                    playbackStatus = status
+                    invalidate()
+                }
+        }
         reload()
     }
 
@@ -191,12 +206,34 @@ private class FluxListeningListCarScreen(
             .take(rowLimit)
             .toList()
 
+        val hasNowPlaying =
+            playbackEnclosureId != null &&
+                playbackStatus != AndroidMediaPlaybackPresentationStatus.Idle &&
+                playbackStatus != AndroidMediaPlaybackPresentationStatus.Stopped
+        val nowPlayingAction = Action.Builder()
+            .setIcon(CarIcon.MEDIA_PLAYBACK)
+            .setOnClickListener {
+                screenManager.push(FluxMediaPlaybackCarScreen(carContext))
+            }
+            .build()
+
         val rows = visibleItems.map { item ->
             val metadata = item.mediaMetadata
+            val enclosureId = item.mediaId.toLongOrNull()
+            val isNowPlaying = hasNowPlaying && enclosureId == playbackEnclosureId
             Row.Builder()
                 .setTitle(metadata.title ?: "Untitled News")
-                .addText(metadata.artist ?: "Unknown Feed")
+                .addText(
+                    if (isNowPlaying) {
+                        "Now Playing • " + (metadata.artist ?: "Unknown Feed")
+                    } else {
+                        metadata.artist ?: "Unknown Feed"
+                    },
+                )
                 .apply {
+                    if (isNowPlaying) {
+                        setEndImage(CarIcon.MEDIA_PLAYBACK, Row.IMAGE_TYPE_ICON)
+                    }
                     metadata.artworkUri?.let { uri ->
                         setImage(
                             CarIcon.Builder(IconCompat.createWithContentUri(uri)).build(),
@@ -214,10 +251,10 @@ private class FluxListeningListCarScreen(
                                 setProgressBar(CarProgressBar.Builder(progress).build())
                             }
                     }
-                    item.mediaId.toLongOrNull()?.let { enclosureId ->
+                    enclosureId?.let { selectedEnclosureId ->
                         setOnClickListener {
                             scope.launch {
-                                playAndShowNowPlaying(enclosureId)
+                                playAndShowNowPlaying(selectedEnclosureId)
                             }
                         }
                     }
@@ -269,10 +306,24 @@ private class FluxListeningListCarScreen(
                     .setInitialSearchText(searchText)
                     .setSearchHint("Search episodes or feeds")
                     .setShowKeyboardByDefault(false)
+                    .apply {
+                        if (hasNowPlaying) {
+                            setEndHeaderActions(listOf(nowPlayingAction))
+                        }
+                    }
                     .build(),
             )
         } else {
-            builder.setHeader(Header.Builder().setTitle("Listening List").build())
+            builder.setHeader(
+                Header.Builder()
+                    .setTitle("Listening List")
+                    .apply {
+                        if (hasNowPlaying) {
+                            addEndHeaderAction(nowPlayingAction)
+                        }
+                    }
+                    .build(),
+            )
         }
 
         builder.addSection(
