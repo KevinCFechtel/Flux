@@ -54,6 +54,7 @@ android/baselineprofile/build/
 android/local.properties
 android/migration-signing.properties
 android/developmentBundle-signing.properties
+android/productionBundle-signing.properties
 android/captures/
 android/**/*.apk
 android/**/*.aab
