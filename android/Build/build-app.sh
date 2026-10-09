@@ -18,6 +18,7 @@ Variants:
   developmentRelease  Native development release APK.
   developmentBundle   Signed development release AAB for Play internal testing.
   productionRelease   Production release APK (signing must be configured separately).
+  productionBundle    Signed production AAB for Google Play (upload key).
 
 Parameters:
   versionCode         Positive Android update number (1..2100000000).
@@ -27,6 +28,8 @@ Parameters:
                       -native-dev automatically.
   Pass both versionCode and versionName together, or omit both.
   Omitting both retains Gradle's non-release fallback (1 / 0.1.0).
+  productionBundle requires both versionCode and versionName,
+                      plus android/productionBundle-signing.properties.
   developmentBundle requires a versionCode and
                       android/developmentBundle-signing.properties.
                       For compatibility its old two-argument form still works,
@@ -38,6 +41,11 @@ Examples:
   ./android/Build/build-app.sh developmentBundle 2026100901 3.0.0
   ./android/Build/build-app.sh developmentBundle 2026100901
   ./android/Build/build-app.sh productionRelease 2026100901 3.0.0
+  ./android/Build/build-app.sh productionBundle 2026100901 3.0.0
+
+Production AAB: app/build/outputs/bundle/productionRelease/app-production-release.aab
+The Play upload key is NOT necessarily the Play app-signing key and is not
+used for productionRelease APK builds.
 
 Note: A production in-place upgrade additionally requires the same signing
 certificate as the installed Flutter app. A different versionName alone does
@@ -67,6 +75,7 @@ case "${VARIANT}" in
   developmentRelease) TASK="assembleDevelopmentRelease" ;;
   developmentBundle) TASK="bundleDevelopmentRelease" ;;
   productionRelease) TASK="assembleProductionRelease" ;;
+  productionBundle) TASK="bundleProductionRelease" ;;
   *) fail_usage "Unknown variant: ${VARIANT}" ;;
 esac
 
@@ -87,12 +96,22 @@ if [[ -n "${VERSION_CODE}" || -n "${VERSION_NAME}" ]]; then
     fail_usage "versionName must look like 3.0.0 or 3.0.0-beta1."
 elif [[ "${VARIANT}" == "developmentBundle" ]]; then
   fail_usage "developmentBundle requires at least versionCode."
+elif [[ "${VARIANT}" == "productionBundle" ]]; then
+  fail_usage "productionBundle requires both versionCode and versionName."
 fi
 
 if [[ "${VARIANT}" == "developmentBundle" ]]; then
   SIGNING_PROPERTIES="${ANDROID_DIR}/developmentBundle-signing.properties"
   [[ -f "${SIGNING_PROPERTIES}" ]] || {
     echo "Missing Google Play upload-signing properties: ${SIGNING_PROPERTIES}" >&2
+    exit 1
+  }
+fi
+
+if [[ "${VARIANT}" == "productionBundle" ]]; then
+  SIGNING_PROPERTIES="${ANDROID_DIR}/productionBundle-signing.properties"
+  [[ -f "${SIGNING_PROPERTIES}" ]] || {
+    echo "Missing Google Play production upload-signing properties: ${SIGNING_PROPERTIES}" >&2
     exit 1
   }
 fi
@@ -105,6 +124,9 @@ fi
 EXTRA_ARGS=()
 if [[ -n "${VERSION_CODE}" ]]; then
   EXTRA_ARGS+=("-PfluxBuildVersionCode=${VERSION_CODE}" "-PfluxBuildVersionName=${VERSION_NAME}")
+fi
+if [[ "${VARIANT}" == "productionBundle" ]]; then
+  EXTRA_ARGS+=("-PfluxProductionBundleSigning=true")
 fi
 
 exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" "${TASK}" "${EXTRA_ARGS[@]}"
