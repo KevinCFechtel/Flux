@@ -27,13 +27,16 @@ Parameters:
                       -native-dev automatically.
   Pass both versionCode and versionName together, or omit both.
   Omitting both retains Gradle's non-release fallback (1 / 0.1.0).
-  developmentBundle requires both arguments and
+  developmentBundle requires a versionCode and
                       android/developmentBundle-signing.properties.
+                      For compatibility its old two-argument form still works,
+                      using Gradle's default versionName (0.1.0).
 
 Examples:
   ./android/Build/build-app.sh
   ./android/Build/build-app.sh developmentRelease 2026100901 3.0.0
   ./android/Build/build-app.sh developmentBundle 2026100901 3.0.0
+  ./android/Build/build-app.sh developmentBundle 2026100901
   ./android/Build/build-app.sh productionRelease 2026100901 3.0.0
 
 Note: A production in-place upgrade additionally requires the same signing
@@ -67,6 +70,10 @@ case "${VARIANT}" in
   *) fail_usage "Unknown variant: ${VARIANT}" ;;
 esac
 
+if [[ "${VARIANT}" == "developmentBundle" && -n "${VERSION_CODE}" && -z "${VERSION_NAME}" ]]; then
+  VERSION_NAME="0.1.0"
+fi
+
 if [[ -n "${VERSION_CODE}" || -n "${VERSION_NAME}" ]]; then
   [[ -n "${VERSION_CODE}" && -n "${VERSION_NAME}" ]] ||
     fail_usage "versionCode and versionName must be supplied together."
@@ -79,7 +86,7 @@ if [[ -n "${VERSION_CODE}" || -n "${VERSION_NAME}" ]]; then
   [[ "${VERSION_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] ||
     fail_usage "versionName must look like 3.0.0 or 3.0.0-beta1."
 elif [[ "${VARIANT}" == "developmentBundle" ]]; then
-  fail_usage "developmentBundle requires versionCode and versionName."
+  fail_usage "developmentBundle requires at least versionCode."
 fi
 
 if [[ "${VARIANT}" == "developmentBundle" ]]; then
