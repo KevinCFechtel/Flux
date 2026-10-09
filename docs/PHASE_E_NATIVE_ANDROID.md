@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: E1 THROUGH E6 COMPLETE FOR SEQUENCING — E7 IN PROGRESS — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: E1 THROUGH E7 COMPLETE FOR SEQUENCING — E9 NEXT — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -1120,27 +1120,27 @@ There remains exactly one native Android player/media runtime per app process.
 
 Initial E7 implementation starts by extending the existing E6 playback service to one `MediaLibraryService` / `MediaLibrarySession`, adding Android Auto manifest discovery and exposing a process-scoped, disposable Core-backed Listening List projection. Headless service startup must restore the existing account/Core session through `AndroidAccountBootstrap`; it must not require `MainActivity` to have run first.
 
-Current E7 implementation status:
+Current E7 implementation status — **complete for sequencing as of 9 October 2026**:
 
-- the E6 service is now the single `MediaLibraryService` / `MediaLibrarySession`, still owning the same ExoPlayer;
-- both Media3 and legacy `android.media.browse.MediaBrowserService` discovery are declared, together with the Android Auto media descriptor;
-- the automotive root projects direct playable Listening List items and keeps feed data only as filter metadata;
+- the E6 service is the single `MediaLibraryService` / `MediaLibrarySession`, still owning the same ExoPlayer and process-scoped playback coordinator;
+- both Media3 and legacy `android.media.browse.MediaBrowserService` discovery are declared together with the Android Auto media descriptor;
+- the stable/classic automotive root projects direct playable Listening List items and keeps feed data out of the normal browse hierarchy;
+- classic Android Auto search narrows by article title or feed title, while custom browse-action feed filtering is capability-gated and omitted when the host reports no custom browse-action support;
 - external item selection and legacy `playFromMediaId` resolve through Core `preparePlayback`, retaining local-download preference, remote fallback and Core resume position;
-- legacy/system `playFromSearch` resolves only within the current Listening List, matching article title or feed title in visible Listening List order;
 - system media metadata includes article title, feed title, duration, MIME type and Core/remote artwork;
-- system seek-back/seek-forward are fixed at 30 seconds and media-button preferences request those actions instead of episode navigation;
-- Next/Previous episode commands are removed from connected-controller command availability; E7 still has no queue or autoplay semantics;
+- system seek-back/seek-forward use the product contract of 15 seconds backward and 30 seconds forward; Next/Previous episode commands remain unavailable and E7 still introduces no queue or autoplay semantics;
 - external seeks update the shared presentation state and checkpoint through the existing E6 coordinator, while external Stop is reflected back into Flux playback state;
-- the process-scoped automotive projection retains an optional validated feed filter across reloads without introducing feed browse nodes in the Listening List root;
-- the Listening List root advertises a `Filter by Feed` custom browse action. Activating it opens a separate filter-choice node containing `All Feeds` plus the current `listeningListFeeds()`; choosing one applies `listeningList(feedId:sort:)`, updates the subscribed Listening List root, and shows that filtered episode set without turning feeds into normal root branches;
-- Android Auto search provides the host-native title/feed narrowing path in addition to the explicit filter action;
-- the root item is returned by `onGetItem` as browsable so Android Auto/legacy MediaBrowser root subscriptions are accepted by Media3's default subscription path;
 - Core/media revision and Core-session changes refresh the automotive snapshot and notify subscribed browsers through `notifyChildrenChanged`;
-- automotive snapshot publication is request-generation guarded so an older browse/search/filter refresh cannot overwrite a newer projection.
+- automotive snapshot publication is request-generation guarded so older browse/search/filter work cannot overwrite a newer projection;
+- browse and Now Playing artwork are served through local content URIs backed by Core/remote artwork with separate browse and Now Playing fallbacks; cancelled host artwork requests are tolerated so viewport churn does not crash the app;
+- Media3 completion status/percentage is projected from Core playback state for compatible classic hosts;
+- the development flavor additionally contains the forward-looking Android for Cars App Library media surface while production remains on the stable MediaLibraryService path;
+- the development CAL surface uses the same E6/E7 player and Core-backed Listening List, with SearchHeader, feed chips, per-item progress bars, artwork, explicit Now Playing via `MediaPlaybackTemplate`, a direct Now Playing return action and visible marking of the currently loaded item;
+- the CAL surface respects host-provided list content limits and records car API/capability diagnostics rather than maintaining a second automotive cache or domain model;
+- CAL Beta Features / Car API 9 acceptance on a physical Android Auto host has proven SearchHeader, feed chips, progress bars, direct playback, Now Playing navigation and stable scrolling after artwork-cancellation hardening;
+- the repository Android test gate is green after the final E7 Media3/CAL lint fixes.
 
-E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
-
-Runtime acceptance on 7 October 2026 has proven Android Auto browsing of the direct Listening List root, selecting/playing episodes and remote playback controls on a physical Android Auto host. Follow-up presentation work publishes every browse episode with a local artwork URI backed by Core/remote artwork and the normal Flux fallback, plus Media3 completion status/percentage from the Core playback state so compatible Auto hosts can show per-item playback progress. Re-accept artwork/fallback/progress presentation after this metadata change.
+E7 real-device acceptance is complete. Remaining CAL scrolling performance is treated as non-blocking host/beta presentation behavior unless future testing reveals a reproducible Flux-side regression. Production rollout does not depend on the experimental CAL presentation path becoming generally available.
 
 ## 19. E8 — Reserved / no artificial iOS counterpart
 
@@ -1151,6 +1151,8 @@ Do not create an Android feature merely to mirror the Phase-D numbering or the d
 A future Android-specific capability may occupy E8 only after a distinct product requirement and architecture decision. No current Phase-E release gate depends on E8.
 
 ## 20. E9 — Flutter Replacement Completion and Production Acceptance
+
+**Status: next active Phase-E step after E7 completion.**
 
 E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
 
