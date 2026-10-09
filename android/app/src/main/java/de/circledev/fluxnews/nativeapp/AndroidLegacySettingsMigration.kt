@@ -77,7 +77,7 @@ internal class AndroidLegacySettingsMigration(
                         readFilter = if (seed.unreadOnly) AndroidWidgetReadFilter.Unread else AndroidWidgetReadFilter.All,
                         sortOrder = if (seed.oldestFirst) AndroidWidgetSortOrder.OldestFirst else AndroidWidgetSortOrder.NewestFirst,
                     )
-                    check(widgetStore?.seedIfAbsent(config) != false || widgetStore.hasSeed())
+                    widgetStore?.let { check(it.seedIfAbsent(config) || it.hasSeed()) }
                 }
                 preferences.write(WIDGET_DONE, true)
             }
