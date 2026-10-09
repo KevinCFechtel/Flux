@@ -35,6 +35,13 @@ internal class LegacyAndroidStateReader(private val context: Context) {
             ?: LegacyAndroidAccountReadResult.Absent
     }
 
+    internal fun readSettingsImport(): LegacyAndroidSettingsReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidSettingsReadResult.Unavailable
+        val values = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!values.readable) return LegacyAndroidSettingsReadResult.Unavailable
+        return LegacyAndroidSettingsReadResult.Found(LegacyAndroidImportParsing.settings(values.values))
+    }
+
     internal fun readProbe(): LegacyMigrationProbeResult {
         val before = LegacySourceFingerprints.capture(context)
         val aliasesBefore = legacyAliases()
@@ -398,6 +405,20 @@ internal sealed interface LegacyAndroidAccountReadResult {
     data class Found(val account: LegacyAndroidAccountImport) : LegacyAndroidAccountReadResult
 }
 
+internal sealed interface LegacyAndroidSettingsReadResult {
+    data object Unavailable : LegacyAndroidSettingsReadResult
+    data class Found(val settings: LegacyAndroidSettingsImport) : LegacyAndroidSettingsReadResult
+}
+
+internal data class LegacyAndroidSettingsImport(
+    val backgroundSyncEnabled: Boolean?,
+    val autoDownloadListeningList: Boolean?,
+    val unmeteredDownloadsOnly: Boolean?,
+    val retentionDays: Int?,
+    val deleteAfterPlayback: Boolean?,
+    val openInMinifluxFeedIds: List<Long>,
+)
+
 internal data class LegacyAndroidAccountImport(
     val serverUrl: String,
     val apiKey: String,
@@ -411,6 +432,34 @@ internal data class LegacyAndroidHeaderImport(
 
 /** Pure retained-state parsing kept separate from Android/Keystore access for regression tests. */
 internal object LegacyAndroidImportParsing {
+    fun settings(values: Map<String, String>): LegacyAndroidSettingsImport {
+        fun boolean(key: String) = when (values[key]?.trim()) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
+        val interval = values["backgroundSyncIntervalMinutes"]?.trim()?.toIntOrNull()
+        val feedIds = runCatching {
+            val overrides = JSONObject(values["feedSettingsOverrides"] ?: "{}")
+            overrides.keys().asSequence().mapNotNull { key ->
+                val id = key.toLongOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+                val setting = overrides.optJSONObject(key) ?: return@mapNotNull null
+                if (setting.opt("openMinifluxEntry") is Number &&
+                    setting.optInt("openMinifluxEntry") == 1
+                ) id else null
+            }.sorted().toList()
+        }.getOrDefault(emptyList())
+        return LegacyAndroidSettingsImport(
+            backgroundSyncEnabled = interval?.takeIf { it >= 0 }?.let { it > 0 },
+            autoDownloadListeningList = boolean("autoDownloadAudioAfterSync"),
+            unmeteredDownloadsOnly = boolean("downloadAudioOnlyOnWifi"),
+            retentionDays = values["audioDownloadRetentionDays"]?.trim()?.toIntOrNull()
+                ?.takeIf { it in setOf(7, 30, 90) },
+            deleteAfterPlayback = boolean("deleteAudioAfterPlayback"),
+            openInMinifluxFeedIds = feedIds,
+        )
+    }
+
     fun account(values: Map<String, String>): LegacyAndroidAccountImport? {
         val serverUrl = values["minifluxURL"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
         val apiKey = values["minifluxAPIKey"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
