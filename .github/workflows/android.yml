@@ -54,3 +54,8 @@ jobs:
           ./android/Build/build-app.sh developmentRelease
           ./android/Build/build-app.sh productionRelease
           bash -n android/Build/*.sh
+          ./android/Build/build-app.sh --help | grep -q productionBundle
+          if ./android/Build/build-app.sh productionBundle 2026100901 >/dev/null 2>&1; then
+            echo "productionBundle unexpectedly accepted a missing versionName" >&2
+            exit 1
+          fi
