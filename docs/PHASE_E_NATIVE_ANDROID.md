@@ -1168,7 +1168,10 @@ Current E9 implementation status:
 - the E9 post-sync adapter now imports compatible Core policy/media settings and positive per-feed Open in Miniflux overrides exclusively for the migrated account. Separate completion flags make a missing feed retry on subsequent successful syncs; explicit native/Core state retains precedence;
 - E9 playback imports positive article-keyed positions from Flutter SharedPreferences with secure-storage fallback; zero is omitted and Core owns unique-enclosure resolution, precedence and import outcomes. Missing/ambiguous records remain retryable;
 - E9 media migration checks primary attachment-ID path metadata against the cloned legacy SQLite enclosure catalog, verifies an accessible regular file under the original audio cache, copies it into a disjoint native media root using a staged file, and only then asks Core to adopt it. Existing Core downloads win; missing enclosures remain retryable; original Flutter media is never removed;
-- widget default seeds and remaining local presentation settings are pending;
+- E9 local presentation follow-up now imports compatible navigation visibility, article-count/read-on-scroll/remove-on-read, reader-opening and swipe semantics, and Android floating-toolbar actions using atomic native-presence-first DataStore writes;
+- startup category/feed imports are catalog-validated and remain independently retryable until the first successful sync contains the requested ID;
+- Flutter global widget scope/read-filter/sort values now seed only unconfigured native widgets; an existing per-widget native configuration remains authoritative. Obsolete item-limit/styling and widget-specific Miniflux-open preferences remain retired;
+- signed production-identity physical upgrade, interruption/retry, widget host reconfiguration, and complete legacy-coexistence acceptance remain outstanding;
 - the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
 
 By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
