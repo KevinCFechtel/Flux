@@ -122,13 +122,6 @@ internal class AndroidLegacyMigrationCoordinator private constructor(
         }
     }
 
-    internal suspend fun migratedAccountServer(): String? =
-        importedAccountServerReader?.invoke()
-
-    // Kept nullable so the initial account-only E9 slice does not require
-    // callers that do not yet need migration provenance to read DataStore.
-    private var importedAccountServerReader: (suspend () -> String?)? = null
-
     companion object {
         internal val IMPORTED_ACCOUNT_SERVER =
             AndroidPreferenceKey.string("migration-e9-imported-account-server")
