@@ -13,6 +13,33 @@ val developmentBundleSigningProperties = Properties().apply {
     if (propertiesFile.exists()) propertiesFile.inputStream().use(::load)
 }
 
+// Explicit opt-in only for the Play upload build. Normal productionRelease APKs
+// must not silently pick up the Play upload certificate: direct installs/rollback
+// may require a different, Flutter-compatible app-signing certificate.
+val signProductionBundle = providers.gradleProperty("fluxProductionBundleSigning")
+    .map(String::toBoolean)
+    .orElse(false)
+    .get()
+val productionBundleSigningProperties = Properties().apply {
+    if (signProductionBundle) {
+        val propertiesFile = rootProject.file("productionBundle-signing.properties")
+        if (!propertiesFile.isFile) {
+            throw GradleException("Missing android/productionBundle-signing.properties for signed Play bundle.")
+        }
+        propertiesFile.inputStream().use(::load)
+        val required = listOf("keyAlias", "keyPassword", "storeFile", "storePassword")
+        required.forEach { name ->
+            if (getProperty(name).isNullOrBlank()) {
+                throw GradleException("Missing ${name} in productionBundle-signing.properties.")
+            }
+        }
+        val keyStore = rootProject.file(getProperty("storeFile"))
+        if (!keyStore.isFile) {
+            throw GradleException("Production Play upload keystore does not exist: ${keyStore.path}")
+        }
+    }
+}
+
 // Release versions are supplied by Build/build-app.sh. The fallback values are
 // retained for CI and non-distributable local builds without release arguments.
 val buildVersionCode = providers.gradleProperty("fluxBuildVersionCode").map(String::toInt).orElse(1)
@@ -30,6 +57,14 @@ android {
                 storeFile = developmentBundleSigningProperties.getProperty("storeFile")
                     ?.let(rootProject::file)
                 storePassword = developmentBundleSigningProperties.getProperty("storePassword")
+            }
+        }
+        if (signProductionBundle) {
+            create("productionBundle") {
+                keyAlias = productionBundleSigningProperties.getProperty("keyAlias")
+                keyPassword = productionBundleSigningProperties.getProperty("keyPassword")
+                storeFile = rootProject.file(productionBundleSigningProperties.getProperty("storeFile"))
+                storePassword = productionBundleSigningProperties.getProperty("storePassword")
             }
         }
     }
@@ -51,7 +86,13 @@ android {
             resValue("string", "app_name", "FluxNews Native Dev")
             signingConfigs.findByName("developmentBundle")?.let { signingConfig = it }
         }
-        create("production") { dimension = "distribution" }
+        create("production") {
+            dimension = "distribution"
+            // Only build-app.sh productionBundle enables this signing configuration.
+            if (signProductionBundle) {
+                signingConfig = signingConfigs.getByName("productionBundle")
+            }
+        }
     }
     sourceSets {
         getByName("debug").apply {
