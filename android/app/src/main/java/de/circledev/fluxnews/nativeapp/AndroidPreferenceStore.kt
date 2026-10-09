@@ -68,6 +68,22 @@ class AndroidPreferenceStore private constructor(
         dataStore.edit { preferences -> preferences[key.preferenceKey] = value }
     }
 
+    /**
+     * Import only absent native values. Presence, including an explicitly
+     * stored false or empty selection, always takes precedence over Flutter.
+     * The check and write must share one DataStore transaction.
+     */
+    suspend fun <T> writeIfAbsent(key: AndroidPreferenceKey<T>, value: T): Boolean {
+        var inserted = false
+        dataStore.edit { preferences ->
+            if (preferences[key.preferenceKey] == null) {
+                preferences[key.preferenceKey] = value
+                inserted = true
+            }
+        }
+        return inserted
+    }
+
     suspend fun <T> remove(key: AndroidPreferenceKey<T>) {
         dataStore.edit { preferences -> preferences.remove(key.preferenceKey) }
     }
