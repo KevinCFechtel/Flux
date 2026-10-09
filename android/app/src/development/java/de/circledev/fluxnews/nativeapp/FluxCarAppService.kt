@@ -232,7 +232,7 @@ private class FluxListeningListCarScreen(
                 )
                 .apply {
                     if (isNowPlaying) {
-                        setEndImage(CarIcon.MEDIA_PLAYBACK, Row.IMAGE_TYPE_ICON)
+                        setEndImage(CarIcon.MEDIA_PLAYBACK)
                     }
                     metadata.artworkUri?.let { uri ->
                         setImage(
