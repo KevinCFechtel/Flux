@@ -1158,6 +1158,8 @@ E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
 
 Current E9 implementation status:
 
+- Android release versionName/versionCode now accept explicit parameters through `android/Build/build-app.sh <variant> <versionCode> <versionName>` with `--help` documentation; existing CI builds without parameters and the old developmentBundle versionCode-only form remain compatible. Production release signing and a larger-than-installed versionCode still require separate acceptance;
+
 - the audited E1 FlutterSecureStorage/legacy-state reader now lives in the production source set and remains read-only;
 - normal and headless account bootstrap run the same migration preflight before reading native credentials;
 - an existing native account wins without reading or changing Flutter state;
