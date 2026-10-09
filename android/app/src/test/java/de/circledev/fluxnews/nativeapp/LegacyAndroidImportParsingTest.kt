@@ -59,4 +59,26 @@ class LegacyAndroidImportParsingTest {
         assertEquals(listOf(42L), settings.openInMinifluxFeedIds)
     }
 
+    @Test
+    fun sharedPlaybackWinsAndZeroDoesNotBecomeResumableProgress() {
+        val parsed = LegacyAndroidImportParsing.playback(
+            sharedPreferences = mapOf(
+                "audio_progress_20" to "1500",
+                "audio_progress_21" to "0",
+                "audio_progress_bad" to "100",
+            ),
+            legacySecure = mapOf(
+                "audio_progress_20" to "800",
+                "audio_progress_22" to "2000",
+                "audio_progress_21" to "3000",
+            ),
+        )
+        assertEquals(
+            listOf(
+                LegacyAndroidPlaybackProgressImport(20L, 1500uL),
+                LegacyAndroidPlaybackProgressImport(22L, 2000uL),
+            ),
+            parsed,
+        )
+    }
 }
