@@ -101,4 +101,27 @@ class LegacyAndroidImportParsingTest {
             root.deleteRecursively()
         }
     }
+    @Test
+    fun localAndWidgetSettingsOnlyMapSupportedValues() {
+        val parsed = LegacyAndroidImportParsing.settings(
+            mapOf(
+                "markAsReadOnScrollOver" to "false",
+                "removeNewsFromListWhenRead" to "true",
+                "startupCategorie" to "3",
+                "startupFeedSelection" to "77",
+                "androidFloatingToolbarActions" to """["settings","search","podcasts"]""",
+                "androidFloatingToolbarActionOrder" to """["search","settings","podcasts"]""",
+                "widgetNewsStatus" to "bookmarked",
+                "widgetSortOrder" to "Oldest first",
+            ),
+        )
+        assertEquals(false, parsed.local.markReadOnScrollover)
+        assertEquals(true, parsed.local.removeWhenRead)
+        assertEquals(3, parsed.local.startupMode)
+        assertEquals(77L, parsed.local.startupFeedId)
+        assertEquals(listOf("search", "settings", "listeningList"), parsed.local.actionBar)
+        assertEquals("bookmarks", parsed.widget?.scope)
+        assertEquals(false, parsed.widget?.unreadOnly)
+        assertEquals(true, parsed.widget?.oldestFirst)
+    }
 }
