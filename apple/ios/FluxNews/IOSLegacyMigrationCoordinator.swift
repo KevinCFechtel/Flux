@@ -94,6 +94,7 @@ final class IOSLegacyMigrationCoordinator {
         static let downloadVerificationV2 = "FluxNews.iOS.legacyMigration.downloads.verified.v2"
         static let metadataRepairCompleted = "FluxNews.iOS.legacyMigration.downloads.metadataRepair.v1.completed"
         static let playbackPendingReason = "FluxNews.iOS.legacyMigration.playback.pendingReason"
+        static let playbackRemoteRetryAfter = "FluxNews.iOS.legacyMigration.playback.remoteRetryAfter.v1"
         static let downloadsPendingReason = "FluxNews.iOS.legacyMigration.downloads.pendingReason"
         static let skippedPlaybackReason = "FluxNews.iOS.legacyMigration.playback.skippedReason"
         static let skippedDownloadsReason = "FluxNews.iOS.legacyMigration.downloads.skippedReason"
@@ -115,6 +116,9 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyAccountReader: () -> LegacyAccountImport?
     private let legacyMediaSettingsReader: () -> IOSLegacyMediaSettingsImport?
     private let legacyPlaybackReader: () -> [LegacyPlaybackProgressImport]?
+    private let legacyPlaybackArticleReader: ([Int64]) -> [LegacyPlaybackArticleImport]
+    private let legacyPlaybackLocalRestorer: ((LegacyPlaybackArticleImport) async -> Result<Bool, Error>)?
+    private let legacyPlaybackRemoteRestorer: ((Int64) async -> Result<Bool, Error>)?
     private let legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)?
     private let legacyDownloadReader: () -> [LegacyDownloadImport]?
     private let legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)?
@@ -137,6 +141,11 @@ final class IOSLegacyMigrationCoordinator {
         legacyAccountReader: @escaping () -> LegacyAccountImport? = LegacyStateDiscovery.readAccountImport,
         legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport,
         legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports,
+        legacyPlaybackArticleReader: @escaping ([Int64]) -> [LegacyPlaybackArticleImport] = {
+            LegacyStateDiscovery.readPlaybackArticleImports(articleIDs: $0)
+        },
+        legacyPlaybackLocalRestorer: ((LegacyPlaybackArticleImport) async -> Result<Bool, Error>)? = nil,
+        legacyPlaybackRemoteRestorer: ((Int64) async -> Result<Bool, Error>)? = nil,
         legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)? = nil,
         legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() },
         legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)? = nil,
@@ -160,6 +169,9 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyAccountReader = legacyAccountReader
         self.legacyMediaSettingsReader = legacyMediaSettingsReader
         self.legacyPlaybackReader = legacyPlaybackReader
+        self.legacyPlaybackArticleReader = legacyPlaybackArticleReader
+        self.legacyPlaybackLocalRestorer = legacyPlaybackLocalRestorer
+        self.legacyPlaybackRemoteRestorer = legacyPlaybackRemoteRestorer
         self.legacyPlaybackImporter = legacyPlaybackImporter
         self.legacyDownloadReader = legacyDownloadReader
         self.legacyDownloadImporter = legacyDownloadImporter
@@ -265,8 +277,10 @@ final class IOSLegacyMigrationCoordinator {
         return .imported
     }
 
-    /// Imports article-keyed Flutter progress through the authoritative Core
-    /// resolver. `updatedAt` remains nil because Flutter retained no timestamp.
+    /// Imports article-keyed Flutter progress through the authoritative Core.
+    /// Local Flutter SQLite identity is preferred over Miniflux re-fetches and is
+    /// accepted only for an unambiguous single-audio article. `updatedAt`
+    /// remains nil because Flutter retained no timestamp.
     @discardableResult
     func migratePlaybackProgressIfNeeded() async -> IOSLegacyPlaybackMigrationOutcome {
         guard !inFlight else { return .retryableFailure }
@@ -285,14 +299,100 @@ final class IOSLegacyMigrationCoordinator {
         guard let legacyRecords = legacyPlaybackReader() else {
             return .retryableFailure
         }
+
         let records = legacyRecords.map {
             LegacyPlaybackImport(articleId: $0.articleID, positionMs: $0.positionMs, updatedAt: nil)
         }
-        if legacyPlaybackImporter == nil {
-            for record in legacyRecords {
-                _ = await bootstrapper.restoreLegacyPlaybackArticle(articleID: record.articleID)
+
+        // Custom importers are test seams and intentionally keep the historical
+        // behavior of bypassing Core hydration unless a restore seam is supplied.
+        let shouldHydrate = legacyPlaybackImporter == nil
+            || legacyPlaybackLocalRestorer != nil
+            || legacyPlaybackRemoteRestorer != nil
+        if shouldHydrate {
+            let resumable = legacyRecords.filter { $0.positionMs > 0 }
+            let localSnapshots = Dictionary(
+                uniqueKeysWithValues: legacyPlaybackArticleReader(
+                    resumable.map(\.articleID)
+                ).map { ($0.articleID, $0) }
+            )
+            var remoteRetryAfter = defaults.dictionary(
+                forKey: DefaultsKey.playbackRemoteRetryAfter
+            ) as? [String: Double] ?? [:]
+            let now = Date().timeIntervalSince1970
+            var retryScheduleChanged = false
+            var locallyRestored = 0
+            var remotelyRestored = 0
+            var remoteDeferred = 0
+
+            for record in resumable {
+                let retryKey = String(record.articleID)
+                var restoredLocally = false
+                if let snapshot = localSnapshots[record.articleID] {
+                    let localResult: Result<Bool, Error>
+                    if let legacyPlaybackLocalRestorer {
+                        localResult = await legacyPlaybackLocalRestorer(snapshot)
+                    } else {
+                        localResult = await bootstrapper.restoreLegacyLocalPlaybackArticle(snapshot)
+                    }
+                    if case .success(true) = localResult {
+                        restoredLocally = true
+                        locallyRestored += 1
+                        if remoteRetryAfter.removeValue(forKey: retryKey) != nil {
+                            retryScheduleChanged = true
+                        }
+                    }
+                }
+                if restoredLocally {
+                    continue
+                }
+
+                if let retryAt = remoteRetryAfter[retryKey], retryAt > now {
+                    remoteDeferred += 1
+                    continue
+                }
+                if remoteRetryAfter.removeValue(forKey: retryKey) != nil {
+                    retryScheduleChanged = true
+                }
+
+                let remoteResult: Result<Bool, Error>
+                if let legacyPlaybackRemoteRestorer {
+                    remoteResult = await legacyPlaybackRemoteRestorer(record.articleID)
+                } else {
+                    remoteResult = await bootstrapper.restoreLegacyPlaybackArticle(
+                        articleID: record.articleID
+                    )
+                }
+                switch remoteResult {
+                case .success(true):
+                    remotelyRestored += 1
+                case .success(false):
+                    // A clean false means the server conclusively could not
+                    // rehydrate this identity (for example HTTP 404/410 or an
+                    // ambiguous remote attachment set). Retry later rather than
+                    // hammering Miniflux on every activation.
+                    remoteRetryAfter[retryKey] = now + 86_400
+                    retryScheduleChanged = true
+                case .failure:
+                    // Connectivity/session failures are not persisted as
+                    // negative evidence. A later valid migration attempt may
+                    // retry as soon as normal runtime connectivity recovers.
+                    break
+                }
             }
+
+            if retryScheduleChanged {
+                if remoteRetryAfter.isEmpty {
+                    defaults.removeObject(forKey: DefaultsKey.playbackRemoteRetryAfter)
+                } else {
+                    defaults.set(remoteRetryAfter, forKey: DefaultsKey.playbackRemoteRetryAfter)
+                }
+            }
+            logger.info(
+                "Legacy playback hydration local=\(locallyRestored) remote=\(remotelyRestored) deferred=\(remoteDeferred)."
+            )
         }
+
         let result: Result<LegacyPlaybackImportResult, Error>
         if let legacyPlaybackImporter {
             result = await legacyPlaybackImporter(records)
@@ -308,6 +408,7 @@ final class IOSLegacyMigrationCoordinator {
             if outcome == .imported {
                 defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
                 defaults.removeObject(forKey: DefaultsKey.playbackPendingReason)
+                defaults.removeObject(forKey: DefaultsKey.playbackRemoteRetryAfter)
             } else {
                 defaults.set("\(importResult.skippedMissing) missing article(s); \(importResult.skippedAmbiguous) ambiguous audio attachment(s)", forKey: DefaultsKey.playbackPendingReason)
             }
