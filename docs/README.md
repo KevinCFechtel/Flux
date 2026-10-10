@@ -15,11 +15,11 @@ This directory is intentionally small.
 
 - **Phase A — Newsreader Completion:** complete and architecture-frozen.
 - **Phase B — Shared Podcast / Media Core:** complete and architecture-frozen.
-- **Phase C — Native macOS Audio Experience:** complete and architecture-frozen. `PHASE_C_NATIVE_MACOS_AUDIO.md` remains the implemented Phase-C contract even if historical wording inside that document still describes it as planned.
-- **Phase D — Native iOS/iPadOS:** feature implementation complete. D7 is architecture-frozen; D8 is deferred and not required for replacement; D9 implementation is complete/test-gated. The final canonical acceptance gate and detailed physical Flutter-to-native production-upgrade test remain pending. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative.
-- **Phase E — Native Android:** E1 through E6 are implemented and accepted for sequencing purposes. E6 — Native Media, Listening List and Background Transfers completed device testing without further blocking findings. E7 — MediaSession, System Media and Android Auto is in progress. Remaining earlier-phase findings are normal bug-fix follow-up unless they expose an architecture/product-contract contradiction. `PHASE_E_NATIVE_ANDROID.md` is the Phase-E implementation/sequencing authority.
+- **Phase C — Native macOS Audio Experience:** complete and architecture-frozen. The native macOS client implements the Phase-C Listening List, playback, transfer, settings and system-media contract; `PHASE_C_NATIVE_MACOS_AUDIO.md` is the completed contract.
+- **Phase D — Native iOS/iPadOS:** implementation complete. D7 is architecture-frozen; D8 is deferred and not required for replacement; D9 production Flutter-to-native migration is real-device accepted as of 10 October 2026, including recovered legacy downloads and terminal handling of stale playback positions with no local download and confirmed 404/410. The current PR regression gate remains the only mechanical acceptance check for later shared changes. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative.
+- **Phase E — Native Android:** E1 through E7 are complete and real-device accepted for their defined scopes. E9 implementation and the signed production Flutter-to-native upgrade path have been exercised successfully on physical hardware. A versioned Playback Verification v2 now reopens only previously manually skipped playback migration so the newer stale-progress semantics can be revalidated on the same upgraded device without resetting account, settings, downloads or widgets. Final E9 closure is pending that focused v2 device recheck plus the current canonical regression gate. `PHASE_E_NATIVE_ANDROID.md` is the Phase-E implementation/sequencing authority.
 
-The remaining Phase-D physical production-upgrade acceptance does not block Phase-E foundation work.
+There is no remaining known iOS or macOS feature implementation block. Android E9 is the active replacement-closure work.
 
 ## Reference evidence
 
