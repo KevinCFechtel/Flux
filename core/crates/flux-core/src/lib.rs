@@ -1054,6 +1054,8 @@ impl FluxCore {
     }
     /// Rehydrate a historical playback article only when Miniflux identifies
     /// exactly one audio enclosure, preserving the Core's ambiguity policy.
+    /// `Ok(false)` is reserved for confirmed remote absence (HTTP 404/410), so
+    /// platform migration can distinguish stale progress from unresolved data.
     pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, CoreError> {
         if article_id <= 0 {
             return Err(CoreError::data("legacy playback article ID must be positive"));
@@ -1070,12 +1072,18 @@ impl FluxCore {
                 Err(error) if matches!(error.http_status(), Some(404 | 410)) => return Ok(false),
                 Err(error) => return Err(error),
             };
-            if remote.article.id != article_id { return Ok(false); }
+            if remote.article.id != article_id {
+                return Err(CoreError::data("legacy playback article identity mismatch"));
+            }
             let audios = remote.enclosures.iter()
                 .filter(|e| e.article_id == article_id
                     && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
                 .collect::<Vec<_>>();
-            if audios.len() != 1 { return Ok(false); }
+            if audios.len() != 1 {
+                return Err(CoreError::data(
+                    "legacy playback article does not have exactly one audio enclosure",
+                ));
+            }
             self.store.restore_legacy_media_article(
                 &remote.article, &remote.enclosures, audios[0].id,
             )
