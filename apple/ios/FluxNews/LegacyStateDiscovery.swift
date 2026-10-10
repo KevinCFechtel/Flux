@@ -230,6 +230,17 @@ enum LegacyStateDiscovery {
         )
     }
 
+    /// Presence-only guard for old audio files when the secure-storage reader
+    /// unexpectedly reports an empty download set. Never mutates Flutter data.
+    static func hasUnmigratedAudioFiles(fileManager: FileManager = .default) -> Bool {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let library = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let audioCache = library.appendingPathComponent("Application Support/audio_cache", isDirectory: true)
+        return countAudioFiles(in: audioCache, fileManager: fileManager) > 0
+    }
+
     /// Reads only primary attachment-ID download paths. URL-keyed values and
     /// filenames are not identity evidence and are intentionally ignored.
     static func readDownloadImports(
