@@ -279,6 +279,11 @@ final class IOSLegacyMigrationCoordinator {
         let records = legacyRecords.map {
             LegacyPlaybackImport(articleId: $0.articleID, positionMs: $0.positionMs, updatedAt: nil)
         }
+        if legacyPlaybackImporter == nil {
+            for record in legacyRecords {
+                _ = await bootstrapper.restoreLegacyPlaybackArticle(articleID: record.articleID)
+            }
+        }
         let result: Result<LegacyPlaybackImportResult, Error>
         if let legacyPlaybackImporter {
             result = await legacyPlaybackImporter(records)
@@ -326,6 +331,14 @@ final class IOSLegacyMigrationCoordinator {
             guard let sourceSize = readableRegularFileSize(at: record.sourceFile) else {
                 hasRetryableRecord = true
                 continue
+            }
+            if legacyDownloadImporter == nil, let articleID = record.articleID {
+                switch await bootstrapper.restoreLegacyMediaArticle(articleID: articleID, enclosureID: record.enclosureID) {
+                case .success(true): break
+                case .success(false), .failure:
+                    hasRetryableRecord = true
+                    continue
+                }
             }
             let destination: URL
             let createdDestination: Bool
