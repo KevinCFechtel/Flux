@@ -62,6 +62,29 @@ explicit confirmation for completing with skipped unresolved media. It persists
 details. Flutter source files remain untouched. Physical upgrade and regression
 CI still need acceptance for this follow-up.
 
+### October 2026 — missing Keychain download keys in device diagnostics
+
+The 2026-10-10 on-device diagnostics (3.0.0 / 2026100902) show
+`Legacy media repair scanned=0 recoveredArtworks=0` and repeated
+`Legacy playback imported=0 missing=53`. The user-reported migration
+status also says that downloaded audio files remain on disk but no
+Keychain download paths match. In the Flutter legacy source,
+`AudioDownloadService.getDownloadedAudios()` enumerates
+`Application Support/audio_cache` by filename independently of
+Keychain; the original native iOS reader required
+`audio_download_path_<id>` entries and therefore missed such files.
+
+The iOS migration source reader now merges positively identified files
+(`audio_<enclosureId>_<timestamp>[.extension]`) from the legacy
+audio directory with any valid Keychain paths, deduplicating by
+enclosure ID and choosing the newest on-disk candidate (like Flutter).
+It is read-only and will still require a matching Core enclosure
+before declaring a download imported. Unit tests cover missing
+Keychain paths, stale absolute paths, duplicate audio files, and
+invalid names. No existing native or Flutter media is deleted.
+An actual TestFlight upgrade test is needed to confirm all migrated
+downloads appear in Listening List.
+
 ### October 2026 — production iOS download migration follow-up
 
 A physical TestFlight upgrade exposed a false-positive Downloads stage: the iOS
