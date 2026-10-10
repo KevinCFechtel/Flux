@@ -84,7 +84,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidLegacyPlaybackMigration(applicationContext, preferenceStore, credentialStore, coreRuntime)
     }
     internal val legacyDownloadMigration: AndroidLegacyDownloadMigration by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidLegacyDownloadMigration(applicationContext, preferenceStore, credentialStore, coreRuntime, storagePaths.media)
+        AndroidLegacyDownloadMigration(applicationContext, preferenceStore, credentialStore, coreRuntime, storagePaths.media, diagnostics)
     }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
