@@ -413,7 +413,7 @@ enum LegacyStateDiscovery {
                a.attachmentID,a.attachmentURL,a.attachmentMimeType
           FROM news n
           JOIN attachments a ON a.newsID=n.newsID
-         WHERE n.newsID IN ((placeholders))
+         WHERE n.newsID IN (\(placeholders))
            AND lower(a.attachmentMimeType) LIKE 'audio/%'
          ORDER BY n.newsID,a.attachmentID
         """
