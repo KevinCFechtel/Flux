@@ -250,20 +250,25 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                 }
             }
         },
+        // Keep all actions in a single aligned group instead of splitting
+        // them between Material 3's widely separated dialog button slots.
         confirmButton = {
-            Button(onClick = onClose) {
-                Text(if (state.complete) "Done" else "Continue in background")
-            }
-        },
-        dismissButton = {
-            if (!state.complete) {
-                Column {
-                    TextButton(onClick = onSync, enabled = !syncing) { Text("Sync now") }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End,
+            ) {
+                if (!state.complete) {
+                    TextButton(onClick = onSync, enabled = !syncing) {
+                        Text("Sync now")
+                    }
                     if (state.canFinishPartial) {
                         TextButton(onClick = { confirmSkip = true }, enabled = !syncing) {
                             Text("Finish with unresolved items")
                         }
                     }
+                }
+                Button(onClick = onClose) {
+                    Text(if (state.complete) "Done" else "Continue in background")
                 }
             }
         },
