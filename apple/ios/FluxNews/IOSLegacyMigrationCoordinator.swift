@@ -321,11 +321,6 @@ final class IOSLegacyMigrationCoordinator {
         guard !inFlight else { return .retryableFailure }
         inFlight = true
         defer { inFlight = false }
-        guard !defaults.bool(forKey: DefaultsKey.settingsFollowupLocalCompleted)
-                || !defaults.bool(forKey: DefaultsKey.settingsFollowupCoreCompleted)
-                || !defaults.bool(forKey: DefaultsKey.settingsFollowupStartupCompleted) else {
-            return .alreadyCompleted
-        }
         do { guard try isCurrentMigratedAccount() else { return .notEligible } }
         catch { return .retryableFailure }
         guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else {
@@ -424,6 +419,77 @@ final class IOSLegacyMigrationCoordinator {
         await repairImportedDownloadMetadataIfNeeded()
         logger.info("Legacy downloads copied into Core media storage.")
         return .imported
+    }
+
+    /// A durable, privacy-safe migration summary for the native iOS dialog.
+    struct Summary: Equatable {
+        let acknowledged: Bool
+        let completed: Bool
+        let completionKind: String
+        let playbackCompleted: Bool
+        let downloadsCompleted: Bool
+        let playbackDetails: String
+        let downloadDetails: String
+        let settingsCompleted: Bool
+        var canFinishWithSkippedItems: Bool {
+            settingsCompleted && (!playbackCompleted || !downloadsCompleted) &&
+                (playbackCompleted || !playbackDetails.isEmpty) &&
+                (downloadsCompleted || !downloadDetails.isEmpty)
+        }
+    }
+
+    func migrationSummary() -> Summary? {
+        guard defaults.bool(forKey: DefaultsKey.accountMigrationCompleted) else { return nil }
+        let settings = [
+            DefaultsKey.mediaSettingsMigrationCompleted,
+            DefaultsKey.globalPreferencesMigrationCompleted,
+            DefaultsKey.feedPreferenceMigrationCompleted,
+            DefaultsKey.settingsFollowupLocalCompleted,
+            DefaultsKey.settingsFollowupCoreCompleted,
+            DefaultsKey.settingsFollowupStartupCompleted,
+            DefaultsKey.toolbarMigrationCompleted,
+            DefaultsKey.widgetDefaultsMigrationCompleted,
+        ].allSatisfy { defaults.bool(forKey: $0) }
+        let playback = defaults.bool(forKey: DefaultsKey.playbackMigrationCompleted)
+        let downloads = defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted)
+        let kind = defaults.string(forKey: DefaultsKey.completionKind) ?? ""
+        return Summary(
+            acknowledged: defaults.bool(forKey: DefaultsKey.summaryAcknowledged),
+            completed: settings && playback && downloads,
+            completionKind: kind,
+            playbackCompleted: playback,
+            downloadsCompleted: downloads,
+            playbackDetails: defaults.string(forKey: DefaultsKey.skippedPlaybackReason)
+                ?? defaults.string(forKey: DefaultsKey.playbackPendingReason) ?? "",
+            downloadDetails: defaults.string(forKey: DefaultsKey.skippedDownloadsReason)
+                ?? defaults.string(forKey: DefaultsKey.downloadsPendingReason) ?? "",
+            settingsCompleted: settings
+        )
+    }
+
+    func acknowledgeCompletedMigration() {
+        guard let summary = migrationSummary(), summary.completed else { return }
+        if defaults.string(forKey: DefaultsKey.completionKind) == nil {
+            defaults.set("completed", forKey: DefaultsKey.completionKind)
+        }
+        defaults.set(true, forKey: DefaultsKey.summaryAcknowledged)
+    }
+
+    @discardableResult
+    func finishMigrationWithSkippedItems() -> Bool {
+        guard let summary = migrationSummary(), summary.canFinishWithSkippedItems else { return false }
+        if !summary.playbackCompleted {
+            defaults.set(summary.playbackDetails, forKey: DefaultsKey.skippedPlaybackReason)
+            defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
+        }
+        if !summary.downloadsCompleted {
+            defaults.set(summary.downloadDetails, forKey: DefaultsKey.skippedDownloadsReason)
+            defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+        }
+        defaults.set("completed_with_skipped_items", forKey: DefaultsKey.completionKind)
+        defaults.set(true, forKey: DefaultsKey.summaryAcknowledged)
+        logger.info("Legacy migration completed with manually skipped unresolved media entries.")
+        return true
     }
 
     private func repairImportedDownloadMetadataIfNeeded() async {
