@@ -613,6 +613,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				ENABLE_TESTABILITY = YES;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
@@ -672,6 +673,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
@@ -743,6 +745,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsUpgradeTest.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.backgroundSync;
 				FLUX_DISPLAY_NAME = FluxNews;
@@ -798,6 +801,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -819,6 +823,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -851,6 +856,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = "";
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
 				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
@@ -876,6 +882,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = "";
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
 				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
@@ -901,6 +908,7 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsUpgradeTest.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 1.0;
 				DEVELOPMENT_TEAM = "";
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews;
 				FLUX_WIDGET_URL_SCHEME = fluxnews;
