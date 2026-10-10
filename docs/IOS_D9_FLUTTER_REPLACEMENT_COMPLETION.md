@@ -44,6 +44,24 @@ or new product decision requires reopening them.
 
 ## 2. D9 release-critical replacement gates
 
+### October 2026 — historical media recovery and completion parity
+
+The native iOS migration now mirrors the Android E9 production findings: a read-only
+legacy SQLite lookup identifies the article for each downloaded enclosure, enabling
+targeted Miniflux recovery of older, already-read articles through the shared Core.
+Playback positions likewise trigger historical article recovery where an unambiguous
+audio enclosure can be found. Mismatched/removed content remains pending; imported
+native playback/download states are never overwritten.
+
+The shared Core's content-based legacy media analysis and one-time repair of
+downloaded `.audio` metadata (embedded artwork, durations and chapters) are now
+invoked by iOS even when the download import completed on an earlier build.
+The app provides a migration summary on startup, repeat-on-sync behavior, and an
+explicit confirmation for completing with skipped unresolved media. It persists
+`completed` versus `completed_with_skipped_items` and the original missing-item
+details. Flutter source files remain untouched. Physical upgrade and regression
+CI still need acceptance for this follow-up.
+
 ### D9-A — Production Flutter-to-native migration
 
 Complete the production-identity migration coordinator over the already-defined
