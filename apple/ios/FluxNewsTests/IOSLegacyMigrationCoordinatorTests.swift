@@ -200,6 +200,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
         let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
         markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.account.v1.completed")
         for key in [
             "mediaSettings.v1", "feedPreferences.v1", "globalPreferences.v1",
             "settingsFollowup.v2.local", "settingsFollowup.v2.core",
