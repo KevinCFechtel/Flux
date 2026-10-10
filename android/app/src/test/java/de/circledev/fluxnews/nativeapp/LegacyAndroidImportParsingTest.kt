@@ -119,6 +119,29 @@ class LegacyAndroidImportParsingTest {
     }
 
     @Test
+    fun downloadDiscoveryFallsBackToValidatedAudioCacheFileWhenStoredPathIsMissing() {
+        val root = kotlin.io.path.createTempDirectory("legacy-audio-cache-fallback").toFile()
+        try {
+            val cached = java.io.File(root, "audio_77_1790000000.mp3").apply {
+                writeText("cached-media")
+            }
+            val imports = LegacyAndroidImportParsing.downloads(
+                secure = emptyMap(),
+                audioRoot = root,
+                knownLegacyEnclosureIds = setOf(77L),
+                articleIdsByEnclosureId = mapOf(77L to 700L),
+            )
+
+            assertEquals(
+                listOf(LegacyAndroidDownloadImport(77L, cached.canonicalFile, 700L)),
+                imports,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun localAndWidgetSettingsOnlyMapSupportedValues() {
         val parsed = LegacyAndroidImportParsing.settings(
             mapOf(
