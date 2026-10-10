@@ -2111,6 +2111,63 @@ impl Store {
         Ok(true)
     }
 
+    /// Reprocess migrated Flutter media once after the initial import. Existing
+    /// artwork, duration, chapters and download/playback state always win.
+    /// A failed scan does not set the platform completion marker and can retry.
+    pub fn repair_legacy_download_metadata(&self) -> Result<(u32, u32), CoreError> {
+        let entries: Vec<(i64, String, String)> = {
+            let connection = self.connection.lock()
+                .map_err(|_| CoreError::internal("database lock poisoned"))?;
+            let mut statement = connection.prepare(
+                "SELECT d.enclosure_id,d.local_file,a.raw_html_content FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id JOIN articles a ON a.id=e.article_id WHERE d.state='downloaded' AND d.local_file LIKE 'downloads/legacy/%'"
+            ).map_err(sql_error)?;
+            statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>().map_err(sql_error)?
+        };
+        let mut scanned = 0u32;
+        let mut recovered = 0u32;
+        for (enclosure_id, reference, article_html) in entries {
+            let path = resolve_media_reference(&self.media_root, &reference)
+                .ok_or_else(|| CoreError::data("invalid legacy media path"))?;
+            if !path.is_file() {
+                return Err(CoreError::persistence("legacy media file missing during metadata repair"));
+            }
+            let analyzed = analyze_file(&path);
+            let prior = self.media_metadata(enclosure_id)?;
+            let has_artwork = prior.as_ref()
+                .and_then(|m| m.embedded_artwork_reference.as_ref()).is_some();
+            let artwork_reference = if has_artwork { None }
+                else { self.persist_artwork(&analyzed.artwork)? };
+            let mut connection = self.connection.lock()
+                .map_err(|_| CoreError::internal("database lock poisoned"))?;
+            let tx = connection.transaction().map_err(sql_error)?;
+            let had_chapters: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1)",
+                [enclosure_id], |row| row.get(0),
+            ).map_err(sql_error)?;
+            let duration = analyzed.duration_ms.map(i64::try_from).transpose()
+                .map_err(|_| CoreError::data("legacy duration exceeds SQLite range"))?;
+            tx.execute(
+                "INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=COALESCE(media_metadata.duration_ms,excluded.duration_ms),embedded_artwork_reference=COALESCE(media_metadata.embedded_artwork_reference,excluded.embedded_artwork_reference)",
+                params![enclosure_id,duration,artwork_reference],
+            ).map_err(sql_error)?;
+            if !had_chapters {
+                let chapters = if analyzed.embedded_chapters.is_empty() {
+                    article_chapters(&article_html, analyzed.duration_ms)
+                } else { analyzed.embedded_chapters.clone() };
+                let source = if analyzed.embedded_chapters.is_empty() {
+                    MediaChapterSource::ArticleContent
+                } else { MediaChapterSource::Embedded };
+                persist_chapters(&tx, enclosure_id, &to_domain_chapters(enclosure_id, source, &chapters))?;
+            }
+            tx.commit().map_err(sql_error)?;
+            scanned += 1;
+            if artwork_reference.is_some() { recovered += 1; }
+        }
+        Ok((scanned, recovered))
+    }
+
     pub fn import_legacy_download(
         &self,
         enclosure_id: i64,
