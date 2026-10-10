@@ -1084,6 +1084,25 @@ impl FluxCore {
         result
     }
 
+    /// Rehydrate a historical playback article from a platform-verified local
+    /// legacy snapshot without contacting Miniflux. The Store preserves native
+    /// rows and requires the legacy feed to still belong to the current catalog.
+    pub fn restore_legacy_local_playback_article(
+        &self,
+        article: &domain::Article,
+        enclosure: &Enclosure,
+    ) -> Result<bool, CoreError> {
+        if article.id <= 0 || enclosure.id <= 0 || enclosure.article_id != article.id {
+            return Err(CoreError::data("invalid legacy local playback snapshot"));
+        }
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .restore_legacy_local_playback_article(article, enclosure)
+    }
+
     /// Hydrate a historical, read article for a verified legacy download.
     /// Never fetch arbitrary URLs and never overwrite native article state.
     /// Missing remote entries or mismatched enclosure IDs remain retryable.
