@@ -39,6 +39,24 @@ struct LegacyPlaybackProgressImport: Equatable {
     let positionMs: UInt64
 }
 
+struct LegacyPlaybackArticleImport: Equatable {
+    let articleID: Int64
+    let feedID: Int64
+    let title: String
+    let url: String
+    let commentsURL: String
+    let publishedAt: String
+    let isRead: Bool
+    let isStarred: Bool
+    let rawHTMLContent: String
+    let readingTimeMinutes: UInt32
+    let preview: String
+    let imageURL: String?
+    let enclosureID: Int64
+    let enclosureURL: String
+    let enclosureMimeType: String
+}
+
 struct LegacyDownloadImport: Equatable {
     let enclosureID: Int64
     let sourceFile: URL
@@ -230,6 +248,29 @@ enum LegacyStateDiscovery {
         )
     }
 
+    /// Reads the local Flutter SQLite rows needed to identify historical
+    /// playback progress without contacting Miniflux. Only articles with exactly
+    /// one valid audio attachment are returned; ambiguous rows are intentionally
+    /// omitted instead of guessed.
+    static func readPlaybackArticleImports(
+        articleIDs: [Int64],
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil
+    ) -> [LegacyPlaybackArticleImport] {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              !articleIDs.isEmpty,
+              let library = homeDirectory ?? fileManager.urls(
+                for: .libraryDirectory,
+                in: .userDomainMask
+              ).first else {
+            return []
+        }
+        return readLegacyPlaybackArticles(
+            at: library.appendingPathComponent("news_database.db"),
+            articleIDs: articleIDs
+        )
+    }
+
     /// Presence-only guard for old audio files when the secure-storage reader
     /// unexpectedly reports an empty download set. Never mutates Flutter data.
     static func hasUnmigratedAudioFiles(fileManager: FileManager = .default) -> Bool {
@@ -346,6 +387,101 @@ enum LegacyStateDiscovery {
             byArticleID[progress.articleID] = progress
         }
         return byArticleID.values.sorted { $0.articleID < $1.articleID }
+    }
+
+    static func readLegacyPlaybackArticles(
+        at url: URL,
+        articleIDs: [Int64]
+    ) -> [LegacyPlaybackArticleImport] {
+        let ids = Array(Set(articleIDs.filter { $0 > 0 })).sorted()
+        guard !ids.isEmpty, FileManager.default.fileExists(atPath: url.path) else {
+            return []
+        }
+
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db = connection else {
+            if connection != nil { sqlite3_close(connection) }
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let sql = """
+        SELECT n.newsID,n.feedID,n.title,n.url,n.commentsUrl,n.publishedAt,
+               n.status,n.starred,n.content,n.readingTime,n.previewText,n.imageUrl,
+               a.attachmentID,a.attachmentURL,a.attachmentMimeType
+          FROM news n
+          JOIN attachments a ON a.newsID=n.newsID
+         WHERE n.newsID IN ((placeholders))
+           AND lower(a.attachmentMimeType) LIKE 'audio/%'
+         ORDER BY n.newsID,a.attachmentID
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            sqlite3_finalize(statement)
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_int64(statement, Int32(index + 1), id)
+        }
+
+        func text(_ column: Int32) -> String? {
+            guard sqlite3_column_type(statement, column) != SQLITE_NULL,
+                  let bytes = sqlite3_column_text(statement, column) else {
+                return nil
+            }
+            return String(cString: bytes)
+        }
+
+        var grouped: [Int64: [LegacyPlaybackArticleImport]] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let articleID = sqlite3_column_int64(statement, 0)
+            let feedID = sqlite3_column_int64(statement, 1)
+            let enclosureID = sqlite3_column_int64(statement, 12)
+            guard articleID > 0,
+                  feedID > 0,
+                  enclosureID > 0,
+                  let title = text(2),
+                  let articleURL = text(3),
+                  let publishedAt = text(5),
+                  let enclosureURL = text(13),
+                  let mimeType = text(14),
+                  !title.isEmpty,
+                  !articleURL.isEmpty,
+                  !publishedAt.isEmpty,
+                  !enclosureURL.isEmpty,
+                  mimeType.lowercased().hasPrefix("audio/") else {
+                continue
+            }
+            let readingTimeRaw = max(0, sqlite3_column_int64(statement, 9))
+            let readingTime = UInt32(clamping: readingTimeRaw)
+            let row = LegacyPlaybackArticleImport(
+                articleID: articleID,
+                feedID: feedID,
+                title: title,
+                url: articleURL,
+                commentsURL: text(4) ?? "",
+                publishedAt: publishedAt,
+                isRead: (text(6) ?? "").lowercased() == "read",
+                isStarred: sqlite3_column_int(statement, 7) != 0,
+                rawHTMLContent: text(8) ?? "",
+                readingTimeMinutes: readingTime,
+                preview: text(10) ?? "",
+                imageURL: text(11),
+                enclosureID: enclosureID,
+                enclosureURL: enclosureURL,
+                enclosureMimeType: mimeType
+            )
+            grouped[articleID, default: []].append(row)
+        }
+
+        return grouped.values.compactMap { rows in
+            rows.count == 1 ? rows[0] : nil
+        }.sorted { $0.articleID < $1.articleID }
     }
 
     static func readLegacyAttachmentArticleIDs(at url: URL) -> [Int64: Int64] {
