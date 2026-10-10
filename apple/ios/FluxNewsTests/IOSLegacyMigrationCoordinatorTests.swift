@@ -205,7 +205,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             "settingsFollowup.v2.local", "settingsFollowup.v2.core",
             "settingsFollowup.v2.startup", "toolbar.v1", "widgetDefaults.v1",
         ] {
-            defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.\\(key).completed")
+            defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.\(key).completed")
         }
         defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
         defaults.set("79 missing article(s)", forKey: "FluxNews.iOS.legacyMigration.playback.pendingReason")
