@@ -64,6 +64,7 @@ internal class LegacyAndroidStateReader(private val context: Context) {
                 secure.values,
                 File(context.filesDir, "audio_cache"),
                 database.attachmentIds,
+                database.attachmentArticleIds,
             ),
         )
     }
@@ -114,6 +115,20 @@ internal class LegacyAndroidStateReader(private val context: Context) {
                 val attachmentIds = db.rawQuery("SELECT attachmentID FROM attachments", null).use { cursor ->
                     buildSet<Long> { while (cursor.moveToNext()) add(cursor.getLong(0)) }
                 }
+                // Read the association from the same read-only SQLite snapshot as
+                // the legacy enclosure IDs. Never infer an article ID from an enclosure ID.
+                val attachmentArticleIds = db.rawQuery(
+                    "SELECT a.attachmentID,a.newsID FROM attachments a INNER JOIN news n ON n.newsID=a.newsID",
+                    null,
+                ).use { cursor ->
+                    buildMap<Long, Long> {
+                        while (cursor.moveToNext()) {
+                            val enclosureId = cursor.getLong(0)
+                            val articleId = cursor.getLong(1)
+                            if (enclosureId > 0 && articleId > 0) put(enclosureId, articleId)
+                        }
+                    }
+                }
                 val relationshipsReadable = db.rawQuery(
                     "SELECT COUNT(*) FROM attachments INNER JOIN news ON attachments.newsID = news.newsID", null,
                 ).use { it.moveToFirst(); true }
@@ -130,6 +145,7 @@ internal class LegacyAndroidStateReader(private val context: Context) {
                     ).use { it.moveToFirst(); it.getInt(0) },
                     articleAttachmentRelationshipsReadable = relationshipsReadable,
                     attachmentIds = attachmentIds,
+                    attachmentArticleIds = attachmentArticleIds,
                 )
             }
         } catch (_: Exception) {
@@ -357,6 +373,7 @@ internal data class DatabaseEvidence(
     val audioAttachmentCount: Int? = null,
     val articleAttachmentRelationshipsReadable: Boolean = false,
     val attachmentIds: Set<Long> = emptySet(),
+    val attachmentArticleIds: Map<Long, Long> = emptyMap(),
 ) {
     companion object { fun absent() = DatabaseEvidence(false, false) }
 }
@@ -434,6 +451,7 @@ internal sealed interface LegacyAndroidAccountReadResult {
 internal data class LegacyAndroidDownloadImport(
     val enclosureId: Long,
     val sourceFile: File,
+    val articleId: Long? = null,
 )
 
 internal sealed interface LegacyAndroidDownloadReadResult {
@@ -507,6 +525,7 @@ internal object LegacyAndroidImportParsing {
         secure: Map<String, String>,
         audioRoot: File,
         knownLegacyEnclosureIds: Set<Long>,
+        articleIdsByEnclosureId: Map<Long, Long> = emptyMap(),
     ): List<LegacyAndroidDownloadImport> {
         val root = audioRoot.canonicalFile
         return secure.mapNotNull { (key, value) ->
@@ -519,7 +538,7 @@ internal object LegacyAndroidImportParsing {
             if (source.parentFile != root || !source.name.startsWith("audio_") ||
                 !source.isFile || !source.canRead() || source.length() <= 0L
             ) return@mapNotNull null
-            LegacyAndroidDownloadImport(id, source)
+            LegacyAndroidDownloadImport(id, source, articleIdsByEnclosureId[id])
         }.distinctBy { it.enclosureId }.sortedBy { it.enclosureId }
     }
 
