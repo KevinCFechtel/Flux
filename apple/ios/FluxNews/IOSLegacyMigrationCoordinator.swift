@@ -448,11 +448,20 @@ final class IOSLegacyMigrationCoordinator {
         let playbackDetails: String
         let downloadDetails: String
         let settingsCompleted: Bool
+        let accountCompleted: Bool
+        let localSettingsCompleted: Bool
+        let feedSettingsCompleted: Bool
+        let startupCompleted: Bool
+        let widgetSettingsCompleted: Bool
         var canFinishWithSkippedItems: Bool {
             settingsCompleted && (!playbackCompleted || !downloadsCompleted) &&
                 (playbackCompleted || !playbackDetails.isEmpty) &&
                 (downloadsCompleted || !downloadDetails.isEmpty)
         }
+    }
+
+    private func kindIsManuallySkipped() -> Bool {
+        defaults.string(forKey: DefaultsKey.completionKind) == "completed_with_skipped_items"
     }
 
     func migrationSummary() -> Summary? {
@@ -470,6 +479,7 @@ final class IOSLegacyMigrationCoordinator {
         ].allSatisfy { defaults.bool(forKey: $0) }
         let playback = defaults.bool(forKey: DefaultsKey.playbackMigrationCompleted)
         let downloads = defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted)
+            && (defaults.bool(forKey: DefaultsKey.downloadVerificationV2) || kindIsManuallySkipped())
         let kind = defaults.string(forKey: DefaultsKey.completionKind) ?? ""
         return Summary(
             acknowledged: defaults.bool(forKey: DefaultsKey.summaryAcknowledged),
@@ -481,7 +491,16 @@ final class IOSLegacyMigrationCoordinator {
                 ?? defaults.string(forKey: DefaultsKey.playbackPendingReason) ?? "",
             downloadDetails: defaults.string(forKey: DefaultsKey.skippedDownloadsReason)
                 ?? defaults.string(forKey: DefaultsKey.downloadsPendingReason) ?? "",
-            settingsCompleted: settings
+            settingsCompleted: settings,
+            accountCompleted: true,
+            localSettingsCompleted: defaults.bool(forKey: DefaultsKey.mediaSettingsMigrationCompleted)
+                && defaults.bool(forKey: DefaultsKey.globalPreferencesMigrationCompleted)
+                && defaults.bool(forKey: DefaultsKey.settingsFollowupLocalCompleted)
+                && defaults.bool(forKey: DefaultsKey.settingsFollowupCoreCompleted)
+                && defaults.bool(forKey: DefaultsKey.toolbarMigrationCompleted),
+            feedSettingsCompleted: defaults.bool(forKey: DefaultsKey.feedPreferenceMigrationCompleted),
+            startupCompleted: defaults.bool(forKey: DefaultsKey.settingsFollowupStartupCompleted),
+            widgetSettingsCompleted: defaults.bool(forKey: DefaultsKey.widgetDefaultsMigrationCompleted)
         )
     }
 
@@ -817,7 +836,10 @@ struct IOSLegacyMigrationSummaryView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(summary.completed ? "Previous data has been checked." : "Settings and media data are imported after a successful sync.")
                         .foregroundStyle(.secondary)
-                    status("Settings and widgets", complete: summary.settingsCompleted, details: "")
+                    status("Account", complete: summary.accountCompleted, details: "Credentials checked")
+                    status("Settings", complete: summary.localSettingsCompleted, details: "")
+                    status("Feeds & startup view", complete: summary.feedSettingsCompleted && summary.startupCompleted, details: "")
+                    status("Widgets", complete: summary.widgetSettingsCompleted, details: "")
                     status("Playback progress", complete: summary.playbackCompleted, details: summary.playbackDetails)
                     status("Downloads", complete: summary.downloadsCompleted, details: summary.downloadDetails)
                     if !summary.completed {
