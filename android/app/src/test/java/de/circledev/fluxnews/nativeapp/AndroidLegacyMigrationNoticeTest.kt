@@ -40,4 +40,15 @@ class AndroidLegacyMigrationNoticeTest {
         assertFalse(complete.copy(acknowledged = true).appliesTo("https://example.test"))
         assertFalse(complete.copy(feedsComplete = false).complete)
     }
+    @Test
+    fun pendingStepsShowSpecificRetryReasonsWithoutMarkingComplete() {
+        val state = AndroidLegacyMigrationNotice(
+            importedServer = "https://example.test",
+            playbackStatus = "2 missing article(s)",
+            downloadsStatus = "1 missing audio attachment(s)",
+        )
+        assertFalse(state.complete)
+        assertEquals("2 missing article(s)", state.steps.first { it.title == "Playback progress" }.description)
+        assertEquals("1 missing audio attachment(s)", state.steps.first { it.title == "Downloads" }.description)
+    }
 }
