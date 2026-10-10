@@ -38,7 +38,47 @@ internal class AndroidLegacyPlaybackMigration(
             val provenance = preferenceStore.read(AndroidLegacyMigrationCoordinator.IMPORTED_ACCOUNT_SERVER, "")
             if (provenance.isBlank()) return@withLock
             if (credentialStore.read()?.serverUrl != provenance) return@withLock
-            if (preferenceStore.read(PLAYBACK_DONE, false)) return@withLock
+
+            val playbackDone = preferenceStore.read(PLAYBACK_DONE, false)
+            val verificationV2Done = preferenceStore.read(PLAYBACK_VERIFICATION_V2_DONE, false)
+            if (playbackDone) {
+                if (verificationV2Done) return@withLock
+
+                val completionKind = preferenceStore.read(
+                    AndroidLegacyMigrationNoticeStore.COMPLETION_KIND,
+                    "",
+                )
+                val skippedPlayback = preferenceStore.read(
+                    AndroidLegacyMigrationNoticeStore.SKIPPED_PLAYBACK_DETAILS,
+                    "",
+                )
+                if (!shouldReopenManualPlaybackSkip(
+                        playbackDone = playbackDone,
+                        verificationV2Done = verificationV2Done,
+                        completionKind = completionKind,
+                        skippedPlaybackDetails = skippedPlayback,
+                    )
+                ) {
+                    // Older installations whose playback import completed
+                    // normally do not need the semantic v2 recheck.
+                    preferenceStore.write(PLAYBACK_VERIFICATION_V2_DONE, true)
+                    return@withLock
+                }
+
+                // Re-open only the playback stage. Account/settings/downloads/
+                // widgets and already imported native Core state remain intact.
+                preferenceStore.write(PLAYBACK_DONE, false)
+                preferenceStore.remove(
+                    AndroidLegacyMigrationNoticeStore.SKIPPED_PLAYBACK_DETAILS,
+                )
+                preferenceStore.remove(
+                    AndroidLegacyMigrationNoticeStore.COMPLETION_KIND,
+                )
+                preferenceStore.write(
+                    AndroidLegacyMigrationNoticeStore.ACKNOWLEDGED,
+                    false,
+                )
+            }
 
             val records = when (val result = legacyReader()) {
                 LegacyAndroidPlaybackReadResult.Unavailable -> return@withLock
@@ -97,11 +137,30 @@ internal class AndroidLegacyPlaybackMigration(
             val discardedDescription = discardedDescription(discardedArticleIds.size)
             if (missing == 0 && ambiguous == 0) {
                 preferenceStore.write(PLAYBACK_DONE, true)
+                preferenceStore.write(PLAYBACK_VERIFICATION_V2_DONE, true)
                 if (discardedDescription.isBlank()) {
                     preferenceStore.remove(PLAYBACK_STATUS)
                 } else {
                     preferenceStore.write(PLAYBACK_STATUS, discardedDescription)
                 }
+                preferenceStore.remove(
+                    AndroidLegacyMigrationNoticeStore.SKIPPED_PLAYBACK_DETAILS,
+                )
+                val skippedDownloads = preferenceStore.read(
+                    AndroidLegacyMigrationNoticeStore.SKIPPED_DOWNLOAD_DETAILS,
+                    "",
+                )
+                preferenceStore.write(
+                    AndroidLegacyMigrationNoticeStore.COMPLETION_KIND,
+                    if (skippedDownloads.isBlank()) "completed"
+                    else "completed_with_skipped_items",
+                )
+                // Surface the verified v2 result once, even when an older
+                // manually skipped migration had already been acknowledged.
+                preferenceStore.write(
+                    AndroidLegacyMigrationNoticeStore.ACKNOWLEDGED,
+                    false,
+                )
             } else {
                 preferenceStore.write(
                     PLAYBACK_STATUS,
@@ -110,6 +169,10 @@ internal class AndroidLegacyPlaybackMigration(
                         if (ambiguous > 0) add("$ambiguous ambiguous audio attachment(s)")
                         if (discardedDescription.isNotBlank()) add(discardedDescription)
                     }.joinToString("; "),
+                )
+                preferenceStore.write(
+                    AndroidLegacyMigrationNoticeStore.ACKNOWLEDGED,
+                    false,
                 )
             }
         }
@@ -120,6 +183,19 @@ internal class AndroidLegacyPlaybackMigration(
         internal val PLAYBACK_STATUS = AndroidPreferenceKey.string("migration-e9-playback-status")
         internal val PLAYBACK_DISCARDED_IDS =
             AndroidPreferenceKey.string("migration-e9-playback-discarded-ids-v1")
+        internal val PLAYBACK_VERIFICATION_V2_DONE =
+            AndroidPreferenceKey.boolean("migration-e9-playback-verification-v2-done")
+
+        internal fun shouldReopenManualPlaybackSkip(
+            playbackDone: Boolean,
+            verificationV2Done: Boolean,
+            completionKind: String,
+            skippedPlaybackDetails: String,
+        ): Boolean =
+            playbackDone &&
+                !verificationV2Done &&
+                completionKind == "completed_with_skipped_items" &&
+                skippedPlaybackDetails.isNotBlank()
 
         internal fun parseDiscardedArticleIds(raw: String): Set<Long> =
             raw.split(',').mapNotNull { it.trim().toLongOrNull()?.takeIf { id -> id > 0L } }.toSet()
