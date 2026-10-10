@@ -55,13 +55,25 @@ internal class AndroidLegacyPlaybackMigration(
             }
             // An empty batch is a valid completed import only after both
             // legacy sources have been successfully inspected.
-            if (outcome.skippedMissing == 0u && outcome.skippedAmbiguous == 0u) {
+            val missing = outcome.skippedMissing.toInt()
+            val ambiguous = outcome.skippedAmbiguous.toInt()
+            if (missing == 0 && ambiguous == 0) {
                 preferenceStore.write(PLAYBACK_DONE, true)
+                preferenceStore.remove(PLAYBACK_STATUS)
+            } else {
+                preferenceStore.write(
+                    PLAYBACK_STATUS,
+                    buildList {
+                        if (missing > 0) add("$missing missing article(s)")
+                        if (ambiguous > 0) add("$ambiguous ambiguous audio attachment(s)")
+                    }.joinToString("; "),
+                )
             }
         }
     }
 
     companion object {
         internal val PLAYBACK_DONE = AndroidPreferenceKey.boolean("migration-e9-playback-done")
+        internal val PLAYBACK_STATUS = AndroidPreferenceKey.string("migration-e9-playback-status")
     }
 }
