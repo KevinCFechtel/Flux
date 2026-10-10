@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SQLite3
 
 struct LegacyDiscoveryResult: Equatable {
     enum Access: String {
@@ -41,6 +42,7 @@ struct LegacyPlaybackProgressImport: Equatable {
 struct LegacyDownloadImport: Equatable {
     let enclosureID: Int64
     let sourceFile: URL
+    var articleID: Int64? = nil
 }
 
 struct LegacyFeedOpenInMinifluxImport: Equatable {
@@ -240,7 +242,9 @@ enum LegacyStateDiscovery {
         guard let audioCache = library?.appendingPathComponent("Application Support/audio_cache", isDirectory: true) else {
             return nil
         }
-        return parseDownloadImports(values, audioCache: audioCache, fileManager: fileManager)
+        let database = library?.appendingPathComponent("news_database.db")
+        let articleIDs = database.map { readLegacyAttachmentArticleIDs(at: $0) } ?? [:]
+        return parseDownloadImports(values, audioCache: audioCache, fileManager: fileManager, articleIDs: articleIDs)
     }
 
     /// Pure decoder kept separate from Keychain access so migration semantics can
@@ -324,10 +328,37 @@ enum LegacyStateDiscovery {
         return byArticleID.values.sorted { $0.articleID < $1.articleID }
     }
 
+    static func readLegacyAttachmentArticleIDs(at url: URL) -> [Int64: Int64] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        var connection: OpaquePointer?
+        let result = sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil)
+        guard result == SQLITE_OK, let db = connection else {
+            if connection != nil { sqlite3_close(connection) }
+            return [:]
+        }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT a.attachmentID,a.newsID FROM attachments a INNER JOIN news n ON n.newsID=a.newsID",
+            -1, &statement, nil) == SQLITE_OK else {
+            sqlite3_finalize(statement)
+            return [:]
+        }
+        defer { sqlite3_finalize(statement) }
+        var mapping: [Int64: Int64] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let enclosureID = sqlite3_column_int64(statement, 0)
+            let articleID = sqlite3_column_int64(statement, 1)
+            if enclosureID > 0 && articleID > 0 { mapping[enclosureID] = articleID }
+        }
+        return mapping
+    }
+
     static func parseDownloadImports(
         _ values: [String: String],
         audioCache: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
     ) -> [LegacyDownloadImport] {
         let root = audioCache.standardizedFileURL.path + "/"
         return values.compactMap { key, value in
@@ -341,7 +372,7 @@ enum LegacyStateDiscovery {
                   source.deletingPathExtension().lastPathComponent.hasPrefix(audioFilePrefix),
                   (try? source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
                   fileManager.isReadableFile(atPath: source.path) else { return nil }
-            return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source)
+            return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source, articleID: articleIDs[enclosureID])
         }
         .sorted { $0.enclosureID < $1.enclosureID }
     }
