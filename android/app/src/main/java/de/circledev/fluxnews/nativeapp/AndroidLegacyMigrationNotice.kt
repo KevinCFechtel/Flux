@@ -37,6 +37,10 @@ internal data class AndroidLegacyMigrationNotice(
     val playbackComplete: Boolean = false,
     val downloadsComplete: Boolean = false,
     val widgetsComplete: Boolean = false,
+    val playbackStatus: String = "",
+    val downloadsStatus: String = "",
+    val feedsStatus: String = "",
+    val startupStatus: String = "",
 ) {
     val steps: List<AndroidLegacyMigrationNoticeStep>
         get() = listOf(
@@ -49,10 +53,11 @@ internal data class AndroidLegacyMigrationNotice(
             AndroidLegacyMigrationNoticeStep(
                 "Feeds & startup view",
                 feedsComplete && startupComplete,
-                "Feed preferences and startup view checked",
+                listOf(feedsStatus, startupStatus).filter(String::isNotBlank).joinToString("; ")
+                    .ifBlank { "Feed preferences and startup view checked" },
             ),
-            AndroidLegacyMigrationNoticeStep("Playback progress", playbackComplete, "Audio positions checked"),
-            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, "Offline audio checked"),
+            AndroidLegacyMigrationNoticeStep("Playback progress", playbackComplete, playbackStatus.ifBlank { "Audio positions checked" }),
+            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, downloadsStatus.ifBlank { "Offline audio checked" }),
             AndroidLegacyMigrationNoticeStep("Widgets", widgetsComplete, "Widget preferences checked"),
         )
 
@@ -84,11 +89,21 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
         ),
     ) { values -> values }
 
+    private val reasons: Flow<Array<String>> = combine(
+        listOf(
+            preferences.observe(AndroidLegacyPlaybackMigration.PLAYBACK_STATUS, ""),
+            preferences.observe(AndroidLegacyDownloadMigration.DOWNLOADS_STATUS, ""),
+            preferences.observe(AndroidLegacySettingsMigration.FEEDS_STATUS, ""),
+            preferences.observe(AndroidLegacySettingsMigration.STARTUP_STATUS, ""),
+        ),
+    ) { values -> values }
+
     val state: Flow<AndroidLegacyMigrationNotice> = combine(
         account,
         acknowledged,
         completionFlags,
-    ) { server, dismissed, flags ->
+        reasons,
+    ) { server, dismissed, flags, details ->
         AndroidLegacyMigrationNotice(
             importedServer = server,
             acknowledged = dismissed,
@@ -99,6 +114,10 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
             playbackComplete = flags[4],
             downloadsComplete = flags[5],
             widgetsComplete = flags[6],
+            playbackStatus = details[0],
+            downloadsStatus = details[1],
+            feedsStatus = details[2],
+            startupStatus = details[3],
         )
     }
 
@@ -159,7 +178,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                         Column {
                             Text(step.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (step.complete) step.description else "Pending – checked after the next successful sync",
+                                if (step.complete) step.description else if (step.description.contains("checked")) "Pending – checked after the next successful sync" else step.description,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
