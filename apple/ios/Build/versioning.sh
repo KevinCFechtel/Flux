@@ -7,10 +7,10 @@ flux_ios_prepare_version_settings() {
   IOS_VERSION_SETTINGS=()
 
   if [[ -n "${build_number}" ]]; then
-    # The canonical iOS build number is a single CFBundleVersion component.
-    # Apple limits this component to four decimal digits.
-    if [[ ! "${build_number}" =~ ^[1-9][0-9]{0,3}$ ]]; then
-      echo "Invalid iOS build number: ${build_number}. Use 1..9999 (e.g. 3001); Android's long versionCode is not valid here." >&2
+    # Preserve the existing Flutter production build-number scheme (e.g. 2026092601).
+    # App Store Connect performs the authoritative validation at upload time.
+    if [[ ! "${build_number}" =~ ^[1-9][0-9]*$ ]]; then
+      echo "Invalid iOS build number: ${build_number}. Use a positive decimal integer." >&2
       return 2
     fi
     IOS_VERSION_SETTINGS+=("CURRENT_PROJECT_VERSION=${build_number}")
