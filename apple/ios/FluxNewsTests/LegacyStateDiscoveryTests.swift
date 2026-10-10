@@ -2,6 +2,40 @@ import XCTest
 @testable import FluxNews
 
 final class LegacyStateDiscoveryTests: XCTestCase {
+    func testDiskDownloadDiscoveryWithoutLegacyKeysAndStalePaths() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let first = root.appendingPathComponent("audio_42_1791633000000.mp3")
+        let second = root.appendingPathComponent("audio_42_1791634000000.mp3")
+        let other = root.appendingPathComponent("audio_43_1791635000000.m4a")
+        for file in [first, second, other] {
+            try Data("audio".utf8).write(to: file)
+        }
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: first.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: second.path)
+        let values = ["audio_download_path_42": "/old/sandbox/audio_42_1791633000000.mp3"]
+        let items = LegacyStateDiscovery.mergeDownloadImports(
+            values, audioCache: root, articleIDs: [42: 1000]
+        )
+        XCTAssertEqual(items.map(\.enclosureID), [42, 43])
+        XCTAssertEqual(items[0].sourceFile, second)
+        XCTAssertEqual(items[0].articleID, 1000)
+        XCTAssertNil(items[1].articleID)
+    }
+
+    func testDiskDownloadDiscoveryRejectsUnsafeOrInvalidNames() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for name in ["audio_-42_1791633000000.mp3", "audio_0_1791633000000.mp3",
+                     "audio_42_bad.mp3", "audio_42_1791633000000.mp3.extra",
+                     "artwork_42_1791633000000.jpg"] {
+            try Data("audio".utf8).write(to: root.appendingPathComponent(name))
+        }
+        XCTAssertTrue(LegacyStateDiscovery.discoverDownloadFiles(audioCache: root).isEmpty)
+    }
+
     func testSummaryRedactsCredentialValues() {
         let result = LegacyDiscoveryResult(
             productionIdentity: .accessible, appGroup: .accessible, keychain: .accessible,
