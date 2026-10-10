@@ -1,5 +1,13 @@
 # Phase D1.3: Production Upgrade Feasibility
 
+> **Status: HISTORICAL FEASIBILITY PROOF — FINAL D9 PRODUCTION UPGRADE ACCEPTED 10 OCTOBER 2026**
+>
+> This document preserves the original feasibility/probe contract. The final
+> productive Flutter-to-native TestFlight upgrade was later accepted under D9;
+> current migration behavior and acceptance status live in
+> `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` and
+> `PHASE_D_NATIVE_IOS_IPADOS.md`.
+
 ## Verified legacy contract
 
 The historical FluxNews revision `8f8161787d99b6bedb3d17404bb370b53c869aae`
