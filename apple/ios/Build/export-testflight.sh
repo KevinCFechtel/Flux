@@ -134,7 +134,16 @@ for component in "${archived_app}" "${archived_widget}"; do
     echo "Invalid archived signature: ${component}" >&2
     exit 1
   }
-  codesign -d --entitlements - "${component}" > "${entitlements_file}" 2>/dev/null
+  # Explicit XML is required: codesign's default entitlement representation
+  # is not guaranteed to be a property list readable by PlistBuddy.
+  if ! codesign -d --entitlements - --xml "${component}" > "${entitlements_file}" 2>/dev/null; then
+    echo "Cannot extract signed entitlements from ${component}." >&2
+    exit 1
+  fi
+  if [[ ! -s "${entitlements_file}" ]] || ! plutil -lint "${entitlements_file}" >/dev/null 2>&1; then
+    echo "Signed entitlements are missing or not a valid XML plist for ${component}." >&2
+    exit 1
+  fi
   group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${entitlements_file}" 2>/dev/null || true)"
   [[ "${group}" == "${EXPECTED_APP_GROUP_IDENTIFIER}" ]] || {
     echo "Unexpected App Group entitlement: ${group:-<missing>}" >&2
