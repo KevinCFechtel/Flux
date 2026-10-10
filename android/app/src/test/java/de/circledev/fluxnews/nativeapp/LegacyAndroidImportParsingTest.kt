@@ -102,6 +102,23 @@ class LegacyAndroidImportParsingTest {
         }
     }
     @Test
+    fun downloadDiscoveryRetainsReadOnlyArticleAssociation() {
+        val root = kotlin.io.path.createTempDirectory("legacy-audio-mapping").toFile()
+        try {
+            val file = java.io.File(root, "audio_99.mp3").apply { writeText("media") }
+            val imports = LegacyAndroidImportParsing.downloads(
+                secure = mapOf("audio_download_path_99" to file.absolutePath),
+                audioRoot = root,
+                knownLegacyEnclosureIds = setOf(99L),
+                articleIdsByEnclosureId = mapOf(99L to 42L),
+            )
+            assertEquals(listOf(LegacyAndroidDownloadImport(99L, file.canonicalFile, 42L)), imports)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun localAndWidgetSettingsOnlyMapSupportedValues() {
         val parsed = LegacyAndroidImportParsing.settings(
             mapOf(
