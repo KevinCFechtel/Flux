@@ -45,6 +45,9 @@ internal data class AndroidLegacyMigrationNotice(
     val downloadsStatus: String = "",
     val feedsStatus: String = "",
     val startupStatus: String = "",
+    val completionKind: String = "",
+    val skippedPlaybackDetails: String = "",
+    val skippedDownloadDetails: String = "",
 ) {
     val steps: List<AndroidLegacyMigrationNoticeStep>
         get() = listOf(
@@ -60,13 +63,14 @@ internal data class AndroidLegacyMigrationNotice(
                 listOf(feedsStatus, startupStatus).filter(String::isNotBlank).joinToString("; ")
                     .ifBlank { "Feed preferences and startup view checked" },
             ),
-            AndroidLegacyMigrationNoticeStep("Playback progress", playbackComplete, playbackStatus.ifBlank { "Audio positions checked" }),
-            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, downloadsStatus.ifBlank { "Offline audio checked" }),
+            AndroidLegacyMigrationNoticeStep("Playback progress", playbackComplete, skippedPlaybackDetails.takeIf { it.isNotBlank() }?.let { "Completed with skipped items: $it" } ?: playbackStatus.ifBlank { "Audio positions checked" }),
+            AndroidLegacyMigrationNoticeStep("Downloads", downloadsComplete, skippedDownloadDetails.takeIf { it.isNotBlank() }?.let { "Completed with skipped items: $it" } ?: downloadsStatus.ifBlank { "Offline audio checked" }),
             AndroidLegacyMigrationNoticeStep("Widgets", widgetsComplete, "Widget preferences checked"),
         )
 
     val completedSteps: Int get() = steps.count { it.complete }
     val complete: Boolean get() = steps.all { it.complete }
+    val completedWithSkippedItems: Boolean get() = completionKind == "completed_with_skipped_items"
     val canFinishPartial: Boolean get() =
         settingsComplete && localComplete && feedsComplete && startupComplete && widgetsComplete &&
             (!playbackComplete || !downloadsComplete) &&
@@ -98,6 +102,14 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
         ),
     ) { values -> values }
 
+    private val finalization = combine(
+        listOf(
+            preferences.observe(COMPLETION_KIND, ""),
+            preferences.observe(SKIPPED_PLAYBACK_DETAILS, ""),
+            preferences.observe(SKIPPED_DOWNLOAD_DETAILS, ""),
+        ),
+    ) { values -> values }
+
     private val reasons: Flow<Array<String>> = combine(
         listOf(
             preferences.observe(AndroidLegacyPlaybackMigration.PLAYBACK_STATUS, ""),
@@ -112,7 +124,8 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
         acknowledged,
         completionFlags,
         reasons,
-    ) { server, dismissed, flags, details ->
+        finalization,
+    ) { server, dismissed, flags, details, finish ->
         AndroidLegacyMigrationNotice(
             importedServer = server,
             acknowledged = dismissed,
@@ -127,6 +140,9 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
             downloadsStatus = details[1],
             feedsStatus = details[2],
             startupStatus = details[3],
+            completionKind = finish[0],
+            skippedPlaybackDetails = finish[1],
+            skippedDownloadDetails = finish[2],
         )
     }
 
@@ -134,32 +150,32 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
         preferences.write(ACKNOWLEDGED, true)
     }
 
-    /** Waive only unresolved media after a real post-sync import attempt. */
+    /** Finish only after successful import attempts, preserving exact retry reasons. */
     suspend fun finishWithUnresolvedMedia() {
-        val required = listOf(
-            AndroidLegacySettingsMigration.SETTINGS_DONE,
-            AndroidLegacySettingsMigration.LOCAL_DONE,
-            AndroidLegacySettingsMigration.FEEDS_DONE,
-            AndroidLegacySettingsMigration.STARTUP_DONE,
-            AndroidLegacySettingsMigration.WIDGET_DONE,
+        preferences.finishLegacyMigrationWithSkippedMedia(
+            requiredKeys = listOf(
+                AndroidLegacySettingsMigration.SETTINGS_DONE,
+                AndroidLegacySettingsMigration.LOCAL_DONE,
+                AndroidLegacySettingsMigration.FEEDS_DONE,
+                AndroidLegacySettingsMigration.STARTUP_DONE,
+                AndroidLegacySettingsMigration.WIDGET_DONE,
+            ),
+            playbackDone = AndroidLegacyPlaybackMigration.PLAYBACK_DONE,
+            downloadsDone = AndroidLegacyDownloadMigration.DOWNLOADS_DONE,
+            playbackReason = AndroidLegacyPlaybackMigration.PLAYBACK_STATUS,
+            downloadsReason = AndroidLegacyDownloadMigration.DOWNLOADS_STATUS,
+            skippedPlayback = SKIPPED_PLAYBACK_DETAILS,
+            skippedDownloads = SKIPPED_DOWNLOAD_DETAILS,
+            completionKind = COMPLETION_KIND,
+            acknowledged = ACKNOWLEDGED,
         )
-        check(required.all { preferences.read(it, false) }) { "Settings migration is pending." }
-        val playbackDone = preferences.read(AndroidLegacyPlaybackMigration.PLAYBACK_DONE, false)
-        val downloadsDone = preferences.read(AndroidLegacyDownloadMigration.DOWNLOADS_DONE, false)
-        check(!playbackDone || !downloadsDone) { "Media migration already completed." }
-        if (!playbackDone) check(
-            preferences.read(AndroidLegacyPlaybackMigration.PLAYBACK_STATUS, "").isNotBlank(),
-        ) { "Playback has no import result." }
-        if (!downloadsDone) check(
-            preferences.read(AndroidLegacyDownloadMigration.DOWNLOADS_STATUS, "").isNotBlank(),
-        ) { "Downloads have no import result." }
-        if (!playbackDone) preferences.write(AndroidLegacyPlaybackMigration.PLAYBACK_DONE, true)
-        if (!downloadsDone) preferences.write(AndroidLegacyDownloadMigration.DOWNLOADS_DONE, true)
-        preferences.write(ACKNOWLEDGED, true)
     }
 
     companion object {
         internal val ACKNOWLEDGED = AndroidPreferenceKey.boolean("migration-e9-summary-acknowledged")
+        internal val COMPLETION_KIND = AndroidPreferenceKey.string("migration-e9-completion-kind-v1")
+        internal val SKIPPED_PLAYBACK_DETAILS = AndroidPreferenceKey.string("migration-e9-skipped-playback-details-v1")
+        internal val SKIPPED_DOWNLOAD_DETAILS = AndroidPreferenceKey.string("migration-e9-skipped-download-details-v1")
     }
 }
 
@@ -190,7 +206,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (state.complete) "Migration complete" else "Import from FluxNews") },
+        title = { Text(if (state.completedWithSkippedItems) "Migration completed with skipped items" else if (state.complete) "Migration complete" else "Import from FluxNews") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -198,7 +214,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
             ) {
                 Text(
                     if (state.complete) {
-                        "Your previous data has been checked. Existing native data was preserved."
+                        if (state.completedWithSkippedItems) "Import completed with skipped items. Successfully imported data was preserved; unresolved media entries were intentionally skipped." else "Your previous data has been checked. Existing native data was preserved."
                     } else {
                         "Wir übernehmen die bisherigen Settings und Mediendaten. Einzelne Schritte werden nach der Synchronisierung geprüft."
                     },
