@@ -532,6 +532,7 @@ internal object LegacyAndroidImportParsing {
             if (id <= 0L || id !in knownLegacyEnclosureIds) return null
             val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
             if (source.parentFile != root ||
+                !source.name.startsWith("audio_") ||
                 !source.isFile ||
                 !source.canRead() ||
                 source.length() <= 0L
