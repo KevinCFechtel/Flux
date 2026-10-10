@@ -4,7 +4,7 @@
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026); current closure work is recorded on `phase-e9-flutter-replacement` in October 2026.
 >
-> Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D implementation and the physical Flutter-to-native iOS production upgrade are complete/accepted as of 10 October 2026. Phase E is now in final E9 replacement closure.
+> Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D implementation and the physical Flutter-to-native iOS production upgrade are complete/accepted as of 10 October 2026. Phase E replacement implementation and migration acceptance are also complete; Android CI #486 is green and the later shared Apple gate is green on main (Apple #123, attempt 2). Remaining Play/F-Droid work is distribution, not E9 implementation acceptance.
 >
 > This document is the authoritative implementation contract for the native Android replacement. ARCHITECTURE_DECISIONS.md remains the primary architecture authority and MOBILE_PRODUCT_SEMANTICS.md remains the shared native-mobile product contract. Where this document describes Android mechanisms, those mechanisms implement the shared contracts rather than redefining the product domain.
 
