@@ -2196,7 +2196,9 @@ impl Store {
         let Some(article_html) = article_html else {
             return Ok(LegacyDownloadImportOutcome::MissingEnclosure);
         };
-        if read_download_state(&tx, enclosure_id)?.is_some() {
+        let existing_state = read_download_state(&tx, enclosure_id)?;
+        if existing_state.is_some() && existing_state != Some(DownloadState::Downloaded) {
+            // Native requested/failed/deleting media remains authoritative.
             return Ok(LegacyDownloadImportOutcome::AlreadyPresent);
         }
         if is_audio_enclosure(&tx, enclosure_id)? {
@@ -2207,7 +2209,13 @@ impl Store {
                     |row| row.get(0),
                 )
                 .map_err(sql_error)?;
+            // A previous migration may have persisted the download before its
+            // Listening List projection was restored. Repair it on safe retry.
             ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
+        }
+        if existing_state.is_some() {
+            tx.commit().map_err(sql_error)?;
+            return Ok(LegacyDownloadImportOutcome::AlreadyPresent);
         }
         tx.execute(
             "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'downloaded','manual',?2,?3,?4,NULL)",
