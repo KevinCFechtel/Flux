@@ -262,7 +262,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(await coordinator.migratePlaybackProgressIfNeeded(), .imported)
+        let outcome = await coordinator.migratePlaybackProgressIfNeeded()
+        XCTAssertEqual(outcome, .imported)
         XCTAssertEqual(localRestores, 1)
         XCTAssertEqual(remoteRestores, 0)
         XCTAssertTrue(
@@ -319,7 +320,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             legacyDownloadReader: { [] }
         )
 
-        XCTAssertEqual(await coordinator.migratePlaybackProgressIfNeeded(), .imported)
+        let outcome = await coordinator.migratePlaybackProgressIfNeeded()
+        XCTAssertEqual(outcome, .imported)
         XCTAssertEqual(remoteRestores, 1)
         XCTAssertEqual(importedRecords, [[]])
         XCTAssertTrue(
@@ -386,15 +388,11 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(
-            await coordinator.migratePlaybackProgressIfNeeded(),
-            .retryableFailure
-        )
+        let firstOutcome = await coordinator.migratePlaybackProgressIfNeeded()
+        XCTAssertEqual(firstOutcome, .retryableFailure)
         XCTAssertEqual(remoteRestores, 1)
-        XCTAssertEqual(
-            await coordinator.migratePlaybackProgressIfNeeded(),
-            .retryableFailure
-        )
+        let secondOutcome = await coordinator.migratePlaybackProgressIfNeeded()
+        XCTAssertEqual(secondOutcome, .retryableFailure)
         XCTAssertEqual(remoteRestores, 1)
         let retryState = defaults.dictionary(
             forKey: "FluxNews.iOS.legacyMigration.playback.remoteRetryAfter.v1"
