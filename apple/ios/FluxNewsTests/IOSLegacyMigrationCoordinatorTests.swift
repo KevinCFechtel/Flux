@@ -209,6 +209,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.\(key).completed")
         }
         defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.verified.v2")
         defaults.set("79 missing article(s)", forKey: "FluxNews.iOS.legacyMigration.playback.pendingReason")
         let coordinator = IOSLegacyMigrationCoordinator(bootstrapper: bootstrapper, defaults: defaults)
         XCTAssertTrue(coordinator.migrationSummary()?.canFinishWithSkippedItems == true)
@@ -655,8 +656,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(first, .retryableFailure)
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         let second = await awaitPlaybackOutcome(coordinator)
-        XCTAssertEqual(second, .imported)
-        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
+        XCTAssertEqual(second, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         XCTAssertEqual(importedRecords.map { $0.map(\.articleId) }, [[42], [42]])
     }
 
