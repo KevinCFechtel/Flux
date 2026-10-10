@@ -2079,6 +2079,38 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
+    /// Persist a specifically fetched legacy article only if its feed/category
+    /// already belong to the authoritative current navigation catalog. Does not
+    /// reconcile absent articles or change existing native article state.
+    pub fn restore_legacy_media_article(
+        &self,
+        article: &Article,
+        enclosures: &[Enclosure],
+        expected_enclosure_id: i64,
+    ) -> Result<bool, CoreError> {
+        if !enclosures.iter().any(|e| e.id == expected_enclosure_id
+            && e.article_id == article.id && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
+            || enclosures.iter().any(|e| e.article_id != article.id)
+        {
+            return Ok(false);
+        }
+        let mut connection = self.connection.lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let feed_is_current: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM feeds f JOIN categories c ON c.id=f.category_id WHERE f.id=?1)",
+            [article.feed_id], |row| row.get(0),
+        ).map_err(sql_error)?;
+        if !feed_is_current { return Ok(false); }
+        tx.execute(
+            "INSERT OR IGNORE INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13)",
+            params![article.id,article.feed_id,article.title,article.url,article.comments_url,article.published_at,article.is_read,article.is_starred,article.raw_html_content,article.reading_time_minutes,article.preview,article.image_url,crate::article::PROCESSING_VERSION],
+        ).map_err(sql_error)?;
+        upsert_remote_enclosures(&tx, enclosures)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(true)
+    }
+
     pub fn import_legacy_download(
         &self,
         enclosure_id: i64,
