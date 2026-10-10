@@ -96,6 +96,35 @@ The macOS scripts under `apple/macos/Build/` and these iOS scripts all ultimatel
 use `apple/Build/build-uniffi.sh`; macOS additionally stages its generated Swift
 files and embeds the macOS library for its app target.
 
+## Versioned iOS builds (aligned with Android)
+
+The iOS `build-app.sh` and `archive.sh` scripts accept the same positional
+`variant buildNumber versionName` pattern as Android. Both use
+`apple/ios/Build/versioning.sh` for validation and pass Xcode build-setting
+overrides rather than rewriting source `Info.plist` files. The app and widget
+both resolve `CFBundleShortVersionString` from `MARKETING_VERSION` and
+`CFBundleVersion` from `CURRENT_PROJECT_VERSION`.
+
+```bash
+# Build an installable production-identity upgrade test:
+./apple/ios/Build/build-app.sh productionRelease 3001 3.0.0 --destination 'generic/platform=iOS'
+
+# Create a signed archive with the production Flutter bundle identity:
+./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
+
+# Parallel nativeDev application/archive:
+./apple/ios/Build/build-app.sh developmentRelease 3001 3.0.0 --destination 'generic/platform=iOS'
+./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
+```
+
+Apple build numbers use a single numeric component of at most four digits
+(`1`–`9999`), rather than the long Android versionCode. Build number
+`3001` is an example, not a guarantee it is newer than a previously installed
+build. The existing `--configuration`, `--build-number` and new
+`--version-name` flags remain usable. `Upgrade Test` still targets the
+production Flutter identity only for on-device migration validation, not
+automatic production App Store upload.
+
 ## NativeDev TestFlight distribution
 
 Archive and export a physical-device nativeDev build with:
