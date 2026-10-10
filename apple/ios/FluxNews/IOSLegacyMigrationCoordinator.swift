@@ -91,6 +91,7 @@ final class IOSLegacyMigrationCoordinator {
         static let mediaSettingsMigrationCompleted = "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"
         static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
         static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
+        static let downloadVerificationV2 = "FluxNews.iOS.legacyMigration.downloads.verified.v2"
         static let metadataRepairCompleted = "FluxNews.iOS.legacyMigration.downloads.metadataRepair.v1.completed"
         static let playbackPendingReason = "FluxNews.iOS.legacyMigration.playback.pendingReason"
         static let downloadsPendingReason = "FluxNews.iOS.legacyMigration.downloads.pendingReason"
@@ -324,13 +325,27 @@ final class IOSLegacyMigrationCoordinator {
         defer { inFlight = false }
         do { guard try isCurrentMigratedAccount() else { return .notEligible } }
         catch { return .retryableFailure }
-        guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else {
+        // v1 could mark an empty/misread Flutter source as completed. Re-evaluate
+        // that marker once after upgrade; do not discard existing native downloads.
+        guard !defaults.bool(forKey: DefaultsKey.downloadVerificationV2) else {
             await repairImportedDownloadMetadataIfNeeded()
             return .alreadyCompleted
         }
-        guard let records = legacyDownloadReader() else { return .retryableFailure }
+        guard let records = legacyDownloadReader() else {
+            defaults.set("Legacy download source could not be read", forKey: DefaultsKey.downloadsPendingReason)
+            return .retryableFailure
+        }
         guard !records.isEmpty else {
+            // A zero-record read is only conclusive if no old audio files exist.
+            // A source-key mismatch must not silently become a green check.
+            if legacyDownloadImporter == nil && LegacyStateDiscovery.hasUnmigratedAudioFiles() {
+                defaults.set("Legacy audio files found but no download keys matched", forKey: DefaultsKey.downloadsPendingReason)
+                defaults.set(false, forKey: DefaultsKey.downloadMigrationCompleted)
+                return .retryableFailure
+            }
             defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+            defaults.set(true, forKey: DefaultsKey.downloadVerificationV2)
+            defaults.removeObject(forKey: DefaultsKey.downloadsPendingReason)
             return .imported
         }
         guard let mediaRoot = mediaRootProvider() else { return .retryableFailure }
@@ -416,6 +431,7 @@ final class IOSLegacyMigrationCoordinator {
             return .retryableFailure
         }
         defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+        defaults.set(true, forKey: DefaultsKey.downloadVerificationV2)
         defaults.removeObject(forKey: DefaultsKey.downloadsPendingReason)
         await repairImportedDownloadMetadataIfNeeded()
         logger.info("Legacy downloads copied into Core media storage.")
