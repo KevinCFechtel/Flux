@@ -73,4 +73,41 @@ class AndroidLegacyPlaybackMigrationTest {
             AndroidLegacyPlaybackMigration.parseDiscardedArticleIds(encoded),
         )
     }
+
+    @Test
+    fun v2ReopensOnlyPlaybackThatWasPreviouslyManuallySkipped() {
+        assertTrue(
+            AndroidLegacyPlaybackMigration.shouldReopenManualPlaybackSkip(
+                playbackDone = true,
+                verificationV2Done = false,
+                completionKind = "completed_with_skipped_items",
+                skippedPlaybackDetails = "53 missing article(s)",
+            ),
+        )
+        assertFalse(
+            AndroidLegacyPlaybackMigration.shouldReopenManualPlaybackSkip(
+                playbackDone = true,
+                verificationV2Done = false,
+                completionKind = "completed",
+                skippedPlaybackDetails = "",
+            ),
+        )
+        assertFalse(
+            AndroidLegacyPlaybackMigration.shouldReopenManualPlaybackSkip(
+                playbackDone = true,
+                verificationV2Done = false,
+                completionKind = "completed_with_skipped_items",
+                skippedPlaybackDetails = "",
+            ),
+        )
+        assertFalse(
+            AndroidLegacyPlaybackMigration.shouldReopenManualPlaybackSkip(
+                playbackDone = true,
+                verificationV2Done = true,
+                completionKind = "completed_with_skipped_items",
+                skippedPlaybackDetails = "53 missing article(s)",
+            ),
+        )
+    }
+
 }
