@@ -1,10 +1,10 @@
 # Phase E — Native Android
 
-> **Status: E1 THROUGH E7 COMPLETE FOR SEQUENCING — E9 NEXT — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: E1 THROUGH E7 COMPLETE / REAL-DEVICE ACCEPTED — E9 IMPLEMENTATION COMPLETE, PRODUCTION UPGRADE PATH ACCEPTED — PLAYBACK VERIFICATION V2 DEVICE RECHECK + FINAL REGRESSION GATE PENDING**
 >
-> Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
+> Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026); current closure work is recorded on `phase-e9-flutter-replacement` in October 2026.
 >
-> Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D feature implementation is complete; its final canonical acceptance gate and physical Flutter-to-native iOS upgrade test remain pending and do not block Phase E.
+> Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D implementation and the physical Flutter-to-native iOS production upgrade are complete/accepted as of 10 October 2026. Phase E is now in final E9 replacement closure.
 >
 > This document is the authoritative implementation contract for the native Android replacement. ARCHITECTURE_DECISIONS.md remains the primary architecture authority and MOBILE_PRODUCT_SEMANTICS.md remains the shared native-mobile product contract. Where this document describes Android mechanisms, those mechanisms implement the shared contracts rather than redefining the product domain.
 
@@ -1152,20 +1152,57 @@ A future Android-specific capability may occupy E8 only after a distinct product
 
 ## 20. E9 — Flutter Replacement Completion and Production Acceptance
 
-**Status: E9 IN PROGRESS — productive Flutter replacement migration started 9 October 2026.**
+**Status: E9 IMPLEMENTATION COMPLETE / PHYSICAL PRODUCTION-UPGRADE PATH ACCEPTED — PLAYBACK VERIFICATION V2 RECHECK AND FINAL REGRESSION GATE PENDING.**
 
 E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
 
 Current E9 implementation status:
 
+### October 2026 — production upgrade acceptance and playback verification v2
+
+The signed production-identity Flutter-to-native Android upgrade path has already
+been exercised successfully on physical hardware in an earlier E9 acceptance
+pass. That pass verified the retained production identity, access to the old
+Flutter state, native account/settings/media migration and continued operation
+after the upgrade. At that time unresolved historical playback positions could
+still be explicitly finalized through **Finish with unresolved items**.
+
+The current playback semantics are stricter and more useful. Positive legacy
+positions are retried against Core/Miniflux. A confirmed HTTP 404/410 is treated
+as terminal stale history only when a complete read-only legacy download scan
+proves that no matching local audio file exists. Such entries are shown as old
+playback positions that were discarded, and the Playback stage may still finish
+green. If a local legacy download exists, if download evidence is incomplete,
+or if identity/network resolution fails, the item remains retryable.
+
+Android download discovery now mirrors the iOS production finding that old
+absolute secure-storage paths are not sufficient evidence: the reader also scans
+the legacy `audio_cache` for validated `audio_<enclosureId>_<timestamp>.*`
+files and maps them through the read-only Flutter SQLite enclosure/article
+relationship. Flutter files remain read-only and are never deleted by migration.
+
+Because the already-upgraded physical test device had previously used the manual
+partial-completion path, Playback Verification v2 reopens only that previously
+skipped Playback stage once. It clears neither account/settings/feed/widget nor
+download completion state, and Core's existing native playback state still wins.
+After the v2 pass the migration summary is surfaced once again; a successful run
+sets the v2 completion marker and cannot loop. This provides a focused real-device
+recheck of the new stale-progress behavior on the same production-upgraded
+installation without fabricating a fresh Flutter state.
+
+Automated tests cover the v2 reopening predicate, durable discarded-ID encoding,
+404-without-download discard, download-backed retry behavior, incomplete-download
+evidence safety, direct legacy audio-cache discovery and the green migration
+summary containing discarded-old-progress details.
+
 ### Play production bundle and F-Droid release handoff
 
 Build the production Google Play AAB with `./android/Build/build-app.sh productionBundle <versionCode> <versionName>`. Provide the gitignored `android/productionBundle-signing.properties`, containing `keyAlias`, `keyPassword`, `storeFile` (relative to `android/`) and `storePassword`. The upload key must match the key accepted by the existing Google Play application. The Play upload certificate is not necessarily the installed app signing certificate; this AAB does not validate an APK-side in-place Flutter upgrade. The normal `productionRelease` APK keeps its separate signing contract. Verify the bundle manifest's application ID and versions, upload-signing certificate and Play Console acceptance before release. Do not commit secrets or keystores.
 
-**F-Droid transition (after physical E9 acceptance):** Flutter's current F-Droid distribution and signature submission tooling live in `KevinCFechtel/FluxNews` (`.github/workflows/build-and-release.yml`, `.github/workflows/submit-fdroid-signatures.yml`, `.github/scripts/prepare_fdroid_metadata.py`). This is a distinct distribution pipeline, not the Play AAB. Move F-Droid build metadata/source references to the Rust/Kotlin `Flux` repo, ensure reproducible/offline-compatible build dependencies and supported architectures, carry forward the existing F-Droid package ID and developer signing/metadata policy, then validate a signed F-Droid update over its existing Flutter variant. Do not assume Play-signing and F-Droid-signing identities are interchangeable. Keep legacy releases and metadata in place until the native path passes F-Droid's build and installed-upgrade checks.
+**F-Droid transition (after final E9 closure):** Flutter's current F-Droid distribution and signature submission tooling live in `KevinCFechtel/FluxNews` (`.github/workflows/build-and-release.yml`, `.github/workflows/submit-fdroid-signatures.yml`, `.github/scripts/prepare_fdroid_metadata.py`). This is a distinct distribution pipeline, not the Play AAB. Move F-Droid build metadata/source references to the Rust/Kotlin `Flux` repo, ensure reproducible/offline-compatible build dependencies and supported architectures, carry forward the existing F-Droid package ID and developer signing/metadata policy, then validate a signed F-Droid update over its existing Flutter variant. Do not assume Play-signing and F-Droid-signing identities are interchangeable. Keep legacy releases and metadata in place until the native path passes F-Droid's build and installed-upgrade checks.
 
 
-- Android release versionName/versionCode now accept explicit parameters through `android/Build/build-app.sh <variant> <versionCode> <versionName>` with `--help` documentation; existing CI builds without parameters and the old developmentBundle versionCode-only form remain compatible. Production release signing and a larger-than-installed versionCode still require separate acceptance;
+- Android release versionName/versionCode now accept explicit parameters through `android/Build/build-app.sh <variant> <versionCode> <versionName>` with `--help` documentation; existing CI builds without parameters and the old developmentBundle versionCode-only form remain compatible. Production release signing/version metadata and Play Console upload acceptance remain release-distribution checks rather than migration-implementation blockers;
 
 - the audited E1 FlutterSecureStorage/legacy-state reader now lives in the production source set and remains read-only;
 - normal and headless account bootstrap run the same migration preflight before reading native credentials;
@@ -1175,19 +1212,20 @@ Build the production Google Play AAB with `./android/Build/build-app.sh producti
 - account migration writes non-secret provenance before the native credential copy, so termination cannot leave an unmarked migrated account; failed copies clear the provisional marker and partial native copy while leaving Flutter sources untouched;
 - parser/coordinator regression tests cover credential requirements, custom-header extraction, native-wins behavior, retryable unreadable storage and failed-copy cleanup;
 - the E9 post-sync adapter now imports compatible Core policy/media settings and positive per-feed Open in Miniflux overrides exclusively for the migrated account. Separate completion flags make a missing feed retry on subsequent successful syncs; explicit native/Core state retains precedence;
-- E9 playback imports positive article-keyed positions from Flutter SharedPreferences with secure-storage fallback; zero is omitted and Core owns unique-enclosure resolution, precedence and import outcomes. Missing/ambiguous records remain retryable;
-- E9 now reads the read-only Flutter SQLite enclosure→article relationship and uses a targeted Core/UniFFI Miniflux article fetch to hydrate historical read articles and matching audio attachments before download adoption. Playback migration similarly hydrates missing historical articles only when they have one unambiguous audio enclosure. Core requires the feed to exist in the current authoritative catalog; 404/410, missing/mismatched media and transient failures remain retryable. Successfully imported native state wins and legacy source files remain unchanged;
+- E9 playback imports positive article-keyed positions from Flutter SharedPreferences with secure-storage fallback; zero is omitted and Core owns unique-enclosure resolution, precedence and import outcomes. Ambiguous identity, transient failures and any record backed by a local legacy download remain retryable;
+- E9 reads the read-only Flutter SQLite enclosure→article relationship and uses a targeted Core/UniFFI Miniflux article fetch to hydrate historical read articles and matching audio attachments before download adoption. For playback, Core now reserves a `false` restore result for confirmed HTTP 404/410; identity mismatch or non-unique audio is an error rather than stale evidence. A confirmed 404/410 with no matching local legacy download is terminal stale progress and is visibly discarded without failing the migration. Successfully imported native state wins and legacy source files remain unchanged;
 - E9 media analysis now probes the actual audio bytes, including migrated `.audio` files. A separate durable one-time repair pass re-extracts missing embedded artwork, duration and chapters from previously imported Flutter downloads without changing downloaded/playback state, then marks metadata repair complete only after successful processing; Support Diagnostics report scan and recovered-artwork counts;
 - E9 download migration logs summary counters and missing/failed enclosure IDs to Support Diagnostics under `migration.downloads` at Info/Warning level (no file paths, URLs or secrets), allowing troubleshooting after a successful sync without enabling Debug Logging;
-- E9 media migration checks primary attachment-ID path metadata against the cloned legacy SQLite enclosure catalog, verifies an accessible regular file under the original audio cache, copies it into a disjoint native media root using a staged file, and only then asks Core to adopt it. Existing Core downloads win; missing enclosures remain retryable; original Flutter media is never removed;
+- E9 media migration validates legacy enclosure identity against the cloned read-only SQLite catalog and accepts verified source audio from either valid stored path metadata or the legacy `audio_cache` filename convention used by Flutter. It copies into a disjoint native media root using a staged file and only then asks Core to adopt it. Existing Core downloads win; missing enclosures remain retryable; original Flutter media is never removed;
 - E9 local presentation follow-up now imports compatible navigation visibility, article-count/read-on-scroll/remove-on-read, reader-opening and swipe semantics, and Android floating-toolbar actions using atomic native-presence-first DataStore writes;
 - startup category/feed imports are catalog-validated and remain independently retryable until the first successful sync contains the requested ID;
 - Flutter global widget scope/read-filter/sort values now seed only unconfigured native widgets; an existing per-widget native configuration remains authoritative. Obsolete item-limit/styling and widget-specific Miniflux-open preferences remain retired;
 - E9 finalization now records a durable `completed` or `completed_with_skipped_items` status, with the original unresolved playback/download reasons preserved separately. Manual partial finalization atomically stores skipped details, stage markers and acknowledgment; ordinary `Done` sets the verified completion status. Successful imports are never discarded, and the UI marks skipped stages as completed with skipped items rather than claiming a full import;
 - Users may explicitly finish with unresolved media only after the settings/catalog steps have completed and the playback/download attempts have returned recorded retry reasons. Successfully imported positions/files are retained; pending media retries are then waived and the dialog is acknowledged. Without confirmation the existing retry-on-sync and dialog-on-relaunch behavior remains unchanged;
 - E9 presents an optional, non-blocking first-upgrade migration dialog after account restoration, using persisted completion markers for account, local/Core settings, feeds/start view, playback, downloads and widgets. It shows only categorical statuses (no URLs, secrets, filenames or article titles), offers an explicit sync action, remains retryable after dismissal, and is permanently acknowledged only once all stages complete;
-- signed production-identity physical upgrade, interruption/retry, widget host reconfiguration, and complete legacy-coexistence acceptance remain outstanding;
-- the signed physical production-upgrade, interruption/retry and legacy-coexistence acceptance gates remain pending.
+- the signed production-identity physical Flutter-to-native upgrade path has been accepted on real hardware, including retained legacy-state access and coexistence with untouched Flutter source data;
+- the remaining focused device acceptance is the versioned Playback Verification v2 recheck on that already-upgraded installation, specifically replacing the earlier manual skip result with the new automatic stale-404 classification;
+- canonical Rust + Android + affected Apple regression CI remains mandatory for the shared Core/UniFFI changes in this closure branch.
 
 By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
 
@@ -1206,7 +1244,7 @@ E9 performs:
 - final feature/accessibility/localization audit;
 - canonical Rust + Android + affected Apple regression gate;
 - repeat the E1-B UniFFI runtime smoke on physical arm64-v8a hardware;
-- physical production-upgrade acceptance.
+- physical production-upgrade acceptance (completed for the production upgrade path; the later Playback Verification v2 semantic recheck is the only focused migration acceptance still pending).
 
 Flutter is not a parity checklist. E9 imports only retained semantic state and validates only retained/current product capabilities.
 
