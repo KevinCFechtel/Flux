@@ -15,6 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -63,6 +67,11 @@ internal data class AndroidLegacyMigrationNotice(
 
     val completedSteps: Int get() = steps.count { it.complete }
     val complete: Boolean get() = steps.all { it.complete }
+    val canFinishPartial: Boolean get() =
+        settingsComplete && localComplete && feedsComplete && startupComplete && widgetsComplete &&
+            (!playbackComplete || !downloadsComplete) &&
+            (playbackComplete || playbackStatus.isNotBlank()) &&
+            (downloadsComplete || downloadsStatus.isNotBlank())
 
     fun appliesTo(serverUrl: String?): Boolean =
         importedServer.isNotBlank() && serverUrl != null && importedServer == serverUrl && !acknowledged
@@ -125,6 +134,30 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
         preferences.write(ACKNOWLEDGED, true)
     }
 
+    /** Waive only unresolved media after a real post-sync import attempt. */
+    suspend fun finishWithUnresolvedMedia() {
+        val required = listOf(
+            AndroidLegacySettingsMigration.SETTINGS_DONE,
+            AndroidLegacySettingsMigration.LOCAL_DONE,
+            AndroidLegacySettingsMigration.FEEDS_DONE,
+            AndroidLegacySettingsMigration.STARTUP_DONE,
+            AndroidLegacySettingsMigration.WIDGET_DONE,
+        )
+        check(required.all { preferences.read(it, false) }) { "Settings migration is pending." }
+        val playbackDone = preferences.read(AndroidLegacyPlaybackMigration.PLAYBACK_DONE, false)
+        val downloadsDone = preferences.read(AndroidLegacyDownloadMigration.DOWNLOADS_DONE, false)
+        check(!playbackDone || !downloadsDone) { "Media migration already completed." }
+        if (!playbackDone) check(
+            preferences.read(AndroidLegacyPlaybackMigration.PLAYBACK_STATUS, "").isNotBlank(),
+        ) { "Playback has no import result." }
+        if (!downloadsDone) check(
+            preferences.read(AndroidLegacyDownloadMigration.DOWNLOADS_STATUS, "").isNotBlank(),
+        ) { "Downloads have no import result." }
+        if (!playbackDone) preferences.write(AndroidLegacyPlaybackMigration.PLAYBACK_DONE, true)
+        if (!downloadsDone) preferences.write(AndroidLegacyDownloadMigration.DOWNLOADS_DONE, true)
+        preferences.write(ACKNOWLEDGED, true)
+    }
+
     companion object {
         internal val ACKNOWLEDGED = AndroidPreferenceKey.boolean("migration-e9-summary-acknowledged")
     }
@@ -136,8 +169,25 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     syncing: Boolean,
     onSync: () -> Unit,
     onClose: () -> Unit,
+    onFinishPartial: () -> Unit,
 ) {
     val steps = state.steps
+    var confirmSkip by remember { mutableStateOf(false) }
+    if (confirmSkip) {
+        AlertDialog(
+            onDismissRequest = { confirmSkip = false },
+            title = { Text("Finish migration?") },
+            text = { Text("Successfully matched playback positions and downloads have already been imported. Only unresolved entries will be skipped. Original Flutter files remain untouched. Automatic retries will stop.") },
+            confirmButton = {
+                Button(onClick = { confirmSkip = false; onFinishPartial() }) {
+                    Text("Skip unresolved entries")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSkip = false }) { Text("Keep retrying") }
+            },
+        )
+    }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text(if (state.complete) "Migration complete" else "Import from FluxNews") },
@@ -207,7 +257,14 @@ internal fun AndroidLegacyMigrationNoticeDialog(
         },
         dismissButton = {
             if (!state.complete) {
-                TextButton(onClick = onSync, enabled = !syncing) { Text("Sync now") }
+                Column {
+                    TextButton(onClick = onSync, enabled = !syncing) { Text("Sync now") }
+                    if (state.canFinishPartial) {
+                        TextButton(onClick = { confirmSkip = true }, enabled = !syncing) {
+                            Text("Finish with unresolved items")
+                        }
+                    }
+                }
             }
         },
     )
