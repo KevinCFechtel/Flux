@@ -2111,6 +2111,130 @@ impl Store {
         Ok(true)
     }
 
+    /// Rehydrates a playback-only historical article from a platform-verified
+    /// local legacy database snapshot. Existing Core rows always win, the
+    /// current navigation catalog must still contain the feed, and the legacy
+    /// enclosure is explicitly marked as not remotely present.
+    pub fn restore_legacy_local_playback_article(
+        &self,
+        article: &Article,
+        enclosure: &Enclosure,
+    ) -> Result<bool, CoreError> {
+        if article.id <= 0
+            || article.feed_id <= 0
+            || enclosure.id <= 0
+            || enclosure.article_id != article.id
+            || !enclosure
+                .mime_type
+                .to_ascii_lowercase()
+                .starts_with("audio/")
+            || enclosure.url.trim().is_empty()
+        {
+            return Ok(false);
+        }
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+
+        let feed_is_current: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM feeds f JOIN categories c ON c.id=f.category_id WHERE f.id=?1)",
+                [article.feed_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if !feed_is_current {
+            return Ok(false);
+        }
+
+        let existing_article_feed = tx
+            .query_row(
+                "SELECT feed_id FROM articles WHERE id=?1",
+                [article.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        if existing_article_feed.is_some_and(|feed_id| feed_id != article.feed_id) {
+            return Ok(false);
+        }
+
+        let existing_enclosure = tx
+            .query_row(
+                "SELECT article_id,mime_type FROM enclosures WHERE id=?1",
+                [enclosure.id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        if let Some((article_id, mime_type)) = existing_enclosure {
+            return Ok(
+                article_id == article.id
+                    && mime_type.to_ascii_lowercase().starts_with("audio/"),
+            );
+        }
+
+        let existing_audio_count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM enclosures WHERE article_id=?1 AND lower(mime_type) LIKE 'audio/%'",
+                [article.id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if existing_audio_count > 0 {
+            return Ok(true);
+        }
+
+        tx.execute(
+            "INSERT OR IGNORE INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,NULL,?9,?10,?11,?12,?13)",
+            params![
+                article.id,
+                article.feed_id,
+                article.title,
+                article.url,
+                article.comments_url,
+                article.published_at,
+                article.is_read,
+                article.is_starred,
+                article.raw_html_content,
+                article.reading_time_minutes,
+                article.preview,
+                article.image_url,
+                crate::article::PROCESSING_VERSION
+            ],
+        )
+        .map_err(sql_error)?;
+
+        tx.execute(
+            "INSERT OR IGNORE INTO enclosures (id,article_id,url,mime_type,size_bytes,remote_media_progression_seconds,remote_present) VALUES (?1,?2,?3,?4,NULL,0,0)",
+            params![
+                enclosure.id,
+                enclosure.article_id,
+                enclosure.url,
+                enclosure.mime_type
+            ],
+        )
+        .map_err(sql_error)?;
+
+        let restored = tx
+            .query_row(
+                "SELECT article_id,mime_type FROM enclosures WHERE id=?1",
+                [enclosure.id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .is_some_and(|(article_id, mime_type)| {
+                article_id == article.id
+                    && mime_type.to_ascii_lowercase().starts_with("audio/")
+            });
+        tx.commit().map_err(sql_error)?;
+        Ok(restored)
+    }
+
     /// Reprocess migrated Flutter media once after the initial import. Existing
     /// artwork, duration, chapters and download/playback state always win.
     /// A failed scan does not set the platform completion marker and can retry.
