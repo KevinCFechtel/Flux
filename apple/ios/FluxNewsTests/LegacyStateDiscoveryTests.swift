@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import FluxNews
 
 final class LegacyStateDiscoveryTests: XCTestCase {
@@ -125,6 +126,72 @@ final class LegacyStateDiscoveryTests: XCTestCase {
                 .init(articleID: 20, positionMs: 0),
                 .init(articleID: 30, positionMs: 7000)
             ]
+        )
+    }
+
+
+    func testLegacyPlaybackSQLiteReaderRequiresExactlyOneAudioAttachment() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let database = root.appendingPathComponent("news_database.db")
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(database.path, &db), SQLITE_OK)
+        let handle = try XCTUnwrap(db)
+        defer { sqlite3_close(handle) }
+
+        let schema = """
+        CREATE TABLE news(
+            newsID INTEGER PRIMARY KEY, feedID INTEGER, title TEXT, url TEXT,
+            commentsUrl TEXT, content TEXT, previewText TEXT, imageUrl TEXT,
+            publishedAt TEXT, status TEXT, readingTime INTEGER, starred INTEGER
+        );
+        CREATE TABLE attachments(
+            attachmentID INTEGER PRIMARY KEY, newsID INTEGER,
+            attachmentURL TEXT, attachmentMimeType TEXT,
+            mediaProgression INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO news VALUES
+            (10,100,'Single','https://example.test/10','', '<p>body</p>','preview',NULL,
+             '2026-01-01T00:00:00Z','read',4,1),
+            (20,100,'Ambiguous','https://example.test/20','', '', '',NULL,
+             '2026-01-02T00:00:00Z','unread',0,0),
+            (30,100,'Image only','https://example.test/30','', '', '',NULL,
+             '2026-01-03T00:00:00Z','unread',0,0);
+        INSERT INTO attachments VALUES
+            (1000,10,'https://cdn.test/10.mp3','audio/mpeg',5),
+            (2000,20,'https://cdn.test/20-a.mp3','audio/mpeg',1),
+            (2001,20,'https://cdn.test/20-b.mp3','audio/mpeg',2),
+            (3000,30,'https://cdn.test/30.jpg','image/jpeg',0);
+        """
+        XCTAssertEqual(sqlite3_exec(handle, schema, nil, nil, nil), SQLITE_OK)
+
+        let rows = LegacyStateDiscovery.readLegacyPlaybackArticles(
+            at: database,
+            articleIDs: [10, 20, 30, 999]
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(
+            rows.first,
+            LegacyPlaybackArticleImport(
+                articleID: 10,
+                feedID: 100,
+                title: "Single",
+                url: "https://example.test/10",
+                commentsURL: "",
+                publishedAt: "2026-01-01T00:00:00Z",
+                isRead: true,
+                isStarred: true,
+                rawHTMLContent: "<p>body</p>",
+                readingTimeMinutes: 4,
+                preview: "preview",
+                imageURL: nil,
+                enclosureID: 1000,
+                enclosureURL: "https://cdn.test/10.mp3",
+                enclosureMimeType: "audio/mpeg"
+            )
         )
     }
 
