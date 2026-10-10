@@ -252,6 +252,12 @@ private fun FluxNewsApp(
                     migrationAckScope.launch { migrationNoticeStore.acknowledge() }
                 }
             },
+            onFinishPartial = {
+                migrationAckScope.launch {
+                    runCatching { migrationNoticeStore.finishWithUnresolvedMedia() }
+                        .onSuccess { migrationHiddenThisSession = true }
+                }
+            },
         )
     }
     }
