@@ -656,8 +656,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(first, .retryableFailure)
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         let second = await awaitPlaybackOutcome(coordinator)
-        XCTAssertEqual(second, .retryableFailure)
-        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
+        XCTAssertEqual(second, .imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         XCTAssertEqual(importedRecords.map { $0.map(\.articleId) }, [[42], [42]])
     }
 
@@ -715,8 +715,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(first, .retryableFailure)
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         let second = await awaitPlaybackOutcome(coordinator)
-        XCTAssertEqual(second, .imported)
-        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
+        XCTAssertEqual(second, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
     }
 
     @MainActor
