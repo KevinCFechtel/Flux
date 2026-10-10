@@ -93,4 +93,27 @@ class AndroidLegacyMigrationNoticeTest {
         assertFalse(skipped.copy(completionKind = "completed", skippedPlaybackDetails = "").completedWithSkippedItems)
     }
 
+    @Test
+    fun discardedOldPlaybackCanBeGreenWhileExplainingWhatWasDropped() {
+        val state = AndroidLegacyMigrationNotice(
+            importedServer = "https://example.test",
+            settingsComplete = true,
+            localComplete = true,
+            feedsComplete = true,
+            startupComplete = true,
+            playbackComplete = true,
+            downloadsComplete = true,
+            widgetsComplete = true,
+            playbackStatus = "53 old playback positions discarded: no local download and no longer available on the server.",
+        )
+
+        val playback = state.steps.first { it.title == "Playback progress" }
+        assertTrue(state.complete)
+        assertTrue(playback.complete)
+        assertEquals(
+            "53 old playback positions discarded: no local download and no longer available on the server.",
+            playback.description,
+        )
+    }
+
 }
