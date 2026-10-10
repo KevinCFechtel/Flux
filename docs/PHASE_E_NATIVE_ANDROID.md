@@ -162,7 +162,7 @@ Minimum E1-B ABI/runtime validation:
 - arm64-v8a runtime on a contemporary Android emulator, including the current 16 KB page-size path where available;
 - x86_64 cross-build and APK packaging.
 
-A physical arm64-v8a runtime smoke is deliberately deferred until the native app is meaningfully testable after E3, where it joins the first real-device product acceptance pass. It is repeated as a mandatory real-device gate in E9 before Flutter replacement/production acceptance. This deferral applies only to the E1-B UniFFI runtime smoke; later E1 gates that specifically require physical production-upgrade, Keystore or migration behavior keep their own device requirements.
+At this E1 checkpoint the physical arm64-v8a runtime smoke was deliberately deferred until the native app became meaningfully testable. That runtime requirement was later superseded by the stronger E9 productive physical-device upgrade acceptance, which exercised the packaged UniFFI/Core path in the real replacement app. The targeted E1-B smoke script remains useful as a diagnostic but is no longer a separate release blocker.
 
 The legacy production app also advertises armeabi-v7a. Whether Phase E continues 32-bit ARM support is an explicit E1 distribution compatibility decision. If it is retained, the current pinned UniFFI/JNA path must pass real ARM32 validation before release. Do not upgrade UniFFI or another shared dependency solely speculatively; a concrete Android blocker must be demonstrated and all affected Rust/Apple gates must remain green after any shared upgrade.
 
@@ -338,7 +338,7 @@ Do not begin product UI beyond what is required to prove startup/runtime.
 
 E1-B is complete. E1-B1 implements `android/Build/build-uniffi.sh`, which builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. E1-B2a resolves the minimal Kotlin-safe UniFFI surface naming while retaining UniFFI 0.29 and the unchanged Core domain. E1-B2 generates Kotlin bindings, compiles them with JNA 5.13.0 and packages variant-specific native libraries. Its crate-local `uniffi.toml` uses the official UniFFI 0.29 Android configuration with `disable_java_cleaner = true`, retaining minSdk 29 through the generated JNA Cleaner fallback without a Lint suppression. E1-B3 adds a `developmentDebug`-only Android instrumentation smoke test for library loading, Flux/Core construction, a local query, typed error propagation, and event-subscription cleanup; `android/Build/test-uniffi-runtime.sh` selects one explicit device and runs only that test target.
 
-Runtime acceptance on 28 September 2026 passed the same three-test suite on an API 29 / Android 10 `arm64-v8a` emulator with 4 KB pages and on an API 37 `arm64-v8a` emulator with 16 KB pages. Both runs completed 3/3 tests successfully, proving the generated Kotlin/JNA/UniFFI path, native library loading, Flux/Core construction, local SQLite-backed querying, typed Rust-to-Kotlin error propagation and event-subscription cleanup across the compatibility floor and a contemporary 16 KB-page runtime. The `x86_64` path remains cross-build/APK-package validated. Physical arm64-v8a execution is intentionally deferred to the first meaningful real-device product acceptance after E3 and is mandatory again in E9 before production replacement; it is no longer an E1-B blocker.
+Runtime acceptance on 28 September 2026 passed the same three-test suite on an API 29 / Android 10 `arm64-v8a` emulator with 4 KB pages and on an API 37 `arm64-v8a` emulator with 16 KB pages. Both runs completed 3/3 tests successfully, proving the generated Kotlin/JNA/UniFFI path, native library loading, Flux/Core construction, local SQLite-backed querying, typed Rust-to-Kotlin error propagation and event-subscription cleanup across the compatibility floor and a contemporary 16 KB-page runtime. The `x86_64` path remains cross-build/APK-package validated. The later E9 productive physical-device upgrade acceptance additionally proved the packaged native/Core runtime on real replacement hardware; a separate E1-B physical smoke is no longer an outstanding release gate.
 
 Prove:
 
@@ -408,8 +408,9 @@ database, file, shared-preference, external and root sandbox domain; `noBackupFi
 also excludes the native roots by platform contract. Configuration backup/restore remains
 the only intended portable configuration handoff.
 
-E1-A through E1-G are complete. E1-H is next. E1-F physical production-upgrade acceptance
-remains deferred to the E9 replacement gate.
+E1-A through E1-G are complete. E1-H is next. At this historical checkpoint the
+E1-F physical production-upgrade acceptance was deferred to E9; it has since
+been completed by the E9 real-device production-upgrade pass.
 
 ### E1-H — CI and test gate
 
@@ -1249,7 +1250,7 @@ E9 performs:
 - post-upgrade sync and offline tests;
 - final feature/accessibility/localization audit;
 - canonical Rust + Android + affected Apple regression gate;
-- repeat the E1-B UniFFI runtime smoke on physical arm64-v8a hardware;
+- confirm productive UniFFI/Core execution on physical replacement hardware (satisfied by the accepted E9 production-upgrade run; the targeted E1-B smoke remains optional diagnostic coverage);
 - physical production-upgrade acceptance (completed for the production upgrade path; the later Playback Verification v2 semantic recheck is the only focused migration acceptance still pending).
 
 Flutter is not a parity checklist. E9 imports only retained semantic state and validates only retained/current product capabilities.
