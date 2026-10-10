@@ -85,16 +85,19 @@ struct FluxNewsApp: App {
                             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                         )
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core != nil {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core == nil,
                               case .accountRequired = bootstrapper.state {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     }
@@ -126,17 +129,20 @@ struct FluxNewsApp: App {
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core != nil {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core == nil,
                                       case .accountRequired = bootstrapper.state {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                   _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             }
                             _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
@@ -190,4 +196,22 @@ struct FluxNewsApp: App {
                 }
         }
     }
+    /// Resolve local and catalog settings immediately on activation, without
+    /// waiting for a long historical media import or a manual sync. Later
+    /// successful syncs can retry catalog-dependent records.
+    private func prepareInitialMigrationSummary() async {
+        let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+        _ = await coordinator.migrateGlobalPreferencesIfNeeded()
+        _ = await coordinator.migrateSettingsFollowupIfNeeded()
+        _ = await coordinator.migrateFeedPreferencesIfNeeded()
+        _ = await coordinator.migrateToolbarIfNeeded()
+        _ = await coordinator.migrateWidgetDefaultsIfNeeded()
+        if !migrationHiddenThisSession,
+           let summary = coordinator.migrationSummary(),
+           !summary.acknowledged {
+            migrationSummary = summary
+            showingMigrationSummary = true
+        }
+    }
+
 }
