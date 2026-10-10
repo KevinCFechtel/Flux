@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum IOSLegacyAccountMigrationOutcome: Equatable {
     case nativeAccountWins
@@ -782,5 +783,69 @@ final class IOSLegacyMigrationCoordinator {
             return false
         }
         return migratedServer == normalizedServerIdentifier(stored.server)
+    }
+}
+@MainActor
+struct IOSLegacyMigrationSummaryView: View {
+    let summary: IOSLegacyMigrationCoordinator.Summary
+    let sync: () async -> Void
+    let close: () -> Void
+    let finishPartial: () -> Void
+    @State private var confirmingSkip = false
+    @State private var syncing = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(summary.completed ? "Previous data has been checked." : "Settings and media data are imported after a successful sync.")
+                        .foregroundStyle(.secondary)
+                    status("Settings and widgets", complete: summary.settingsCompleted, details: "")
+                    status("Playback progress", complete: summary.playbackCompleted, details: summary.playbackDetails)
+                    status("Downloads", complete: summary.downloadsCompleted, details: summary.downloadDetails)
+                    if !summary.completed {
+                        Text("Pending items are retried after synchronization.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button(syncing ? "Syncing…" : "Sync now") {
+                            syncing = true
+                            Task { await sync(); syncing = false }
+                        }
+                        .disabled(syncing)
+                        if summary.canFinishWithSkippedItems {
+                            Button("Finish with unresolved items") { confirmingSkip = true }
+                                .disabled(syncing)
+                        }
+                    }
+                    Button(summary.completed ? "Done" : "Continue in background", action: close)
+                        .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            }
+            .navigationTitle(summary.completionKind == "completed_with_skipped_items"
+                ? "Completed with skipped items" : summary.completed ? "Migration complete" : "Import from FluxNews")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .confirmationDialog("Finish migration with skipped items?", isPresented: $confirmingSkip) {
+            Button("Skip unresolved items") { finishPartial() }
+            Button("Keep retrying", role: .cancel) {}
+        } message: {
+            Text("Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched.")
+        }
+    }
+
+    private func status(_ title: String, complete: Bool, details: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: complete ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(complete ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                if !details.isEmpty {
+                    Text(complete ? "Completed with skipped items: \(details)" : details)
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
