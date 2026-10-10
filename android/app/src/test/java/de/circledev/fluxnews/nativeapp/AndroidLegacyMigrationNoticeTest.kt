@@ -51,4 +51,21 @@ class AndroidLegacyMigrationNoticeTest {
         assertEquals("2 missing article(s)", state.steps.first { it.title == "Playback progress" }.description)
         assertEquals("1 missing audio attachment(s)", state.steps.first { it.title == "Downloads" }.description)
     }
+    @Test
+    fun partialFinishRequiresCompletedSettingsAndMediaImportResults() {
+        val base = AndroidLegacyMigrationNotice(
+            importedServer = "https://example.test",
+            settingsComplete = true,
+            localComplete = true,
+            feedsComplete = true,
+            startupComplete = true,
+            widgetsComplete = true,
+            playbackStatus = "1 missing article(s)",
+            downloadsStatus = "2 missing audio attachment(s)",
+        )
+        assertTrue(base.canFinishPartial)
+        assertFalse(base.copy(downloadsStatus = "").canFinishPartial)
+        assertFalse(base.copy(feedsComplete = false).canFinishPartial)
+        assertFalse(base.copy(playbackComplete = true, downloadsComplete = true).canFinishPartial)
+    }
 }
