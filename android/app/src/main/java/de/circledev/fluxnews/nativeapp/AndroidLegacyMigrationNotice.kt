@@ -228,7 +228,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                         Column {
                             Text(step.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (step.complete) step.description else if (step.title == "Playback progress" && playbackStatus.isNotBlank() || step.title == "Downloads" && downloadsStatus.isNotBlank() || step.title == "Feeds & startup view" && (feedsStatus.isNotBlank() || startupStatus.isNotBlank())) step.description else "Pending – checked after the next successful sync",
+                                if (step.complete) step.description else if ((step.title == "Playback progress" && state.playbackStatus.isNotBlank()) || (step.title == "Downloads" && state.downloadsStatus.isNotBlank()) || (step.title == "Feeds & startup view" && (state.feedsStatus.isNotBlank() || state.startupStatus.isNotBlank()))) step.description else "Pending – checked after the next successful sync",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
