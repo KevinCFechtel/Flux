@@ -214,7 +214,14 @@ trap 'rm -f -- "${ENTITLEMENTS_FILE}"' EXIT
 
 verify_app_group_entitlement() {
   local component="$1"
-  codesign -d --entitlements - "${component}" > "${ENTITLEMENTS_FILE}" 2>/dev/null
+  if ! codesign -d --entitlements - --xml "${component}" > "${ENTITLEMENTS_FILE}" 2>/dev/null; then
+    echo "Could not extract signed entitlements for ${component}." >&2
+    exit 1
+  fi
+  if [[ ! -s "${ENTITLEMENTS_FILE}" ]] || ! plutil -lint "${ENTITLEMENTS_FILE}" >/dev/null 2>&1; then
+    echo "Signed entitlements for ${component} are missing or not a valid XML plist." >&2
+    exit 1
+  fi
   local actual_group
   actual_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${ENTITLEMENTS_FILE}" 2>/dev/null || true)"
   [[ "${actual_group}" == "${EXPECTED_APP_GROUP_IDENTIFIER}" ]] || {
