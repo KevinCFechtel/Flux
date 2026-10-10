@@ -237,9 +237,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                 XCTAssertEqual(ids, [10])
                 return [snapshot]
             },
-            legacyDownloadReader: {
-                [try! self.makeLegacyDownload(enclosureID: 1000)]
-            },
             legacyPlaybackLocalRestorer: { received in
                 localRestores += 1
                 XCTAssertEqual(received, snapshot)
@@ -259,6 +256,9 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                         alreadyPresent: 0
                     )
                 )
+            },
+            legacyDownloadReader: {
+                [try! self.makeLegacyDownload(enclosureID: 1000)]
             }
         )
 
@@ -300,7 +300,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                 [.init(articleID: 53, positionMs: 9_000)]
             },
             legacyPlaybackArticleReader: { _ in [] },
-            legacyDownloadReader: { [] },
             legacyPlaybackRemoteRestorer: { articleID in
                 XCTAssertEqual(articleID, 53)
                 remoteRestores += 1
@@ -316,7 +315,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                         alreadyPresent: 0
                     )
                 )
-            }
+            },
+            legacyDownloadReader: { [] }
         )
 
         XCTAssertEqual(await coordinator.migratePlaybackProgressIfNeeded(), .imported)
@@ -362,13 +362,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                 [.init(articleID: 53, positionMs: 9_000)]
             },
             legacyPlaybackArticleReader: { _ in [] },
-            legacyDownloadReader: {
-                [LegacyDownloadImport(
-                    enclosureID: download.enclosureID,
-                    sourceFile: download.sourceFile,
-                    articleID: 53
-                )]
-            },
             legacyPlaybackRemoteRestorer: { articleID in
                 XCTAssertEqual(articleID, 53)
                 remoteRestores += 1
@@ -383,6 +376,13 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                         alreadyPresent: 0
                     )
                 )
+            },
+            legacyDownloadReader: {
+                [LegacyDownloadImport(
+                    enclosureID: download.enclosureID,
+                    sourceFile: download.sourceFile,
+                    articleID: 53
+                )]
             }
         )
 
