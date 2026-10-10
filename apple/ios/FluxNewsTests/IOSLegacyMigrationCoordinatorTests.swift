@@ -1227,6 +1227,27 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testOldCompletedDownloadMarkerIsRecheckedOnlyOnce() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyDownloadReader: { reads += 1; return [] },
+            mediaRootProvider: { nil }
+        )
+        XCTAssertEqual(await coordinator.migrateDownloadsIfNeeded(), .imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.verified.v2"))
+        XCTAssertEqual(await coordinator.migrateDownloadsIfNeeded(), .alreadyCompleted)
+        XCTAssertEqual(reads, 1)
+    }
+
+    @MainActor
     func testDownloadMigrationCompletesAnAccessibleEmptyLegacySet() async throws {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
