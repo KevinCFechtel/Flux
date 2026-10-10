@@ -322,6 +322,33 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func restoreLegacyMediaArticle(articleID: Int64, enclosureID: Int64) async -> Result<Bool, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.restoreLegacyMediaArticle(articleId: articleID, enclosureId: enclosureID) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
+    func restoreLegacyPlaybackArticle(articleID: Int64) async -> Result<Bool, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.restoreLegacyPlaybackArticle(articleId: articleID) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
+    func repairLegacyDownloadMetadata() async -> Result<LegacyMediaRepairResult, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.repairLegacyDownloadMetadata() }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
     func importLegacyDownload(
         enclosureID: Int64,
         localFile: String,
