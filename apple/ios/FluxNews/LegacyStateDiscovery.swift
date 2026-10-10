@@ -425,12 +425,16 @@ enum LegacyStateDiscovery {
                   enclosureID > 0 else { continue }
             let remainder = suffix[suffix.index(after: underscore)...]
             let timestamp = remainder.prefix(while: { $0.isNumber })
+            let extensionSuffix = String(remainder.dropFirst(timestamp.count))
             guard !timestamp.isEmpty,
                   timestamp.count >= 10,
                   timestamp.count <= 17,
                   Int64(timestamp) != nil,
-                  (remainder.dropFirst(timestamp.count).isEmpty ||
-                   remainder.dropFirst(timestamp.count).first == ".") else {
+                  (extensionSuffix.isEmpty ||
+                   (extensionSuffix.first == "." &&
+                    extensionSuffix.dropFirst().count >= 1 &&
+                    extensionSuffix.dropFirst().count <= 8 &&
+                    extensionSuffix.dropFirst().allSatisfy { $0.isASCII && $0.isLetter || $0.isNumber })) else {
                 continue
             }
 
