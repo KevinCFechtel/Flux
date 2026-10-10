@@ -95,6 +95,8 @@ final class IOSLegacyMigrationCoordinator {
         static let metadataRepairCompleted = "FluxNews.iOS.legacyMigration.downloads.metadataRepair.v1.completed"
         static let playbackPendingReason = "FluxNews.iOS.legacyMigration.playback.pendingReason"
         static let playbackRemoteRetryAfter = "FluxNews.iOS.legacyMigration.playback.remoteRetryAfter.v1"
+        static let playbackDiscardedArticleIDs = "FluxNews.iOS.legacyMigration.playback.discardedArticleIDs.v1"
+        static let playbackDiscardedReason = "FluxNews.iOS.legacyMigration.playback.discardedReason.v1"
         static let downloadsPendingReason = "FluxNews.iOS.legacyMigration.downloads.pendingReason"
         static let skippedPlaybackReason = "FluxNews.iOS.legacyMigration.playback.skippedReason"
         static let skippedDownloadsReason = "FluxNews.iOS.legacyMigration.downloads.skippedReason"
@@ -300,9 +302,10 @@ final class IOSLegacyMigrationCoordinator {
             return .retryableFailure
         }
 
-        let records = legacyRecords.map {
-            LegacyPlaybackImport(articleId: $0.articleID, positionMs: $0.positionMs, updatedAt: nil)
-        }
+        var discardedArticleIDs = Set(
+            defaults.stringArray(forKey: DefaultsKey.playbackDiscardedArticleIDs)?
+                .compactMap(Int64.init) ?? []
+        )
 
         // Custom importers are test seams and intentionally keep the historical
         // behavior of bypassing Core hydration unless a restore seam is supplied.
@@ -310,25 +313,44 @@ final class IOSLegacyMigrationCoordinator {
             || legacyPlaybackLocalRestorer != nil
             || legacyPlaybackRemoteRestorer != nil
         if shouldHydrate {
-            let resumable = legacyRecords.filter { $0.positionMs > 0 }
+            let resumable = legacyRecords.filter {
+                $0.positionMs > 0 && !discardedArticleIDs.contains($0.articleID)
+            }
             let localSnapshots = Dictionary(
                 uniqueKeysWithValues: legacyPlaybackArticleReader(
                     resumable.map(\.articleID)
                 ).map { ($0.articleID, $0) }
+            )
+            let legacyDownloads = legacyDownloadReader()
+            let downloadScanSucceeded = legacyDownloads != nil
+            let downloadedEnclosureIDs = Set(
+                legacyDownloads?.map(\.enclosureID) ?? []
+            )
+            let downloadedArticleIDs = Set(
+                legacyDownloads?.compactMap(\.articleID) ?? []
             )
             var remoteRetryAfter = defaults.dictionary(
                 forKey: DefaultsKey.playbackRemoteRetryAfter
             ) as? [String: Double] ?? [:]
             let now = Date().timeIntervalSince1970
             var retryScheduleChanged = false
+            var discardedSetChanged = false
             var locallyRestored = 0
             var remotelyRestored = 0
             var remoteDeferred = 0
+            var newlyDiscarded = 0
 
             for record in resumable {
                 let retryKey = String(record.articleID)
+                let snapshot = localSnapshots[record.articleID]
+                let hasLegacyDownload = downloadedArticleIDs.contains(record.articleID)
+                    || snapshot.map { downloadedEnclosureIDs.contains($0.enclosureID) } == true
+
+                // Flutter SQLite is trusted as identity evidence only when the
+                // corresponding legacy audio file is actually present. Progress
+                // alone must never fabricate a playable historical Core item.
                 var restoredLocally = false
-                if let snapshot = localSnapshots[record.articleID] {
+                if hasLegacyDownload, let snapshot {
                     let localResult: Result<Bool, Error>
                     if let legacyPlaybackLocalRestorer {
                         localResult = await legacyPlaybackLocalRestorer(snapshot)
@@ -367,16 +389,28 @@ final class IOSLegacyMigrationCoordinator {
                 case .success(true):
                     remotelyRestored += 1
                 case .success(false):
-                    // A clean false means the server conclusively could not
-                    // rehydrate this identity (for example HTTP 404/410 or an
-                    // ambiguous remote attachment set). Retry later rather than
-                    // hammering Miniflux on every activation.
-                    remoteRetryAfter[retryKey] = now + 86_400
-                    retryScheduleChanged = true
+                    // Core returns false only for a confirmed 404/410. When the
+                    // read-only Flutter download scan also proves there is no
+                    // matching local audio file, this is stale progress rather
+                    // than a migration failure and can be discarded terminally.
+                    if downloadScanSucceeded, !hasLegacyDownload, snapshot != nil {
+                        if discardedArticleIDs.insert(record.articleID).inserted {
+                            discardedSetChanged = true
+                            newlyDiscarded += 1
+                        }
+                        if remoteRetryAfter.removeValue(forKey: retryKey) != nil {
+                            retryScheduleChanged = true
+                        }
+                    } else {
+                        // A local download or incomplete local evidence keeps the
+                        // record retryable. Avoid repeated server requests on
+                        // every foreground activation while preserving source data.
+                        remoteRetryAfter[retryKey] = now + 86_400
+                        retryScheduleChanged = true
+                    }
                 case .failure:
-                    // Connectivity/session failures are not persisted as
-                    // negative evidence. A later valid migration attempt may
-                    // retry as soon as normal runtime connectivity recovers.
+                    // Connectivity/session/identity failures are not negative
+                    // evidence. A later valid migration attempt may retry.
                     break
                 }
             }
@@ -388,10 +422,36 @@ final class IOSLegacyMigrationCoordinator {
                     defaults.set(remoteRetryAfter, forKey: DefaultsKey.playbackRemoteRetryAfter)
                 }
             }
+            if discardedSetChanged {
+                defaults.set(
+                    discardedArticleIDs.sorted().map(String.init),
+                    forKey: DefaultsKey.playbackDiscardedArticleIDs
+                )
+            }
+            if discardedArticleIDs.isEmpty {
+                defaults.removeObject(forKey: DefaultsKey.playbackDiscardedReason)
+            } else {
+                let count = discardedArticleIDs.count
+                let noun = count == 1 ? "playback position" : "playback positions"
+                defaults.set(
+                    "\(count) old \(noun) discarded: no local download and no longer available on the server.",
+                    forKey: DefaultsKey.playbackDiscardedReason
+                )
+            }
             logger.info(
-                "Legacy playback hydration local=\(locallyRestored) remote=\(remotelyRestored) deferred=\(remoteDeferred)."
+                "Legacy playback hydration local=\(locallyRestored) remote=\(remotelyRestored) deferred=\(remoteDeferred) discarded_old=\(newlyDiscarded)."
             )
         }
+
+        let records = legacyRecords
+            .filter { !discardedArticleIDs.contains($0.articleID) }
+            .map {
+                LegacyPlaybackImport(
+                    articleId: $0.articleID,
+                    positionMs: $0.positionMs,
+                    updatedAt: nil
+                )
+            }
 
         let result: Result<LegacyPlaybackImportResult, Error>
         if let legacyPlaybackImporter {
@@ -588,8 +648,11 @@ final class IOSLegacyMigrationCoordinator {
             completionKind: kind,
             playbackCompleted: playback,
             downloadsCompleted: downloads,
-            playbackDetails: defaults.string(forKey: DefaultsKey.skippedPlaybackReason)
-                ?? defaults.string(forKey: DefaultsKey.playbackPendingReason) ?? "",
+            playbackDetails: [
+                defaults.string(forKey: DefaultsKey.skippedPlaybackReason)
+                    ?? defaults.string(forKey: DefaultsKey.playbackPendingReason),
+                defaults.string(forKey: DefaultsKey.playbackDiscardedReason),
+            ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
             downloadDetails: defaults.string(forKey: DefaultsKey.skippedDownloadsReason)
                 ?? defaults.string(forKey: DefaultsKey.downloadsPendingReason) ?? "",
             settingsCompleted: settings,
@@ -982,7 +1045,7 @@ struct IOSLegacyMigrationSummaryView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline)
                 if !details.isEmpty {
-                    Text(complete ? "Completed with skipped items: \(details)" : details)
+                    Text(details)
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
