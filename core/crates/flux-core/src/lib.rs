@@ -1052,6 +1052,38 @@ impl FluxCore {
         self.store
             .download_finished(enclosure_id, local_file, file_size_bytes)
     }
+    /// Rehydrate a historical playback article only when Miniflux identifies
+    /// exactly one audio enclosure, preserving the Core's ambiguity policy.
+    pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("legacy playback article ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self.sync_gate.lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            if self.store.enclosures_for_article(article_id)?.iter()
+                .any(|e| e.enclosure.mime_type.to_ascii_lowercase().starts_with("audio/")) {
+                return Ok(true);
+            }
+            let remote = match self.remote.fetch_article_by_id(article_id) {
+                Ok(remote) => remote,
+                Err(error) if matches!(error.http_status(), Some(404 | 410)) => return Ok(false),
+                Err(error) => return Err(error),
+            };
+            if remote.article.id != article_id { return Ok(false); }
+            let audios = remote.enclosures.iter()
+                .filter(|e| e.article_id == article_id
+                    && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
+                .collect::<Vec<_>>();
+            if audios.len() != 1 { return Ok(false); }
+            self.store.restore_legacy_media_article(
+                &remote.article, &remote.enclosures, audios[0].id,
+            )
+        });
+        self.diagnostics.flush();
+        result
+    }
+
     /// Hydrate a historical, read article for a verified legacy download.
     /// Never fetch arbitrary URLs and never overwrite native article state.
     /// Missing remote entries or mismatched enclosure IDs remain retryable.
