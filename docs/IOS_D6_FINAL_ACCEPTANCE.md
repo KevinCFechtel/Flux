@@ -1,8 +1,14 @@
 # iOS D6 Final Acceptance
 
-Status: **IMPLEMENTATION STABLE / TESTVALIDATED — real-device UX observation window active; final D6-G process-boundary acceptance and architecture freeze intentionally deferred — 25 September 2026**
+Status: **HISTORICAL D6 ACCEPTANCE RECORD — implementation stable/testvalidated; UX observation remains non-blocking**
 
-This acceptance record closes and testvalidates the implementation portion of **D6 — Native Media & Background Downloads**. D6 now remains open only as a deliberate real-device UX observation window plus the retained D6-G process-boundary/final-freeze gate. D7 may proceed in parallel over the stable app-wide playback runtime.
+> Current replacement status: D9 and the physical Flutter-to-native production
+> upgrade were accepted on 10 October 2026. The observation/final-freeze wording
+> below records the D6 state at its September acceptance point and is not a
+> current replacement-release blocker. `PHASE_D_NATIVE_IOS_IPADOS.md` is the
+> current Phase-D status authority.
+
+This acceptance record closes and testvalidates the implementation portion of **D6 — Native Media & Background Downloads**. The retained real-device UX observation window is non-blocking; later D7 and D9 acceptance proceeded over the stable app-wide playback runtime.
 
 ## Current closure state
 
