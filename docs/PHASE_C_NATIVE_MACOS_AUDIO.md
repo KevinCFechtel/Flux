@@ -1,11 +1,16 @@
 # Phase C — Native macOS Audio Experience
 
-> **Status: PLANNED / AUTHORITATIVE PHASE-C CONTRACT**
+> **Status: COMPLETE / ARCHITECTURE-FROZEN / AUTHORITATIVE PHASE-C CONTRACT**
 >
-> Phase C turns the Phase-B shared media domain and native macOS media execution
-> into the complete user-facing audio experience. Phase B remains frozen.
-> This phase adds the public read/mutation contracts and native UX required by
-> the decisions below; it does not move playback execution into Rust.
+> Phase C is implemented in the native macOS client and is architecture-frozen.
+> The completed experience covers the shared Listening List/media domain,
+> native playback and transfer execution, chapters/show notes, playback speed,
+> Sleep Timer, media settings, Now Playing/remote commands and the associated
+> macOS presentation. Phase B remains frozen and playback execution remains
+> native rather than moving into Rust.
+>
+> Historical requirement wording below is retained as the implemented contract,
+> not as an open checklist.
 
 ## 1. Goal and boundaries
 
