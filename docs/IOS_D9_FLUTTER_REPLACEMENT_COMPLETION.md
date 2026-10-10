@@ -1,6 +1,6 @@
 # iOS D9 — Flutter Replacement Completion / Legacy-Parity Closure
 
-> **Status: IN PROGRESS — FINAL NATIVE REPLACEMENT COMPLETION GATE**
+> **Status: COMPLETE / PHYSICAL PRODUCTION-UPGRADE ACCEPTED — 10 OCTOBER 2026**
 >
 > Decision date: 26 September 2026.
 >
@@ -36,11 +36,15 @@ Current repository status:
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
 - **D9-H — Logging & Support Diagnostics:** COMPLETE / TEST-GATED
 - **D9 Widget Configuration:** COMPLETE / TEST-GATED
-- **Final physical-device Flutter-to-native production-upgrade acceptance:** OPEN
+- **Final physical-device Flutter-to-native production-upgrade acceptance:** COMPLETE / REAL-DEVICE ACCEPTED
 
-Completed blocks remain subject to the final D9 acceptance gate and regression
-suite; their implementation contracts are frozen unless a concrete regression
-or new product decision requires reopening them.
+The productive TestFlight upgrade completed successfully on a physical iPhone
+on 10 October 2026. The final migration summary was green and explicitly
+reported stale historical playback positions that were discarded because no
+local download existed and Miniflux returned confirmed 404/410. Completed
+implementation contracts are frozen unless a concrete regression or new
+product decision requires reopening them. Later shared changes must still pass
+the canonical regression suite.
 
 ## 2. D9 release-critical replacement gates
 
@@ -49,9 +53,13 @@ or new product decision requires reopening them.
 The native iOS migration now mirrors the Android E9 production findings: a read-only
 legacy SQLite lookup identifies the article for each downloaded enclosure, enabling
 targeted Miniflux recovery of older, already-read articles through the shared Core.
-Playback positions likewise trigger historical article recovery where an unambiguous
-audio enclosure can be found. Mismatched/removed content remains pending; imported
-native playback/download states are never overwritten.
+Playback positions likewise trigger historical article recovery where an
+unambiguous audio enclosure can be found. A confirmed 404/410 is terminal only
+when the read-only legacy download scan proves that no matching local audio file
+exists; that historical progress is shown as old/discarded and does not make the
+migration fail. Local downloads, ambiguous identity, connectivity failures and
+incomplete legacy evidence remain retryable. Imported native playback/download
+states are never overwritten.
 
 The shared Core's content-based legacy media analysis and one-time repair of
 downloaded `.audio` metadata (embedded artwork, durations and chapters) are now
@@ -59,8 +67,8 @@ invoked by iOS even when the download import completed on an earlier build.
 The app provides a migration summary on startup, repeat-on-sync behavior, and an
 explicit confirmation for completing with skipped unresolved media. It persists
 `completed` versus `completed_with_skipped_items` and the original missing-item
-details. Flutter source files remain untouched. Physical upgrade and regression
-CI still need acceptance for this follow-up.
+details. Flutter source files remain untouched. The physical production upgrade
+is accepted; later changes remain subject to the canonical regression gate.
 
 ### October 2026 — missing Keychain download keys in device diagnostics
 
@@ -82,8 +90,8 @@ It is read-only and will still require a matching Core enclosure
 before declaring a download imported. Unit tests cover missing
 Keychain paths, stale absolute paths, duplicate audio files, and
 invalid names. No existing native or Flutter media is deleted.
-An actual TestFlight upgrade test is needed to confirm all migrated
-downloads appear in Listening List.
+The subsequent TestFlight upgrade confirmed the legacy downloads appear in the
+Listening List and that extracted artwork is retained.
 
 ### October 2026 — production iOS download migration follow-up
 
@@ -99,8 +107,8 @@ The migration progress sheet now reports the same six logical stages as
 Android: Account, Settings, Feeds & startup view, Playback progress, Downloads,
 and Widgets. The local settings migration and summary are initiated on startup
 before historical media restoration; catalog-dependent state can still retry
-after sync. A real-device verification of the repaired downloads and post-sync
-Listening List refresh is still required before final release acceptance.
+after sync. Real-device verification subsequently confirmed repaired downloads,
+post-sync Listening List refresh, and successful completion of the migration.
 
 ### D9-A — Production Flutter-to-native migration
 
