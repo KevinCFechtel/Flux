@@ -62,6 +62,23 @@ explicit confirmation for completing with skipped unresolved media. It persists
 details. Flutter source files remain untouched. Physical upgrade and regression
 CI still need acceptance for this follow-up.
 
+### October 2026 — production iOS download migration follow-up
+
+A physical TestFlight upgrade exposed a false-positive Downloads stage: the iOS
+legacy reader could report an empty import set and write the v1 completion
+marker despite offline media not appearing in Listening List. A new versioned
+verification marker forces a one-time, non-destructive recheck of those existing
+installations. The new empty-source guard refuses to mark completion if legacy
+audio files are still present but no secure-storage path keys matched. Already
+downloaded Core entries can repair missing Listening List membership on retry.
+
+The migration progress sheet now reports the same six logical stages as
+Android: Account, Settings, Feeds & startup view, Playback progress, Downloads,
+and Widgets. The local settings migration and summary are initiated on startup
+before historical media restoration; catalog-dependent state can still retry
+after sync. A real-device verification of the repaired downloads and post-sync
+Listening List refresh is still required before final release acceptance.
+
 ### D9-A — Production Flutter-to-native migration
 
 Complete the production-identity migration coordinator over the already-defined
