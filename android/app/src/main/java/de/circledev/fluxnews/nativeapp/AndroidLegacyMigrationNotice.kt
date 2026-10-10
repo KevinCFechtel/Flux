@@ -147,7 +147,19 @@ internal class AndroidLegacyMigrationNoticeStore(private val preferences: Androi
     }
 
     suspend fun acknowledge() {
-        preferences.write(ACKNOWLEDGED, true)
+        preferences.acknowledgeVerifiedLegacyMigration(
+            requiredKeys = listOf(
+                AndroidLegacySettingsMigration.SETTINGS_DONE,
+                AndroidLegacySettingsMigration.LOCAL_DONE,
+                AndroidLegacySettingsMigration.FEEDS_DONE,
+                AndroidLegacySettingsMigration.STARTUP_DONE,
+                AndroidLegacySettingsMigration.WIDGET_DONE,
+                AndroidLegacyPlaybackMigration.PLAYBACK_DONE,
+                AndroidLegacyDownloadMigration.DOWNLOADS_DONE,
+            ),
+            completionKind = COMPLETION_KIND,
+            acknowledged = ACKNOWLEDGED,
+        )
     }
 
     /** Finish only after successful import attempts, preserving exact retry reasons. */
