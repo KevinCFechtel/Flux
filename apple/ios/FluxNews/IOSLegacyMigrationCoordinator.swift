@@ -440,7 +440,8 @@ final class IOSLegacyMigrationCoordinator {
     }
 
     func migrationSummary() -> Summary? {
-        guard defaults.bool(forKey: DefaultsKey.accountMigrationCompleted) else { return nil }
+        guard defaults.bool(forKey: DefaultsKey.accountMigrationCompleted),
+              (try? isCurrentMigratedAccount()) == true else { return nil }
         let settings = [
             DefaultsKey.mediaSettingsMigrationCompleted,
             DefaultsKey.globalPreferencesMigrationCompleted,
@@ -761,7 +762,7 @@ final class IOSLegacyMigrationCoordinator {
         for importResult: LegacyPlaybackImportResult
     ) -> IOSLegacyPlaybackMigrationOutcome {
         // A later authoritative reconcile may make these article-keyed records resolvable.
-        importResult.skippedMissing > 0 ? .retryableFailure : .imported
+        importResult.skippedMissing > 0 || importResult.skippedAmbiguous > 0 ? .retryableFailure : .imported
     }
 
     private func normalizedServerIdentifier(_ server: String) -> String {
@@ -838,7 +839,7 @@ struct IOSLegacyMigrationSummaryView: View {
     private func status(_ title: String, complete: Bool, details: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: complete ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(complete ? .green : .secondary)
+                .foregroundColor(complete ? .green : .secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline)
                 if !details.isEmpty {
