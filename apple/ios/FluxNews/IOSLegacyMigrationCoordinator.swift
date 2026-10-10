@@ -393,7 +393,7 @@ final class IOSLegacyMigrationCoordinator {
                     // read-only Flutter download scan also proves there is no
                     // matching local audio file, this is stale progress rather
                     // than a migration failure and can be discarded terminally.
-                    if downloadScanSucceeded, !hasLegacyDownload, snapshot != nil {
+                    if downloadScanSucceeded, !hasLegacyDownload {
                         if discardedArticleIDs.insert(record.articleID).inserted {
                             discardedSetChanged = true
                             newlyDiscarded += 1
