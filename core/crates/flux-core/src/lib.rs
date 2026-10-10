@@ -1127,6 +1127,12 @@ impl FluxCore {
         result
     }
 
+    pub fn repair_legacy_download_metadata(&self) -> Result<(u32, u32), CoreError> {
+        let _sync = self.sync_gate.lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.repair_legacy_download_metadata()
+    }
+
     /// Registers a verified legacy file copied by a platform adapter. Unlike
     /// normal transfer completion, this never replaces existing Core state.
     pub fn import_legacy_download(
