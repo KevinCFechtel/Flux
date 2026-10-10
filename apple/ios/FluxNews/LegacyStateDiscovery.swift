@@ -255,7 +255,16 @@ enum LegacyStateDiscovery {
         }
         let database = library?.appendingPathComponent("news_database.db")
         let articleIDs = database.map { readLegacyAttachmentArticleIDs(at: $0) } ?? [:]
-        return parseDownloadImports(values, audioCache: audioCache, fileManager: fileManager, articleIDs: articleIDs)
+        // Flutter's Downloads screen scans audio_cache directly: the secure
+        // storage keys are an optimization, not the source of truth. Merge
+        // validated cached files back into the import set when keys are absent
+        // or contain old sandbox UUIDs after an application upgrade.
+        return mergeDownloadImports(
+            values,
+            audioCache: audioCache,
+            fileManager: fileManager,
+            articleIDs: articleIDs
+        )
     }
 
     /// Pure decoder kept separate from Keychain access so migration semantics can
@@ -386,6 +395,88 @@ enum LegacyStateDiscovery {
             return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source, articleID: articleIDs[enclosureID])
         }
         .sorted { $0.enclosureID < $1.enclosureID }
+    }
+
+    /// Mirror Flutter AudioDownloadService.getDownloadedAudios(): files named
+    /// audio_<positiveEnclosureID>_<epochMilliseconds>[.extension] are also
+    /// discoverable without surviving secure-storage download-path keys.
+    /// A positive enclosure ID alone is not sufficient to fabricate an article:
+    /// the Core must still resolve the enclosure before accepting the import.
+    static func discoverDownloadFiles(
+        audioCache: URL,
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
+    ) -> [LegacyDownloadImport] {
+        guard let candidates = try? fileManager.contentsOfDirectory(
+            at: audioCache,
+            includingPropertiesForKeys: [
+                .isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey
+            ],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var newest: [Int64: (file: URL, modified: Date)] = [:]
+        for file in candidates {
+            let name = file.lastPathComponent
+            guard name.hasPrefix(audioFilePrefix) else { continue }
+            let suffix = String(name.dropFirst(audioFilePrefix.count))
+            guard let underscore = suffix.firstIndex(of: "_"),
+                  let enclosureID = Int64(suffix[..<underscore]),
+                  enclosureID > 0 else { continue }
+            let remainder = suffix[suffix.index(after: underscore)...]
+            let timestamp = remainder.prefix(while: { $0.isNumber })
+            guard !timestamp.isEmpty,
+                  timestamp.count >= 10,
+                  timestamp.count <= 17,
+                  Int64(timestamp) != nil,
+                  (remainder.dropFirst(timestamp.count).isEmpty ||
+                   remainder.dropFirst(timestamp.count).first == ".") else {
+                continue
+            }
+
+            guard let properties = try? file.resourceValues(forKeys: [
+                .isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey
+            ]), properties.isRegularFile == true,
+                properties.isSymbolicLink != true,
+                fileManager.isReadableFile(atPath: file.path) else { continue }
+            let modified = properties.contentModificationDate ?? .distantPast
+            if let previous = newest[enclosureID], previous.modified >= modified {
+                continue
+            }
+            newest[enclosureID] = (file, modified)
+        }
+
+        return newest.map { id, entry in
+            LegacyDownloadImport(
+                enclosureID: id,
+                sourceFile: entry.file,
+                articleID: articleIDs[id]
+            )
+        }.sorted { $0.enclosureID < $1.enclosureID }
+    }
+
+    /// Combine the legacy Keychain index with Flutter's actual on-disk source.
+    /// A real file under audio_cache wins over a stale absolute Keychain path.
+    static func mergeDownloadImports(
+        _ values: [String: String],
+        audioCache: URL,
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
+    ) -> [LegacyDownloadImport] {
+        var byID = Dictionary(
+            uniqueKeysWithValues: parseDownloadImports(
+                values, audioCache: audioCache, fileManager: fileManager,
+                articleIDs: articleIDs
+            ).map { ($0.enclosureID, $0) }
+        )
+        for record in discoverDownloadFiles(
+            audioCache: audioCache, fileManager: fileManager, articleIDs: articleIDs
+        ) {
+            // The filesystem scanner handles duplicate historical downloads,
+            // choosing the most recently modified file as Flutter does.
+            byID[record.enclosureID] = record
+        }
+        return byID.values.sorted { $0.enclosureID < $1.enclosureID }
     }
 
     static func parseFeedOpenInMinifluxImports(
