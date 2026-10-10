@@ -117,10 +117,12 @@ both resolve `CFBundleShortVersionString` from `MARKETING_VERSION` and
 ./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
 ```
 
-Apple build numbers use a single numeric component of at most four digits
-(`1`–`9999`), rather than the long Android versionCode. Build number
-`3001` is an example, not a guarantee it is newer than a previously installed
-build. The existing `--configuration`, `--build-number` and new
+The iOS build scripts accept positive decimal build numbers, including the existing
+Flutter production scheme (e.g. `2026092601` from `FluxNews/pubspec.yaml`).
+App Store Connect remains authoritative for upload acceptance. Build number
+`3001` is only an example and may be older than the installed Flutter build;
+for a production in-place upgrade prefer the next unused higher value, such as
+`2026101001`. The existing `--configuration`, `--build-number` and new
 `--version-name` flags remain usable. `Upgrade Test` still targets the
 production Flutter identity only for on-device migration validation, not
 automatic production App Store upload.
