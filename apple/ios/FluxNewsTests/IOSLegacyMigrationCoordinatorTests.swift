@@ -142,7 +142,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testPlaybackMigrationTreatsImportedAlreadyPresentAndAmbiguousAsTerminal() {
+    func testPlaybackMigrationTreatsImportedAndAlreadyPresentAsTerminalButAmbiguousAsRetryable() {
         XCTAssertEqual(
             IOSLegacyMigrationCoordinator.playbackMigrationOutcome(
                 for: LegacyPlaybackImportResult(
@@ -174,7 +174,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                     alreadyPresent: 0
                 )
             ),
-            .imported
+            .retryableFailure
         )
     }
 
@@ -191,6 +191,33 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             ),
             .retryableFailure
         )
+    }
+
+    @MainActor
+    func testIOSMigrationSummaryRemembersManuallySkippedPlaybackReasons() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        for key in [
+            "mediaSettings.v1", "feedPreferences.v1", "globalPreferences.v1",
+            "settingsFollowup.v2.local", "settingsFollowup.v2.core",
+            "settingsFollowup.v2.startup", "toolbar.v1", "widgetDefaults.v1",
+        ] {
+            defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.\\(key).completed")
+        }
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
+        defaults.set("79 missing article(s)", forKey: "FluxNews.iOS.legacyMigration.playback.pendingReason")
+        let coordinator = IOSLegacyMigrationCoordinator(bootstrapper: bootstrapper, defaults: defaults)
+        XCTAssertTrue(coordinator.migrationSummary()?.canFinishWithSkippedItems == true)
+        XCTAssertTrue(coordinator.finishMigrationWithSkippedItems())
+        let summary = try XCTUnwrap(coordinator.migrationSummary())
+        XCTAssertTrue(summary.completed)
+        XCTAssertTrue(summary.acknowledged)
+        XCTAssertEqual(summary.completionKind, "completed_with_skipped_items")
+        XCTAssertEqual(summary.playbackDetails, "79 missing article(s)")
+        XCTAssertFalse(coordinator.finishMigrationWithSkippedItems())
     }
 
     @MainActor
