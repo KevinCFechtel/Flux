@@ -2111,7 +2111,7 @@ impl Store {
         Ok(true)
     }
 
-    /// Rehydrates a playback-only historical article from a platform-verified
+    /// Rehydrates a download-backed historical article from a platform-verified
     /// local legacy database snapshot. Existing Core rows always win, the
     /// current navigation catalog must still contain the feed, and the legacy
     /// enclosure is explicitly marked as not remotely present.
@@ -2185,7 +2185,10 @@ impl Store {
             )
             .map_err(sql_error)?;
         if existing_audio_count > 0 {
-            return Ok(true);
+            // A matching enclosure ID was handled above. Any other existing
+            // native audio identity must win rather than letting legacy progress
+            // attach to a potentially different enclosure.
+            return Ok(false);
         }
 
         tx.execute(
