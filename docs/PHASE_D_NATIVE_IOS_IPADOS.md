@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D5 COMPLETE / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 COMPLETE & ARCHITECTURE-FROZEN / D8 DEFERRED — NOT REQUIRED FOR REPLACEMENT / D9 IMPLEMENTATION COMPLETE — FINAL ACCEPTANCE & PHYSICAL FLUTTER→NATIVE UPGRADE TEST PENDING / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D5 COMPLETE / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW NON-BLOCKING / D7 COMPLETE & ARCHITECTURE-FROZEN / D8 DEFERRED — NOT REQUIRED FOR REPLACEMENT / D9 IMPLEMENTATION COMPLETE & PHYSICAL FLUTTER→NATIVE UPGRADE ACCEPTED / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -566,17 +566,26 @@ reopened for a distinct future live-state product requirement. See
 
 ### D9 — Flutter Replacement Completion / Legacy-Parity Closure
 
-Implementation complete; final acceptance pending. All planned D9 implementation
-blocks are complete and test-gated: production migration, config backup/restore,
-configurable Bottom Action Bar, retained localization set, downloaded-data
-management, widget Unread/All plus Newest/Oldest configuration, final Settings
-account/about information, and production logging/support diagnostics with a
-native log viewer and export.
+Implementation and physical production-upgrade acceptance are complete. All
+planned D9 blocks are complete and test-gated: production migration, config
+backup/restore, configurable Bottom Action Bar, retained localization set,
+downloaded-data management, widget Unread/All plus Newest/Oldest
+configuration, final Settings account/about information, and production
+logging/support diagnostics with a native log viewer and export.
 
-The remaining D9 work is acceptance-only: the canonical regression gate and the
-physical-device production-identity Flutter-to-native upgrade test. D9 also
-records the intentionally retired/replaced behaviors so they are not
-reintroduced later as accidental parity work. See
+On 10 October 2026 the production-identity TestFlight upgrade path completed
+successfully on a physical iPhone. Legacy downloads were recovered from the
+Flutter audio cache, including artwork extraction, and the migration completed
+green while explicitly reporting stale historical playback positions that had
+no local download and returned confirmed 404/410 from Miniflux. Such stale
+positions are intentionally discarded rather than creating ghost Listening List
+items. Existing native playback/download state and Flutter source data remain
+untouched.
+
+D9 therefore has no remaining iOS feature or physical-upgrade blocker. The
+canonical Apple/Rust regression gate remains mandatory whenever later shared
+changes touch the iOS path. D9 also records the intentionally retired/replaced
+behaviors so they are not reintroduced later as accidental parity work. See
 [IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md](IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md).
 
 ## 11. Release/acceptance invariants
