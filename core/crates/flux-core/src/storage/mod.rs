@@ -8188,6 +8188,78 @@ mod tests {
     }
 
     #[test]
+    fn local_legacy_playback_restore_is_non_destructive_and_importable() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+
+        // Local legacy rows are accepted only into the current navigation catalog.
+        assert!(!store
+            .restore_legacy_local_playback_article(&article, &enclosure)
+            .unwrap());
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[],
+                &[],
+            )
+            .unwrap();
+
+        assert!(store
+            .restore_legacy_local_playback_article(&article, &enclosure)
+            .unwrap());
+        let restored = store.enclosure(enclosure.id).unwrap().unwrap();
+        assert_eq!(restored.enclosure.article_id, article.id);
+        assert!(!restored.remote_present);
+
+        let result = store
+            .import_legacy_playback(&[LegacyPlaybackImport {
+                article_id: article.id,
+                position_ms: 42_000,
+                updated_at: None,
+            }])
+            .unwrap();
+        assert_eq!(result.imported, 1);
+        assert_eq!(
+            store.playback_state(enclosure.id).unwrap().unwrap().position_ms,
+            42_000
+        );
+
+        // Neither repeated local hydration nor repeated progress import may
+        // replace native playback state.
+        let changed = Article {
+            title: "Legacy title must not replace native".into(),
+            ..article.clone()
+        };
+        assert!(store
+            .restore_legacy_local_playback_article(&changed, &enclosure)
+            .unwrap());
+        assert_eq!(
+            store.import_legacy_playback(&[LegacyPlaybackImport {
+                article_id: article.id,
+                position_ms: 99_000,
+                updated_at: None,
+            }])
+            .unwrap()
+            .already_present,
+            1
+        );
+        assert_eq!(
+            store.playback_state(enclosure.id).unwrap().unwrap().position_ms,
+            42_000
+        );
+    }
+
+    #[test]
     fn historical_media_restore_requires_current_feed_and_matching_audio_identity() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
