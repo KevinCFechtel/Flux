@@ -101,7 +101,15 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
     }
     let bytes = bounded_file_prefix(path);
     let structured_chapters = bytes.as_deref().map(parse_id3_chapters).unwrap_or_default();
-    let (duration_ms, artwork, text_chapters) = if let Ok(tagged) = lofty::read_from_path(path) {
+    // Legacy Flutter files are imported with a .audio suffix, which is not a
+    // supported extension in lofty. Detect the actual format from the bytes.
+    // Preserve the normal path-based fallback for otherwise valid files.
+    let tagged = lofty::probe::Probe::open(path)
+        .ok()
+        .and_then(|probe| probe.guess_file_type().ok())
+        .and_then(|probe| probe.read().ok())
+        .or_else(|| lofty::read_from_path(path).ok());
+    let (duration_ms, artwork, text_chapters) = if let Some(tagged) = tagged {
         use lofty::file::{AudioFile, TaggedFileExt};
         let duration_ms = (tagged.properties().duration().as_millis() > 0)
             .then(|| tagged.properties().duration().as_millis() as u64);
@@ -109,7 +117,8 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
             .primary_tag()
             .and_then(|tag| tag.pictures().first())
             .map(|picture| picture.data().to_vec())
-            .filter(|data| !data.is_empty() && data.len() <= 10 * 1024 * 1024);
+            .filter(|data| !data.is_empty() && data.len() <= 10 * 1024 * 1024)
+            .or_else(|| bytes.as_deref().and_then(parse_id3_artwork));
         let chapters = tagged
             .tags()
             .iter()
@@ -134,7 +143,9 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
             .collect();
         (duration_ms, artwork, chapters)
     } else {
-        (None, None, Vec::new())
+        // Some old or truncated MP3s still contain a perfectly valid APIC
+        // frame even if their audio stream cannot be parsed by lofty.
+        (None, bytes.as_deref().and_then(parse_id3_artwork), Vec::new())
     };
     let mut embedded_chapters = if structured_chapters.is_empty() {
         text_chapters
