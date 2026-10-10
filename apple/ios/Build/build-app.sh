@@ -110,6 +110,7 @@ run_xcodebuild() {
       -configuration "${CONFIGURATION}" \
       -destination "${DESTINATION}" \
       -derivedDataPath "${DERIVED_DATA}" \
+      "${IOS_VERSION_SETTINGS[@]}" \
       "$@"
   fi
 }
