@@ -68,4 +68,29 @@ class AndroidLegacyMigrationNoticeTest {
         assertFalse(base.copy(feedsComplete = false).canFinishPartial)
         assertFalse(base.copy(playbackComplete = true, downloadsComplete = true).canFinishPartial)
     }
+    @Test
+    fun manuallySkippedMediaRemainsDistinguishableFromVerifiedCompletion() {
+        val skipped = AndroidLegacyMigrationNotice(
+            importedServer = "https://example.test",
+            acknowledged = true,
+            settingsComplete = true,
+            localComplete = true,
+            feedsComplete = true,
+            startupComplete = true,
+            widgetsComplete = true,
+            playbackComplete = true,
+            downloadsComplete = true,
+            completionKind = "completed_with_skipped_items",
+            skippedPlaybackDetails = "79 missing article(s)",
+        )
+        assertTrue(skipped.complete)
+        assertTrue(skipped.completedWithSkippedItems)
+        assertEquals(
+            "Completed with skipped items: 79 missing article(s)",
+            skipped.steps.first { it.title == "Playback progress" }.description,
+        )
+        assertFalse(skipped.appliesTo("https://example.test"))
+        assertFalse(skipped.copy(completionKind = "completed", skippedPlaybackDetails = "").completedWithSkippedItems)
+    }
+
 }
