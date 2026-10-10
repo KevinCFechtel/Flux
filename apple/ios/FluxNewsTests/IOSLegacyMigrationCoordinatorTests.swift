@@ -1241,9 +1241,11 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             legacyDownloadReader: { reads += 1; return [] },
             mediaRootProvider: { nil }
         )
-        XCTAssertEqual(await coordinator.migrateDownloadsIfNeeded(), .imported)
+        let first = await coordinator.migrateDownloadsIfNeeded()
+        XCTAssertEqual(first, .imported)
         XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.verified.v2"))
-        XCTAssertEqual(await coordinator.migrateDownloadsIfNeeded(), .alreadyCompleted)
+        let second = await coordinator.migrateDownloadsIfNeeded()
+        XCTAssertEqual(second, .alreadyCompleted)
         XCTAssertEqual(reads, 1)
     }
 
