@@ -44,7 +44,10 @@ internal class AndroidLegacyDownloadMigration(
         mutex.withLock {
             val provenance = preferences.read(AndroidLegacyMigrationCoordinator.IMPORTED_ACCOUNT_SERVER, "")
             if (provenance.isBlank() || credentials.read()?.serverUrl != provenance) return@withLock
-            if (preferences.read(DOWNLOADS_DONE, false)) return@withLock
+            if (preferences.read(DOWNLOADS_DONE, false)) {
+                repairExistingDownloads(sessionGeneration)
+                return@withLock
+            }
             val records = when (val result = legacyReader()) {
                 LegacyAndroidDownloadReadResult.Unavailable -> {
                     log(AndroidAppLogLevel.Warning, "Legacy download sources unavailable; retrying after next sync")
@@ -152,6 +155,7 @@ internal class AndroidLegacyDownloadMigration(
             if (!shouldRetry) {
                 preferences.write(DOWNLOADS_DONE, true)
                 preferences.remove(DOWNLOADS_STATUS)
+                repairExistingDownloads(sessionGeneration)
             } else {
                 preferences.write(DOWNLOADS_STATUS, buildList {
                     if (missingEnclosures > 0) add("$missingEnclosures missing audio attachment(s)")
@@ -161,7 +165,20 @@ internal class AndroidLegacyDownloadMigration(
         }
     }
 
+    private suspend fun repairExistingDownloads(sessionGeneration: Long) {
+        if (preferences.read(ARTWORK_REPAIR_DONE, false)) return
+        // Core holds the sync lock and only analyzes Core-owned downloaded files.
+        // If a file is missing or an error occurs, keep the marker unset for retry.
+        val result = runtime.localForGeneration(sessionGeneration) {
+            it.repairLegacyDownloadMetadata()
+        }
+        log(AndroidAppLogLevel.Info,
+            "Legacy media metadata repair scanned=${result.scanned} recoveredArtworks=${result.recoveredArtworks}")
+        preferences.write(ARTWORK_REPAIR_DONE, true)
+    }
+
     companion object {
+        internal val ARTWORK_REPAIR_DONE = AndroidPreferenceKey.boolean("migration-e9-media-metadata-repair-done-v1")
         internal val DOWNLOADS_DONE = AndroidPreferenceKey.boolean("migration-e9-downloads-done")
         internal val DOWNLOADS_STATUS = AndroidPreferenceKey.string("migration-e9-downloads-status")
     }
