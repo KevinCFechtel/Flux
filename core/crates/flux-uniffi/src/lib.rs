@@ -521,6 +521,11 @@ pub struct LegacyPlaybackImportResult {
     pub skipped_ambiguous: u32,
     pub already_present: u32,
 }
+#[derive(uniffi::Record)]
+pub struct LegacyMediaRepairResult {
+    pub scanned: u32,
+    pub recovered_artworks: u32,
+}
 #[derive(uniffi::Enum)]
 pub enum LegacyDownloadImportOutcome {
     Imported,
@@ -1263,6 +1268,11 @@ impl Flux {
         self.core
             .download_finished(enclosure_id, &local_file, file_size_bytes)
             .map_err(map_error)
+    }
+    pub fn repair_legacy_download_metadata(&self) -> Result<LegacyMediaRepairResult, FluxError> {
+        let (scanned, recovered_artworks) = self.core.repair_legacy_download_metadata()
+            .map_err(map_error)?;
+        Ok(LegacyMediaRepairResult { scanned, recovered_artworks })
     }
     pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, FluxError> {
         self.core.restore_legacy_playback_article(article_id).map_err(map_error)
