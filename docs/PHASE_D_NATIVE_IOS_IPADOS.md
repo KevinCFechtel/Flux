@@ -11,6 +11,11 @@
 > source; it is not a parity checklist and intentionally removed behavior must
 > not be reintroduced without a product decision.
 >
+> Final replacement acceptance: the physical production upgrade completed
+> successfully on 10 October 2026 and the canonical Apple regression workflow
+> is green on main (Apple #123, attempt 2). No known Phase-D replacement blocker
+> remains.
+>
 > On 2026-09-11, the owner approved replacing the Article Timeline with an owned
 > UIKit Timeline and native UIKit cells. The implementation initially used a
 > `UICollectionView` baseline and later evolved to the current `UITableView`
