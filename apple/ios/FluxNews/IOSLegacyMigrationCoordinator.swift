@@ -90,6 +90,13 @@ final class IOSLegacyMigrationCoordinator {
         static let mediaSettingsMigrationCompleted = "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"
         static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
         static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
+        static let metadataRepairCompleted = "FluxNews.iOS.legacyMigration.downloads.metadataRepair.v1.completed"
+        static let playbackPendingReason = "FluxNews.iOS.legacyMigration.playback.pendingReason"
+        static let downloadsPendingReason = "FluxNews.iOS.legacyMigration.downloads.pendingReason"
+        static let skippedPlaybackReason = "FluxNews.iOS.legacyMigration.playback.skippedReason"
+        static let skippedDownloadsReason = "FluxNews.iOS.legacyMigration.downloads.skippedReason"
+        static let summaryAcknowledged = "FluxNews.iOS.legacyMigration.summary.acknowledged"
+        static let completionKind = "FluxNews.iOS.legacyMigration.summary.completionKind"
         static let feedPreferenceMigrationCompleted = "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"
         static let globalPreferencesMigrationCompleted = "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed"
         static let settingsFollowupLocalCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.local.completed"
@@ -298,6 +305,9 @@ final class IOSLegacyMigrationCoordinator {
             let outcome = Self.playbackMigrationOutcome(for: importResult)
             if outcome == .imported {
                 defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
+                defaults.removeObject(forKey: DefaultsKey.playbackPendingReason)
+            } else {
+                defaults.set("\(importResult.skippedMissing) missing article(s); \(importResult.skippedAmbiguous) ambiguous audio attachment(s)", forKey: DefaultsKey.playbackPendingReason)
             }
             return outcome
         case let .failure(error):
@@ -318,7 +328,10 @@ final class IOSLegacyMigrationCoordinator {
         }
         do { guard try isCurrentMigratedAccount() else { return .notEligible } }
         catch { return .retryableFailure }
-        guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else { return .alreadyCompleted }
+        guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else {
+            await repairImportedDownloadMetadataIfNeeded()
+            return .alreadyCompleted
+        }
         guard let records = legacyDownloadReader() else { return .retryableFailure }
         guard !records.isEmpty else {
             defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
@@ -326,10 +339,14 @@ final class IOSLegacyMigrationCoordinator {
         }
         guard let mediaRoot = mediaRootProvider() else { return .retryableFailure }
         var hasRetryableRecord = false
+        var missingCount = 0
+        var failedCount = 0
+        var importedCount = 0
         for record in records {
             let reference = "downloads/legacy/enclosure-\(record.enclosureID).audio"
             guard let sourceSize = readableRegularFileSize(at: record.sourceFile) else {
                 hasRetryableRecord = true
+                failedCount += 1
                 continue
             }
             if legacyDownloadImporter == nil, let articleID = record.articleID {
@@ -337,6 +354,7 @@ final class IOSLegacyMigrationCoordinator {
                 case .success(true): break
                 case .success(false), .failure:
                     hasRetryableRecord = true
+                    missingCount += 1
                     continue
                 }
             }
@@ -379,7 +397,7 @@ final class IOSLegacyMigrationCoordinator {
                 )
             }
             switch result {
-            case .success(.imported): break
+            case .success(.imported): importedCount += 1
             case .success(.alreadyPresent):
                 // Only this run can prove that it created a file Core did not adopt.
                 if createdDestination { try? fileManager.removeItem(at: destination) }
@@ -388,16 +406,35 @@ final class IOSLegacyMigrationCoordinator {
                 // run can be recreated after a later authoritative sync.
                 if createdDestination { try? fileManager.removeItem(at: destination) }
                 hasRetryableRecord = true
+                missingCount += 1
             case .failure:
                 // Retain a pre-existing or just-created copy: the operation may be
                 // retried safely without changing the Flutter source.
                 hasRetryableRecord = true
+                failedCount += 1
             }
         }
-        guard !hasRetryableRecord else { return .retryableFailure }
+        logger.info("Legacy downloads discovered=\(records.count) imported=\(importedCount) missing=\(missingCount) failed=\(failedCount).")
+        if hasRetryableRecord {
+            defaults.set("\(missingCount) missing audio attachment(s); \(failedCount) file error(s)", forKey: DefaultsKey.downloadsPendingReason)
+            return .retryableFailure
+        }
         defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+        defaults.removeObject(forKey: DefaultsKey.downloadsPendingReason)
+        await repairImportedDownloadMetadataIfNeeded()
         logger.info("Legacy downloads copied into Core media storage.")
         return .imported
+    }
+
+    private func repairImportedDownloadMetadataIfNeeded() async {
+        guard !defaults.bool(forKey: DefaultsKey.metadataRepairCompleted) else { return }
+        switch await bootstrapper.repairLegacyDownloadMetadata() {
+        case .success(let result):
+            defaults.set(true, forKey: DefaultsKey.metadataRepairCompleted)
+            logger.info("Legacy media repair scanned=\(result.scanned) recoveredArtworks=\(result.recoveredArtworks).")
+        case .failure:
+            logger.warning("Legacy media repair remains retryable.")
+        }
     }
 
     @discardableResult
