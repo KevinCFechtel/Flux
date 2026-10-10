@@ -84,6 +84,22 @@ class AndroidPreferenceStore private constructor(
         return inserted
     }
 
+    internal suspend fun acknowledgeVerifiedLegacyMigration(
+        requiredKeys: List<AndroidPreferenceKey<Boolean>>,
+        completionKind: AndroidPreferenceKey<String>,
+        acknowledged: AndroidPreferenceKey<Boolean>,
+    ) {
+        dataStore.edit { prefs ->
+            check(requiredKeys.all { prefs[it.preferenceKey] == true }) {
+                "Migration stages have not all completed."
+            }
+            if (prefs[completionKind.preferenceKey] == null) {
+                prefs[completionKind.preferenceKey] = "completed"
+            }
+            prefs[acknowledged.preferenceKey] = true
+        }
+    }
+
     /** Persist a manually accepted partial migration in one DataStore edit. */
     internal suspend fun finishLegacyMigrationWithSkippedMedia(
         requiredKeys: List<AndroidPreferenceKey<Boolean>>,
