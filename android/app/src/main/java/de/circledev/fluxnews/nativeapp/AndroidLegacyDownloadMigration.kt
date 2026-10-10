@@ -66,6 +66,22 @@ internal class AndroidLegacyDownloadMigration(
                 try {
                     val sourceLength = record.sourceFile.length()
                     require(sourceLength > 0 && record.sourceFile.isFile && record.sourceFile.canRead())
+                    // The initial full sync contains unread/starred entries only.
+                    // For historical Flutter audio, hydrate the exact server entry
+                    // before copying bytes. A mismatch leaves the original untouched.
+                    if (record.articleId != null) {
+                        val restored = runtime.remoteForGeneration(sessionGeneration) {
+                            it.restoreLegacyMediaArticle(record.articleId, record.enclosureId)
+                        }
+                        if (!restored) {
+                            shouldRetry = true
+                            missingEnclosures++
+                            missingIds += record.enclosureId
+                            log(AndroidAppLogLevel.Warning,
+                                "Legacy media article/enclosure not available articleId=${record.articleId} enclosureId=${record.enclosureId}")
+                            continue
+                        }
+                    }
                     if (!destination.exists()) {
                         val directory = requireNotNull(destination.parentFile)
                         check(directory.isDirectory || directory.mkdirs())
