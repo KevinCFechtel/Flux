@@ -99,6 +99,9 @@ internal class AndroidLegacySettingsMigration(
                             ?.let { "feed" }
                         else -> null
                     }
+                    if (target == null) {
+                        preferences.write(STARTUP_STATUS, "Selected startup feed or category is not in the current catalog")
+                    }
                     if (target != null) {
                         if (target == "category") local.startupCategoryId?.let {
                             preferences.writeIfAbsent(AndroidPreferenceKey.long("navigation-startup-category"), it)
@@ -108,6 +111,7 @@ internal class AndroidLegacySettingsMigration(
                         }
                         preferences.writeIfAbsent(AndroidPreferenceKey.string("navigation-startup-scope"), target)
                         preferences.write(STARTUP_DONE, true)
+                        preferences.remove(STARTUP_STATUS)
                     }
                 }
             }
@@ -133,7 +137,12 @@ internal class AndroidLegacySettingsMigration(
                     }
                     if (outcome == LegacyFeedOpenInMinifluxImportOutcome.MISSING_FEED) missing = true
                 }
-                if (!missing) preferences.write(FEEDS_DONE, true)
+                if (!missing) {
+                    preferences.write(FEEDS_DONE, true)
+                    preferences.remove(FEEDS_STATUS)
+                } else {
+                    preferences.write(FEEDS_STATUS, "Some legacy feeds are missing from the current catalog")
+                }
             }
         }
     }
@@ -144,5 +153,7 @@ internal class AndroidLegacySettingsMigration(
         internal val LOCAL_DONE = AndroidPreferenceKey.boolean("migration-e9-local-done")
         internal val STARTUP_DONE = AndroidPreferenceKey.boolean("migration-e9-startup-done")
         internal val WIDGET_DONE = AndroidPreferenceKey.boolean("migration-e9-widget-done")
+        internal val STARTUP_STATUS = AndroidPreferenceKey.string("migration-e9-startup-status")
+        internal val FEEDS_STATUS = AndroidPreferenceKey.string("migration-e9-feeds-status")
     }
 }
