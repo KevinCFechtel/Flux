@@ -61,8 +61,7 @@ internal class AndroidLegacyPlaybackMigration(
                         it.restoreLegacyPlaybackArticle(record.articleId)
                     }
                     if (!restored &&
-                        downloadArticleIds != null &&
-                        record.articleId !in downloadArticleIds
+                        shouldDiscardRemoteMiss(record.articleId, downloadArticleIds)
                     ) {
                         discardedArticleIds += record.articleId
                     }
@@ -142,6 +141,11 @@ internal class AndroidLegacyPlaybackMigration(
                 else result.records.mapNotNull { it.articleId }.toSet()
             }
         }
+
+        internal fun shouldDiscardRemoteMiss(
+            articleId: Long,
+            downloadedArticleIds: Set<Long>?,
+        ): Boolean = downloadedArticleIds != null && articleId !in downloadedArticleIds
 
         internal fun discardedDescription(count: Int): String =
             when (count) {
