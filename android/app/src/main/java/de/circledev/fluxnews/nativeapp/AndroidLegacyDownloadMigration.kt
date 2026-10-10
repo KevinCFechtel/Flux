@@ -20,6 +20,7 @@ internal class AndroidLegacyDownloadMigration(
     private val credentials: AndroidCredentialStore,
     private val runtime: AndroidCoreRuntime,
     private val mediaRoot: File,
+    private val log: (AndroidAppLogLevel, String) -> Unit = { _, _ -> },
 ) : AndroidPostSyncEffect {
     internal constructor(
         context: Context,
@@ -27,12 +28,14 @@ internal class AndroidLegacyDownloadMigration(
         credentials: AndroidCredentialStore,
         runtime: AndroidCoreRuntime,
         mediaRoot: File,
+        diagnostics: AndroidAppDiagnostics,
     ) : this(
         legacyReader = LegacyAndroidStateReader(context)::readDownloadImports,
         preferences = preferences,
         credentials = credentials,
         runtime = runtime,
         mediaRoot = mediaRoot,
+        log = { level, message -> diagnostics.record(level, "migration.downloads", message) },
     )
 
     private val mutex = Mutex()
@@ -43,12 +46,19 @@ internal class AndroidLegacyDownloadMigration(
             if (provenance.isBlank() || credentials.read()?.serverUrl != provenance) return@withLock
             if (preferences.read(DOWNLOADS_DONE, false)) return@withLock
             val records = when (val result = legacyReader()) {
-                LegacyAndroidDownloadReadResult.Unavailable -> return@withLock
+                LegacyAndroidDownloadReadResult.Unavailable -> {
+                    log(AndroidAppLogLevel.Warning, "Legacy download sources unavailable; retrying after next sync")
+                    return@withLock
+                }
                 is LegacyAndroidDownloadReadResult.Found -> result.records
             }
             var shouldRetry = false
             var missingEnclosures = 0
             var failedFiles = 0
+            var imported = 0
+            var alreadyPresent = 0
+            val missingIds = mutableListOf<Long>()
+            val failedIds = mutableListOf<Long>()
             for (record in records) {
                 val reference = "downloads/legacy/enclosure-${record.enclosureId}.audio"
                 val destination = AndroidMediaTransferFileLayout.destination(mediaRoot, reference)
@@ -89,22 +99,39 @@ internal class AndroidLegacyDownloadMigration(
                         )
                     }
                     when (outcome) {
-                        LegacyDownloadImportOutcome.IMPORTED -> Unit
-                        LegacyDownloadImportOutcome.ALREADY_PRESENT -> if (created) destination.delete()
+                        LegacyDownloadImportOutcome.IMPORTED -> imported++
+                        LegacyDownloadImportOutcome.ALREADY_PRESENT -> {
+                            alreadyPresent++
+                            if (created) destination.delete()
+                        }
                         LegacyDownloadImportOutcome.MISSING_ENCLOSURE -> {
                             if (created) destination.delete()
                             shouldRetry = true
                             missingEnclosures++
+                            missingIds += record.enclosureId
                         }
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
+                } catch (error: Exception) {
                     // If Core may have accepted this file before the exception,
                     // retain it for the next idempotent import attempt.
                     shouldRetry = true
                     failedFiles++
+                    failedIds += record.enclosureId
+                    log(AndroidAppLogLevel.Warning, "Legacy download file/adoption error enclosureId=${record.enclosureId} type=${error.javaClass.simpleName}")
                 }
+            }
+            log(
+                if (shouldRetry) AndroidAppLogLevel.Warning else AndroidAppLogLevel.Info,
+                "Legacy download import summary discovered=${records.size} imported=$imported " +
+                    "alreadyPresent=$alreadyPresent missing=$missingEnclosures fileErrors=$failedFiles",
+            )
+            if (missingIds.isNotEmpty()) {
+                log(AndroidAppLogLevel.Warning, "Missing Core enclosure IDs: ${missingIds.joinToString(",")}")
+            }
+            if (failedIds.isNotEmpty()) {
+                log(AndroidAppLogLevel.Warning, "Failed legacy enclosure IDs: ${failedIds.joinToString(",")}")
             }
             if (!shouldRetry) {
                 preferences.write(DOWNLOADS_DONE, true)
