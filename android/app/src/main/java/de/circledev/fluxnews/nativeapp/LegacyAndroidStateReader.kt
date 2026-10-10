@@ -528,18 +528,41 @@ internal object LegacyAndroidImportParsing {
         articleIdsByEnclosureId: Map<Long, Long> = emptyMap(),
     ): List<LegacyAndroidDownloadImport> {
         val root = audioRoot.canonicalFile
-        return secure.mapNotNull { (key, value) ->
+        fun verifiedImport(id: Long, file: File): LegacyAndroidDownloadImport? {
+            if (id <= 0L || id !in knownLegacyEnclosureIds) return null
+            val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
+            if (source.parentFile != root ||
+                !source.isFile ||
+                !source.canRead() ||
+                source.length() <= 0L
+            ) return null
+            return LegacyAndroidDownloadImport(id, source, articleIdsByEnclosureId[id])
+        }
+
+        val keyed = secure.mapNotNull { (key, value) ->
             val id = Regex("^audio_download_path_(\\d+)$").matchEntire(key)
-                ?.groupValues?.get(1)?.toLongOrNull()?.takeIf { it > 0L }
+                ?.groupValues?.get(1)?.toLongOrNull()
                 ?: return@mapNotNull null
-            if (id !in knownLegacyEnclosureIds) return@mapNotNull null
-            val source = runCatching { File(value).canonicalFile }.getOrNull()
-                ?: return@mapNotNull null
-            if (source.parentFile != root || !source.name.startsWith("audio_") ||
-                !source.isFile || !source.canRead() || source.length() <= 0L
-            ) return@mapNotNull null
-            LegacyAndroidDownloadImport(id, source, articleIdsByEnclosureId[id])
-        }.distinctBy { it.enclosureId }.sortedBy { it.enclosureId }
+            verifiedImport(id, File(value))
+        }
+
+        // Flutter's Downloads screen also treats audio_cache itself as source
+        // data. Old absolute sandbox paths can become stale across an upgrade,
+        // so scan only the validated legacy filename form as a read-only fallback.
+        val cached = root.listFiles()
+            ?.asSequence()
+            ?.filter(File::isFile)
+            ?.mapNotNull { file ->
+                val id = LegacyKeyParsing.attachmentIdFromAudioFile(file.name)
+                    ?: return@mapNotNull null
+                verifiedImport(id, file)
+            }
+            ?.toList()
+            .orEmpty()
+
+        return (keyed + cached)
+            .distinctBy { it.enclosureId }
+            .sortedBy { it.enclosureId }
     }
 
     fun playback(
