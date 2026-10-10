@@ -125,21 +125,36 @@ build. The existing `--configuration`, `--build-number` and new
 production Flutter identity only for on-device migration validation, not
 automatic production App Store upload.
 
-## NativeDev TestFlight distribution
+## Transporter / TestFlight distribution
 
-Archive and export a physical-device nativeDev build with:
+Both archive identities can now be exported through the same guarded script.
+The export does not submit the app for review, upload the IPA, or publish a
+release. Transporter uploads the resulting local IPA to App Store Connect;
+use an internal TestFlight tester to validate the production Flutter upgrade.
 
 ```bash
-DEVELOPMENT_TEAM=<your-team-id> apple/ios/Build/archive.sh --build-number 3
-apple/ios/Build/export-testflight.sh
+# Existing Flutter production bundle ID, for a true in-place TestFlight upgrade:
+./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
+./apple/ios/Build/export-testflight.sh productionRelease
+# IPA: dist/ProductionExport/*.ipa
+
+# Separately installable development identity:
+./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
+./apple/ios/Build/export-testflight.sh developmentRelease
+# IPA: dist/TestFlightExport/*.ipa
 ```
 
-`export-testflight.sh` writes the IPA locally for manual upload with Apple's
-Transporter app; the repository does not contain a direct-upload script.
+Omitting the export variant remains backward compatible with NativeDev.
+The `--archive` and `--export-path` overrides remain supported for both
+identities, but the script refuses archives or exported IPAs whose app/widget
+Bundle IDs, display names or build/version numbers do not match their expected
+identity. It also checks the archived app and widget signatures and App Group
+entitlements before export. Export uses an App Store Connect distribution
+method with automatic signing and the configured Apple Developer team; matching
+distribution certificates/profiles, approved entitlements, and App Store Connect
+permissions are required.
 
-The archive is written to `.build/Archives/FluxNews-nativeDev.xcarchive` and
-the exported IPA is written under `dist/TestFlightExport` by default.
-These generated directories are safe to delete. The archive and export scripts
-reject the production Bundle ID before distribution. NativeDev TestFlight can
-coexist with the Flutter production app, but it does not test Flutter-to-native
-migration; use the separate Upgrade-Test configuration for that validation.
+For migration acceptance, install the TestFlight version **over** an existing
+Flutter production installation without deleting the app. This release route
+is intended for TestFlight validation; public App Store rollout still requires
+separate review and release decisions.
