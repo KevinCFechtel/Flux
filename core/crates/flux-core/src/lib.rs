@@ -1052,6 +1052,49 @@ impl FluxCore {
         self.store
             .download_finished(enclosure_id, local_file, file_size_bytes)
     }
+    /// Hydrate a historical, read article for a verified legacy download.
+    /// Never fetch arbitrary URLs and never overwrite native article state.
+    /// Missing remote entries or mismatched enclosure IDs remain retryable.
+    pub fn restore_legacy_media_article(
+        &self,
+        article_id: i64,
+        enclosure_id: i64,
+    ) -> Result<bool, CoreError> {
+        if article_id <= 0 || enclosure_id <= 0 {
+            return Err(CoreError::data("legacy media IDs must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self.sync_gate.lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            if let Some(existing) = self.store.enclosure(enclosure_id)? {
+                return Ok(existing.enclosure.article_id == article_id);
+            }
+            let remote = match self.remote.fetch_article_by_id(article_id) {
+                Ok(remote) => remote,
+                Err(error) if matches!(error.http_status(), Some(404 | 410)) => {
+                    tracing::info!(target: "migration", "legacy media article unavailable article_id={article_id}");
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
+            };
+            if remote.article.id != article_id {
+                tracing::warn!(target: "migration", "legacy media article identity mismatch article_id={article_id}");
+                return Ok(false);
+            }
+            let restored = self.store.restore_legacy_media_article(
+                &remote.article,
+                &remote.enclosures,
+                enclosure_id,
+            )?;
+            tracing::info!(target: "migration",
+                "legacy media hydration article_id={} enclosure_id={} restored={}",
+                article_id, enclosure_id, restored);
+            Ok(restored)
+        });
+        self.diagnostics.flush();
+        result
+    }
+
     /// Registers a verified legacy file copied by a platform adapter. Unlike
     /// normal transfer completion, this never replaces existing Core state.
     pub fn import_legacy_download(
