@@ -18602,90 +18602,986 @@
     "Build": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Build" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Build" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Build" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Build" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Build" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Build" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Build"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Build"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Build"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Build"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Build"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Build"
+          }
+        }
       }
     },
     "Version": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Version" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Version" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Version" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Version" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Version" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Version" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version"
+          }
+        }
       }
     },
     "Miniflux Version": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Miniflux-Version" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Miniflux Version" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Miniflux Version" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Miniflux Version" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Miniflux Version" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Miniflux Version" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miniflux-Version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Miniflux Version"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Miniflux Version"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Miniflux Version"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Miniflux Version"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Miniflux Version"
+          }
+        }
       }
     },
     "Technical Details": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Technische Details" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Technical Details" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Technical Details" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Technical Details" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Technical Details" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Technical Details" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Technische Details"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Technical Details"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Technical Details"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Technical Details"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Technical Details"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Technical Details"
+          }
+        }
       }
     },
     "Downloaded Files": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Heruntergeladene Dateien" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Downloaded Files" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Downloaded Files" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Downloaded Files" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Downloaded Files" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Downloaded Files" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heruntergeladene Dateien"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Downloaded Files"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Downloaded Files"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Downloaded Files"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Downloaded Files"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Downloaded Files"
+          }
+        }
       }
     },
     "Storage Used": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Verwendeter Speicher" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Storage Used" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Storage Used" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Storage Used" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Storage Used" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Storage Used" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verwendeter Speicher"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Storage Used"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Storage Used"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Storage Used"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Storage Used"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Storage Used"
+          }
+        }
       }
     },
     "Stored Records": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Gespeicherte Einträge" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Stored Records" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Stored Records" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Stored Records" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Stored Records" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Stored Records" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gespeicherte Einträge"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stored Records"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stored Records"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stored Records"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stored Records"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stored Records"
+          }
+        }
       }
     },
     "Search category or message": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Kategorie oder Nachricht durchsuchen" } },
-        "es": { "stringUnit": { "state": "needs_review", "value": "Search category or message" } },
-        "gl": { "stringUnit": { "state": "needs_review", "value": "Search category or message" } },
-        "nl": { "stringUnit": { "state": "needs_review", "value": "Search category or message" } },
-        "ta": { "stringUnit": { "state": "needs_review", "value": "Search category or message" } },
-        "tr": { "stringUnit": { "state": "needs_review", "value": "Search category or message" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kategorie oder Nachricht durchsuchen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Search category or message"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Search category or message"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Search category or message"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Search category or message"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Search category or message"
+          }
+        }
       }
+    },
+    "Previous data has been checked.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die bisherigen Daten wurden geprüft."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Previous data has been checked."
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Previous data has been checked."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Previous data has been checked."
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Previous data has been checked."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Previous data has been checked."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Settings and media data are imported after a successful sync.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen und Mediendaten werden nach einer erfolgreichen Synchronisierung übernommen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Settings and media data are imported after a successful sync."
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Settings and media data are imported after a successful sync."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Settings and media data are imported after a successful sync."
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Settings and media data are imported after a successful sync."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Settings and media data are imported after a successful sync."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Credentials checked": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zugangsdaten geprüft"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Credentials checked"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Credentials checked"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Credentials checked"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Credentials checked"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Credentials checked"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Feeds & startup view": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds und Startansicht"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Feeds & startup view"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Feeds & startup view"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Feeds & startup view"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Feeds & startup view"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Feeds & startup view"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Widgets": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Widgets"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Widgets"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Widgets"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Widgets"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Widgets"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Widgets"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Pending items are retried after synchronization.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offene Einträge werden nach der Synchronisierung erneut versucht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pending items are retried after synchronization."
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pending items are retried after synchronization."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pending items are retried after synchronization."
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pending items are retried after synchronization."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pending items are retried after synchronization."
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Sync now": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jetzt synchronisieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sync now"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sync now"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sync now"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sync now"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sync now"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Finish with unresolved items": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mit offenen Einträgen abschließen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish with unresolved items"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish with unresolved items"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish with unresolved items"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish with unresolved items"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish with unresolved items"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Continue in background": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Im Hintergrund fortfahren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Continue in background"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Continue in background"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Continue in background"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Continue in background"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Continue in background"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Completed with skipped items": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mit übersprungenen Einträgen abgeschlossen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Completed with skipped items"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Completed with skipped items"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Completed with skipped items"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Completed with skipped items"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Completed with skipped items"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Migration complete": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migration abgeschlossen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Migration complete"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Migration complete"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Migration complete"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Migration complete"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Migration complete"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Import from FluxNews": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus FluxNews importieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Import from FluxNews"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Import from FluxNews"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Import from FluxNews"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Import from FluxNews"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Import from FluxNews"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Finish migration with skipped items?": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migration mit übersprungenen Einträgen abschließen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish migration with skipped items?"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish migration with skipped items?"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish migration with skipped items?"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish migration with skipped items?"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finish migration with skipped items?"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Skip unresolved items": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offene Einträge überspringen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skip unresolved items"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skip unresolved items"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skip unresolved items"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skip unresolved items"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skip unresolved items"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Keep retrying": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weiter versuchen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keep retrying"
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keep retrying"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keep retrying"
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keep retrying"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Keep retrying"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erfolgreich importierte Downloads und Wiedergabepositionen bleiben erhalten. Nur offene Einträge werden übersprungen. Die ursprünglichen Flutter-Daten bleiben unverändert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched."
+          }
+        },
+        "gl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched."
+          }
+        },
+        "ta": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Successfully imported downloads and playback positions are preserved. Only unresolved items will be skipped. Original Flutter data remains untouched."
+          }
+        }
+      },
+      "extractionState": "manual"
     }
   },
   "version": "1.0"

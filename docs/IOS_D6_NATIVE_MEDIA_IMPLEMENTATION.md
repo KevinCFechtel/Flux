@@ -1,6 +1,11 @@
 # iOS/iPadOS D6 — Native Media & Background Downloads
 
-Status: **implementation-stable / testvalidated; UX observation window active; final D6-G freeze pending**  
+Status: **IMPLEMENTATION STABLE / TESTVALIDATED — UX OBSERVATION NON-BLOCKING; historical D6 execution record**  
+>
+> Current Phase-D replacement acceptance is recorded in
+> `PHASE_D_NATIVE_IOS_IPADOS.md`: D9 and the physical production upgrade are
+> complete. Any remaining D6 observation/final-freeze wording in this document
+> is historical/non-blocking rather than a replacement-release gate.
 Date: 25 September 2026  
 Repository baseline reviewed: `main` at `3d6b59202c61d1537784c8be9544c88e1a38c95e`
 

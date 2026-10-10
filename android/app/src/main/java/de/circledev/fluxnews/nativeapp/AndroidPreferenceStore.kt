@@ -68,6 +68,77 @@ class AndroidPreferenceStore private constructor(
         dataStore.edit { preferences -> preferences[key.preferenceKey] = value }
     }
 
+    /**
+     * Import only absent native values. Presence, including an explicitly
+     * stored false or empty selection, always takes precedence over Flutter.
+     * The check and write must share one DataStore transaction.
+     */
+    suspend fun <T> writeIfAbsent(key: AndroidPreferenceKey<T>, value: T): Boolean {
+        var inserted = false
+        dataStore.edit { preferences ->
+            if (preferences[key.preferenceKey] == null) {
+                preferences[key.preferenceKey] = value
+                inserted = true
+            }
+        }
+        return inserted
+    }
+
+    internal suspend fun acknowledgeVerifiedLegacyMigration(
+        requiredKeys: List<AndroidPreferenceKey<Boolean>>,
+        completionKind: AndroidPreferenceKey<String>,
+        acknowledged: AndroidPreferenceKey<Boolean>,
+    ) {
+        dataStore.edit { prefs ->
+            check(requiredKeys.all { prefs[it.preferenceKey] == true }) {
+                "Migration stages have not all completed."
+            }
+            if (prefs[completionKind.preferenceKey] == null) {
+                prefs[completionKind.preferenceKey] = "completed"
+            }
+            prefs[acknowledged.preferenceKey] = true
+        }
+    }
+
+    /** Persist a manually accepted partial migration in one DataStore edit. */
+    internal suspend fun finishLegacyMigrationWithSkippedMedia(
+        requiredKeys: List<AndroidPreferenceKey<Boolean>>,
+        playbackDone: AndroidPreferenceKey<Boolean>,
+        downloadsDone: AndroidPreferenceKey<Boolean>,
+        playbackReason: AndroidPreferenceKey<String>,
+        downloadsReason: AndroidPreferenceKey<String>,
+        skippedPlayback: AndroidPreferenceKey<String>,
+        skippedDownloads: AndroidPreferenceKey<String>,
+        completionKind: AndroidPreferenceKey<String>,
+        acknowledged: AndroidPreferenceKey<Boolean>,
+    ) {
+        dataStore.edit { prefs ->
+            check(requiredKeys.all { prefs[it.preferenceKey] == true }) {
+                "Settings and catalog migration must complete first."
+            }
+            check(prefs[acknowledged.preferenceKey] != true) {
+                "Migration already acknowledged."
+            }
+            val playbackComplete = prefs[playbackDone.preferenceKey] == true
+            val downloadsComplete = prefs[downloadsDone.preferenceKey] == true
+            check(!playbackComplete || !downloadsComplete) { "Media migration already completed." }
+            val playbackDetails = prefs[playbackReason.preferenceKey].orEmpty()
+            val downloadDetails = prefs[downloadsReason.preferenceKey].orEmpty()
+            if (!playbackComplete) check(playbackDetails.isNotBlank()) { "Playback has no import result." }
+            if (!downloadsComplete) check(downloadDetails.isNotBlank()) { "Downloads have no import result." }
+            if (!playbackComplete) {
+                prefs[skippedPlayback.preferenceKey] = playbackDetails
+                prefs[playbackDone.preferenceKey] = true
+            }
+            if (!downloadsComplete) {
+                prefs[skippedDownloads.preferenceKey] = downloadDetails
+                prefs[downloadsDone.preferenceKey] = true
+            }
+            prefs[completionKind.preferenceKey] = "completed_with_skipped_items"
+            prefs[acknowledged.preferenceKey] = true
+        }
+    }
+
     suspend fun <T> remove(key: AndroidPreferenceKey<T>) {
         dataStore.edit { preferences -> preferences.remove(key.preferenceKey) }
     }

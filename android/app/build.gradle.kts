@@ -13,10 +13,42 @@ val developmentBundleSigningProperties = Properties().apply {
     if (propertiesFile.exists()) propertiesFile.inputStream().use(::load)
 }
 
+// Explicit opt-in only for the Play upload build. Normal productionRelease APKs
+// must not silently pick up the Play upload certificate: direct installs/rollback
+// may require a different, Flutter-compatible app-signing certificate.
+val signProductionBundle = providers.gradleProperty("fluxProductionBundleSigning")
+    .map(String::toBoolean)
+    .orElse(false)
+    .get()
+val productionBundleSigningProperties = Properties().apply {
+    if (signProductionBundle) {
+        val propertiesFile = rootProject.file("productionBundle-signing.properties")
+        if (!propertiesFile.isFile) {
+            throw GradleException("Missing android/productionBundle-signing.properties for signed Play bundle.")
+        }
+        propertiesFile.inputStream().use(::load)
+        val required = listOf("keyAlias", "keyPassword", "storeFile", "storePassword")
+        required.forEach { name ->
+            if (getProperty(name).isNullOrBlank()) {
+                throw GradleException("Missing ${name} in productionBundle-signing.properties.")
+            }
+        }
+        val keyStore = rootProject.file(getProperty("storeFile"))
+        if (!keyStore.isFile) {
+            throw GradleException("Production Play upload keystore does not exist: ${keyStore.path}")
+        }
+    }
+}
+
+// Release versions are supplied by Build/build-app.sh. The fallback values are
+// retained for CI and non-distributable local builds without release arguments.
+val buildVersionCode = providers.gradleProperty("fluxBuildVersionCode").map(String::toInt).orElse(1)
+val buildVersionName = providers.gradleProperty("fluxBuildVersionName").orElse("0.1.0")
+
 android {
     namespace = "de.circledev.fluxnews.nativeapp"
     compileSdk = 37
-    defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = buildVersionCode.get(); versionName = buildVersionName.get(); testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     signingConfigs {
         if (developmentBundleSigningProperties.isNotEmpty()) {
             create("developmentBundle") {
@@ -25,6 +57,14 @@ android {
                 storeFile = developmentBundleSigningProperties.getProperty("storeFile")
                     ?.let(rootProject::file)
                 storePassword = developmentBundleSigningProperties.getProperty("storePassword")
+            }
+        }
+        if (signProductionBundle) {
+            create("productionBundle") {
+                keyAlias = productionBundleSigningProperties.getProperty("keyAlias")
+                keyPassword = productionBundleSigningProperties.getProperty("keyPassword")
+                storeFile = rootProject.file(productionBundleSigningProperties.getProperty("storeFile"))
+                storePassword = productionBundleSigningProperties.getProperty("storePassword")
             }
         }
     }
@@ -46,7 +86,13 @@ android {
             resValue("string", "app_name", "FluxNews Native Dev")
             signingConfigs.findByName("developmentBundle")?.let { signingConfig = it }
         }
-        create("production") { dimension = "distribution" }
+        create("production") {
+            dimension = "distribution"
+            // Only build-app.sh productionBundle enables this signing configuration.
+            if (signProductionBundle) {
+                signingConfig = signingConfigs.getByName("productionBundle")
+            }
+        }
     }
     sourceSets {
         getByName("debug").apply {
@@ -97,9 +143,11 @@ android.buildTypes.named("migrationProbe") { if (migrationSigningProperties.isNo
 val migrationVersionCode = providers.gradleProperty("fluxMigrationVersionCode").map(String::toInt).orElse(1)
 androidComponents.onVariants(androidComponents.selector().withBuildType("migrationProbe")) { variant -> variant.outputs.forEach { output -> output.versionCode.set(migrationVersionCode) } }
 
+// Keep the legacy development Play override compatible with existing callers.
+// The unified build-app.sh flow uses fluxBuildVersionCode for all release variants.
 val developmentPlayVersionCode = providers.gradleProperty("fluxDevelopmentPlayVersionCode")
     .map(String::toInt)
-    .orElse(1)
+    .orElse(buildVersionCode)
 androidComponents.onVariants(
     androidComponents.selector()
         .withFlavor("distribution" to "development")

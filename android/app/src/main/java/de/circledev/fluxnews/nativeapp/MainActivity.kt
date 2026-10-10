@@ -19,12 +19,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
         val configurationBackup = application.configurationBackup
         val widgetProjection = application.widgetProjection
         val widgetRouting = application.widgetRouting
+        val migrationNoticeStore = application.legacyMigrationNoticeStore
         setContent {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
@@ -133,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         systemNotifications,
                         widgetProjection,
                         widgetRouting,
+                        migrationNoticeStore,
                     )
                 }
             }
@@ -157,9 +161,15 @@ private fun FluxNewsApp(
     systemNotifications: AndroidSystemNotificationManager,
     widgetProjection: AndroidWidgetProjectionCoordinator,
     widgetRouting: AndroidWidgetRouting,
+    migrationNoticeStore: AndroidLegacyMigrationNoticeStore,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
+    val migrationNotice by migrationNoticeStore.state.collectAsState(initial = AndroidLegacyMigrationNotice())
+    val syncState by syncCoordinator.state.collectAsState()
+    val migrationAckScope = rememberCoroutineScope()
+    var migrationHiddenThisSession by remember { mutableStateOf(false) }
+    var migrationAccountPreviouslyShown by remember { mutableStateOf("") }
     val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
     LaunchedEffect(readyState?.serverUrl) {
         if (readyState != null) {
@@ -168,6 +178,7 @@ private fun FluxNewsApp(
         }
     }
     fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) { bootstrapState = ready; syncCoordinator.requestSync(SyncReason.APP_START) }
+    Box(modifier = Modifier.fillMaxSize()) {
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
             AndroidAccountBootstrap.State.Starting -> StartupProgress()
@@ -220,6 +231,35 @@ private fun FluxNewsApp(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+    val showMigration = migrationNotice.appliesTo(readyState?.serverUrl) && !migrationHiddenThisSession
+    LaunchedEffect(migrationNotice.importedServer) {
+        if (migrationNotice.importedServer != migrationAccountPreviouslyShown) {
+            migrationHiddenThisSession = false
+            migrationAccountPreviouslyShown = migrationNotice.importedServer
+        }
+    }
+    if (showMigration) {
+        AndroidLegacyMigrationNoticeDialog(
+            state = migrationNotice,
+            syncing = syncState is AndroidSyncCoordinator.State.Syncing,
+            onSync = { syncCoordinator.requestSync(SyncReason.MANUAL) },
+            onClose = {
+                migrationHiddenThisSession = true
+                if (migrationNotice.complete) {
+                    // Only a fully verified migration is permanently acknowledged.
+                    // Partial migrations remain visible on a later app launch.
+                    migrationAckScope.launch { migrationNoticeStore.acknowledge() }
+                }
+            },
+            onFinishPartial = {
+                migrationAckScope.launch {
+                    runCatching { migrationNoticeStore.finishWithUnresolvedMedia() }
+                        .onSuccess { migrationHiddenThisSession = true }
+                }
+            },
+        )
+    }
     }
 }
 

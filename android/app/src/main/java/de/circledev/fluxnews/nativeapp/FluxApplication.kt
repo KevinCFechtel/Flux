@@ -30,6 +30,9 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidStoragePaths.create(applicationContext) }
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
+    internal val legacyMigrationNoticeStore: AndroidLegacyMigrationNoticeStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacyMigrationNoticeStore(preferenceStore)
+    }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
     internal val mediaPlaybackCoordinator: AndroidMediaPlaybackCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidMediaPlaybackCoordinator(
@@ -74,10 +77,19 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val widgetRouting: AndroidWidgetRouting by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidWidgetRouting()
     }
+    internal val legacySettingsMigration: AndroidLegacySettingsMigration by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacySettingsMigration(applicationContext, preferenceStore, credentialStore, coreRuntime)
+    }
+    internal val legacyPlaybackMigration: AndroidLegacyPlaybackMigration by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacyPlaybackMigration(applicationContext, preferenceStore, credentialStore, coreRuntime)
+    }
+    internal val legacyDownloadMigration: AndroidLegacyDownloadMigration by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacyDownloadMigration(applicationContext, preferenceStore, credentialStore, coreRuntime, storagePaths.media, diagnostics)
+    }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
-            effects = listOf(systemNotifications, widgetProjection, mediaTransferCoordinator),
+            effects = listOf(legacySettingsMigration, legacyPlaybackMigration, legacyDownloadMigration, systemNotifications, widgetProjection, mediaTransferCoordinator),
             onEffectError = { effect, error ->
                 diagnostics.record(
                     AndroidAppLogLevel.Error,
@@ -108,6 +120,26 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidBackgroundSync(applicationContext, coreRuntime, accountBootstrap, postSyncEffects, diagnostics)
     }
     val credentialStore: AndroidCredentialStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCredentialStore(applicationContext) }
+    internal val legacyMigration: AndroidLegacyMigrationCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidLegacyMigrationCoordinator(
+            context = applicationContext,
+            credentialStore = credentialStore,
+            preferenceStore = preferenceStore,
+            onCredentialsImported = { credentials ->
+                diagnostics.setSensitiveValues(
+                    buildList {
+                        add(credentials.apiKey)
+                        credentials.customHeaders.forEach { add(it.value) }
+                    },
+                )
+                diagnostics.record(
+                    AndroidAppLogLevel.Info,
+                    "migration",
+                    "Legacy Flutter account copied into native credential storage.",
+                )
+            },
+        )
+    }
     internal val navigationPreferences: AndroidNavigationPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidNavigationPreferences(preferenceStore) }
     internal val articlePreferences: AndroidArticlePreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticlePreferences(preferenceStore) }
     internal val actionBarPreferences: AndroidActionBarPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidActionBarPreferences(preferenceStore) }
@@ -128,6 +160,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             coreRuntime = coreRuntime,
             storagePaths = storagePaths,
             lifecycleParticipant = mediaRuntime,
+            beforeCredentialRestore = legacyMigration::prepareAccountForRestore,
             onWidgetStateCleared = { AndroidWidgetUpdates.refreshAll(applicationContext) },
         )
     }

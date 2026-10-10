@@ -17,6 +17,9 @@ struct FluxNewsApp: App {
     @StateObject private var bootstrapper = IOSAppRuntime.shared.bootstrapper
     @State private var newsreaderStore = NewsreaderStore()
     @StateObject private var articleListActionPreferences = IOSArticleListActionPreferences()
+    @State private var migrationSummary: IOSLegacyMigrationCoordinator.Summary?
+    @State private var showingMigrationSummary = false
+    @State private var migrationHiddenThisSession = false
 
     var body: some Scene {
         WindowGroup {
@@ -82,16 +85,19 @@ struct FluxNewsApp: App {
                             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                         )
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core != nil {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core == nil,
                               case .accountRequired = bootstrapper.state {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                        await prepareInitialMigrationSummary()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     }
@@ -103,6 +109,12 @@ struct FluxNewsApp: App {
                     articleListActionPreferences.reloadFromDefaults()
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
+                    if !migrationHiddenThisSession,
+                       let summary = IOSAppRuntime.shared.legacyMigrationCoordinator.migrationSummary(),
+                       !summary.acknowledged {
+                        migrationSummary = summary
+                        showingMigrationSummary = true
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
@@ -117,17 +129,20 @@ struct FluxNewsApp: App {
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core != nil {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core == nil,
                                       case .accountRequired = bootstrapper.state {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 await prepareInitialMigrationSummary()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                                   _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             }
                             _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
@@ -137,12 +152,66 @@ struct FluxNewsApp: App {
                     articleListActionPreferences.reloadFromDefaults()
                             await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
+                            if !migrationHiddenThisSession,
+                               let summary = IOSAppRuntime.shared.legacyMigrationCoordinator.migrationSummary(),
+                               !summary.acknowledged {
+                                migrationSummary = summary
+                                showingMigrationSummary = true
+                            }
                         }
                     } else {
                         IOSAppRuntime.shared.mediaRuntime.sceneWillResignActive()
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
                     }
                 }
+                .sheet(isPresented: $showingMigrationSummary) {
+                    if let summary = migrationSummary {
+                        IOSLegacyMigrationSummaryView(
+                            summary: summary,
+                            sync: {
+                                await newsreaderStore.syncManually()
+                                let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+                                _ = await coordinator.migratePlaybackProgressIfNeeded()
+                                _ = await coordinator.migrateDownloadsIfNeeded()
+                                migrationSummary = coordinator.migrationSummary()
+                            },
+                            close: {
+                                if summary.completed {
+                                    IOSAppRuntime.shared.legacyMigrationCoordinator.acknowledgeCompletedMigration()
+                                }
+                                migrationHiddenThisSession = true
+                                showingMigrationSummary = false
+                            },
+                            finishPartial: {
+                                let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+                                if coordinator.finishMigrationWithSkippedItems() {
+                                    migrationSummary = coordinator.migrationSummary()
+                                    migrationHiddenThisSession = true
+                                    showingMigrationSummary = false
+                                }
+                            }
+                        )
+                        .interactiveDismissDisabled()
+                    }
+                }
         }
     }
+    /// Resolve local and catalog settings immediately on activation, without
+    /// waiting for a long historical media import or a manual sync. Later
+    /// successful syncs can retry catalog-dependent records.
+    private func prepareInitialMigrationSummary() async {
+        let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+        _ = await coordinator.migrateGlobalPreferencesIfNeeded()
+        _ = await coordinator.migrateSettingsFollowupIfNeeded()
+        _ = await coordinator.migrateFeedPreferencesIfNeeded()
+        _ = await coordinator.migrateToolbarIfNeeded()
+        _ = await coordinator.migrateWidgetDefaultsIfNeeded()
+        if !migrationHiddenThisSession,
+           let summary = coordinator.migrationSummary(),
+           !summary.acknowledged {
+            migrationSummary = summary
+            showingMigrationSummary = true
+        }
+    }
+
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SQLite3
 
 struct LegacyDiscoveryResult: Equatable {
     enum Access: String {
@@ -38,9 +39,28 @@ struct LegacyPlaybackProgressImport: Equatable {
     let positionMs: UInt64
 }
 
+struct LegacyPlaybackArticleImport: Equatable {
+    let articleID: Int64
+    let feedID: Int64
+    let title: String
+    let url: String
+    let commentsURL: String
+    let publishedAt: String
+    let isRead: Bool
+    let isStarred: Bool
+    let rawHTMLContent: String
+    let readingTimeMinutes: UInt32
+    let preview: String
+    let imageURL: String?
+    let enclosureID: Int64
+    let enclosureURL: String
+    let enclosureMimeType: String
+}
+
 struct LegacyDownloadImport: Equatable {
     let enclosureID: Int64
     let sourceFile: URL
+    var articleID: Int64? = nil
 }
 
 struct LegacyFeedOpenInMinifluxImport: Equatable {
@@ -228,6 +248,40 @@ enum LegacyStateDiscovery {
         )
     }
 
+    /// Reads the local Flutter SQLite rows needed to identify historical
+    /// playback progress without contacting Miniflux. Only articles with exactly
+    /// one valid audio attachment are returned; ambiguous rows are intentionally
+    /// omitted instead of guessed.
+    static func readPlaybackArticleImports(
+        articleIDs: [Int64],
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil
+    ) -> [LegacyPlaybackArticleImport] {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              !articleIDs.isEmpty,
+              let library = homeDirectory ?? fileManager.urls(
+                for: .libraryDirectory,
+                in: .userDomainMask
+              ).first else {
+            return []
+        }
+        return readLegacyPlaybackArticles(
+            at: library.appendingPathComponent("news_database.db"),
+            articleIDs: articleIDs
+        )
+    }
+
+    /// Presence-only guard for old audio files when the secure-storage reader
+    /// unexpectedly reports an empty download set. Never mutates Flutter data.
+    static func hasUnmigratedAudioFiles(fileManager: FileManager = .default) -> Bool {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let library = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let audioCache = library.appendingPathComponent("Application Support/audio_cache", isDirectory: true)
+        return countAudioFiles(in: audioCache, fileManager: fileManager) > 0
+    }
+
     /// Reads only primary attachment-ID download paths. URL-keyed values and
     /// filenames are not identity evidence and are intentionally ignored.
     static func readDownloadImports(
@@ -240,7 +294,18 @@ enum LegacyStateDiscovery {
         guard let audioCache = library?.appendingPathComponent("Application Support/audio_cache", isDirectory: true) else {
             return nil
         }
-        return parseDownloadImports(values, audioCache: audioCache, fileManager: fileManager)
+        let database = library?.appendingPathComponent("news_database.db")
+        let articleIDs = database.map { readLegacyAttachmentArticleIDs(at: $0) } ?? [:]
+        // Flutter's Downloads screen scans audio_cache directly: the secure
+        // storage keys are an optimization, not the source of truth. Merge
+        // validated cached files back into the import set when keys are absent
+        // or contain old sandbox UUIDs after an application upgrade.
+        return mergeDownloadImports(
+            values,
+            audioCache: audioCache,
+            fileManager: fileManager,
+            articleIDs: articleIDs
+        )
     }
 
     /// Pure decoder kept separate from Keychain access so migration semantics can
@@ -324,10 +389,132 @@ enum LegacyStateDiscovery {
         return byArticleID.values.sorted { $0.articleID < $1.articleID }
     }
 
+    static func readLegacyPlaybackArticles(
+        at url: URL,
+        articleIDs: [Int64]
+    ) -> [LegacyPlaybackArticleImport] {
+        let ids = Array(Set(articleIDs.filter { $0 > 0 })).sorted()
+        guard !ids.isEmpty, FileManager.default.fileExists(atPath: url.path) else {
+            return []
+        }
+
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db = connection else {
+            if connection != nil { sqlite3_close(connection) }
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let sql = """
+        SELECT n.newsID,n.feedID,n.title,n.url,n.commentsUrl,n.publishedAt,
+               n.status,n.starred,n.content,n.readingTime,n.previewText,n.imageUrl,
+               a.attachmentID,a.attachmentURL,a.attachmentMimeType
+          FROM news n
+          JOIN attachments a ON a.newsID=n.newsID
+         WHERE n.newsID IN ((placeholders))
+           AND lower(a.attachmentMimeType) LIKE 'audio/%'
+         ORDER BY n.newsID,a.attachmentID
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            sqlite3_finalize(statement)
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_int64(statement, Int32(index + 1), id)
+        }
+
+        func text(_ column: Int32) -> String? {
+            guard sqlite3_column_type(statement, column) != SQLITE_NULL,
+                  let bytes = sqlite3_column_text(statement, column) else {
+                return nil
+            }
+            return String(cString: bytes)
+        }
+
+        var grouped: [Int64: [LegacyPlaybackArticleImport]] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let articleID = sqlite3_column_int64(statement, 0)
+            let feedID = sqlite3_column_int64(statement, 1)
+            let enclosureID = sqlite3_column_int64(statement, 12)
+            guard articleID > 0,
+                  feedID > 0,
+                  enclosureID > 0,
+                  let title = text(2),
+                  let articleURL = text(3),
+                  let publishedAt = text(5),
+                  let enclosureURL = text(13),
+                  let mimeType = text(14),
+                  !title.isEmpty,
+                  !articleURL.isEmpty,
+                  !publishedAt.isEmpty,
+                  !enclosureURL.isEmpty,
+                  mimeType.lowercased().hasPrefix("audio/") else {
+                continue
+            }
+            let readingTimeRaw = max(0, sqlite3_column_int64(statement, 9))
+            let readingTime = UInt32(clamping: readingTimeRaw)
+            let row = LegacyPlaybackArticleImport(
+                articleID: articleID,
+                feedID: feedID,
+                title: title,
+                url: articleURL,
+                commentsURL: text(4) ?? "",
+                publishedAt: publishedAt,
+                isRead: (text(6) ?? "").lowercased() == "read",
+                isStarred: sqlite3_column_int(statement, 7) != 0,
+                rawHTMLContent: text(8) ?? "",
+                readingTimeMinutes: readingTime,
+                preview: text(10) ?? "",
+                imageURL: text(11),
+                enclosureID: enclosureID,
+                enclosureURL: enclosureURL,
+                enclosureMimeType: mimeType
+            )
+            grouped[articleID, default: []].append(row)
+        }
+
+        return grouped.values.compactMap { rows in
+            rows.count == 1 ? rows[0] : nil
+        }.sorted { $0.articleID < $1.articleID }
+    }
+
+    static func readLegacyAttachmentArticleIDs(at url: URL) -> [Int64: Int64] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        var connection: OpaquePointer?
+        let result = sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil)
+        guard result == SQLITE_OK, let db = connection else {
+            if connection != nil { sqlite3_close(connection) }
+            return [:]
+        }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT a.attachmentID,a.newsID FROM attachments a INNER JOIN news n ON n.newsID=a.newsID",
+            -1, &statement, nil) == SQLITE_OK else {
+            sqlite3_finalize(statement)
+            return [:]
+        }
+        defer { sqlite3_finalize(statement) }
+        var mapping: [Int64: Int64] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let enclosureID = sqlite3_column_int64(statement, 0)
+            let articleID = sqlite3_column_int64(statement, 1)
+            if enclosureID > 0 && articleID > 0 { mapping[enclosureID] = articleID }
+        }
+        return mapping
+    }
+
     static func parseDownloadImports(
         _ values: [String: String],
         audioCache: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
     ) -> [LegacyDownloadImport] {
         let root = audioCache.standardizedFileURL.path + "/"
         return values.compactMap { key, value in
@@ -341,9 +528,95 @@ enum LegacyStateDiscovery {
                   source.deletingPathExtension().lastPathComponent.hasPrefix(audioFilePrefix),
                   (try? source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
                   fileManager.isReadableFile(atPath: source.path) else { return nil }
-            return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source)
+            return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source, articleID: articleIDs[enclosureID])
         }
         .sorted { $0.enclosureID < $1.enclosureID }
+    }
+
+    /// Mirror Flutter AudioDownloadService.getDownloadedAudios(): files named
+    /// audio_<positiveEnclosureID>_<epochMilliseconds>[.extension] are also
+    /// discoverable without surviving secure-storage download-path keys.
+    /// A positive enclosure ID alone is not sufficient to fabricate an article:
+    /// the Core must still resolve the enclosure before accepting the import.
+    static func discoverDownloadFiles(
+        audioCache: URL,
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
+    ) -> [LegacyDownloadImport] {
+        guard let candidates = try? fileManager.contentsOfDirectory(
+            at: audioCache,
+            includingPropertiesForKeys: [
+                .isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey
+            ],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var newest: [Int64: (file: URL, modified: Date)] = [:]
+        for file in candidates {
+            let name = file.lastPathComponent
+            guard name.hasPrefix(audioFilePrefix) else { continue }
+            let suffix = String(name.dropFirst(audioFilePrefix.count))
+            guard let underscore = suffix.firstIndex(of: "_"),
+                  let enclosureID = Int64(suffix[..<underscore]),
+                  enclosureID > 0 else { continue }
+            let remainder = suffix[suffix.index(after: underscore)...]
+            let timestamp = remainder.prefix(while: { $0.isNumber })
+            let extensionSuffix = String(remainder.dropFirst(timestamp.count))
+            guard !timestamp.isEmpty,
+                  timestamp.count >= 10,
+                  timestamp.count <= 17,
+                  Int64(timestamp) != nil,
+                  (extensionSuffix.isEmpty ||
+                   (extensionSuffix.first == "." &&
+                    extensionSuffix.dropFirst().count >= 1 &&
+                    extensionSuffix.dropFirst().count <= 8 &&
+                    extensionSuffix.dropFirst().allSatisfy { $0.isASCII && $0.isLetter || $0.isNumber })) else {
+                continue
+            }
+
+            guard let properties = try? file.resourceValues(forKeys: [
+                .isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey
+            ]), properties.isRegularFile == true,
+                properties.isSymbolicLink != true,
+                fileManager.isReadableFile(atPath: file.path) else { continue }
+            let modified = properties.contentModificationDate ?? .distantPast
+            if let previous = newest[enclosureID], previous.modified >= modified {
+                continue
+            }
+            newest[enclosureID] = (file, modified)
+        }
+
+        return newest.map { id, entry in
+            LegacyDownloadImport(
+                enclosureID: id,
+                sourceFile: entry.file,
+                articleID: articleIDs[id]
+            )
+        }.sorted { $0.enclosureID < $1.enclosureID }
+    }
+
+    /// Combine the legacy Keychain index with Flutter's actual on-disk source.
+    /// A real file under audio_cache wins over a stale absolute Keychain path.
+    static func mergeDownloadImports(
+        _ values: [String: String],
+        audioCache: URL,
+        fileManager: FileManager = .default,
+        articleIDs: [Int64: Int64] = [:]
+    ) -> [LegacyDownloadImport] {
+        var byID = Dictionary(
+            uniqueKeysWithValues: parseDownloadImports(
+                values, audioCache: audioCache, fileManager: fileManager,
+                articleIDs: articleIDs
+            ).map { ($0.enclosureID, $0) }
+        )
+        for record in discoverDownloadFiles(
+            audioCache: audioCache, fileManager: fileManager, articleIDs: articleIDs
+        ) {
+            // The filesystem scanner handles duplicate historical downloads,
+            // choosing the most recently modified file as Flutter does.
+            byID[record.enclosureID] = record
+        }
+        return byID.values.sorted { $0.enclosureID < $1.enclosureID }
     }
 
     static func parseFeedOpenInMinifluxImports(

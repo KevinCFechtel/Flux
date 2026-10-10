@@ -509,6 +509,25 @@ pub struct ContinueListeningItem {
     pub local_file: Option<String>,
 }
 #[derive(uniffi::Record)]
+pub struct LegacyLocalPlaybackArticle {
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub url: String,
+    pub comments_url: String,
+    pub published_at: String,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub raw_html_content: String,
+    pub reading_time_minutes: u32,
+    pub preview: String,
+    pub image_url: Option<String>,
+    pub enclosure_id: i64,
+    pub enclosure_url: String,
+    pub enclosure_mime_type: String,
+}
+
+#[derive(uniffi::Record)]
 pub struct LegacyPlaybackImport {
     pub article_id: i64,
     pub position_ms: u64,
@@ -520,6 +539,11 @@ pub struct LegacyPlaybackImportResult {
     pub skipped_missing: u32,
     pub skipped_ambiguous: u32,
     pub already_present: u32,
+}
+#[derive(uniffi::Record)]
+pub struct LegacyMediaRepairResult {
+    pub scanned: u32,
+    pub recovered_artworks: u32,
 }
 #[derive(uniffi::Enum)]
 pub enum LegacyDownloadImportOutcome {
@@ -1262,6 +1286,52 @@ impl Flux {
     ) -> Result<(), FluxError> {
         self.core
             .download_finished(enclosure_id, &local_file, file_size_bytes)
+            .map_err(map_error)
+    }
+    pub fn repair_legacy_download_metadata(&self) -> Result<LegacyMediaRepairResult, FluxError> {
+        let (scanned, recovered_artworks) = self.core.repair_legacy_download_metadata()
+            .map_err(map_error)?;
+        Ok(LegacyMediaRepairResult { scanned, recovered_artworks })
+    }
+    pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, FluxError> {
+        self.core.restore_legacy_playback_article(article_id).map_err(map_error)
+    }
+    pub fn restore_legacy_local_playback_article(
+        &self,
+        snapshot: LegacyLocalPlaybackArticle,
+    ) -> Result<bool, FluxError> {
+        let article = domain::Article {
+            id: snapshot.article_id,
+            feed_id: snapshot.feed_id,
+            title: snapshot.title,
+            url: snapshot.url,
+            comments_url: snapshot.comments_url,
+            published_at: snapshot.published_at,
+            is_read: snapshot.is_read,
+            is_starred: snapshot.is_starred,
+            raw_html_content: snapshot.raw_html_content,
+            reading_time_minutes: snapshot.reading_time_minutes,
+            preview: snapshot.preview,
+            image_url: snapshot.image_url,
+        };
+        let enclosure = domain::Enclosure {
+            id: snapshot.enclosure_id,
+            article_id: snapshot.article_id,
+            url: snapshot.enclosure_url,
+            mime_type: snapshot.enclosure_mime_type,
+            size_bytes: None,
+            remote_media_progression_seconds: 0,
+        };
+        self.core
+            .restore_legacy_local_playback_article(&article, &enclosure)
+            .map_err(map_error)
+    }
+    pub fn restore_legacy_media_article(
+        &self,
+        article_id: i64,
+        enclosure_id: i64,
+    ) -> Result<bool, FluxError> {
+        self.core.restore_legacy_media_article(article_id, enclosure_id)
             .map_err(map_error)
     }
     pub fn import_legacy_download(

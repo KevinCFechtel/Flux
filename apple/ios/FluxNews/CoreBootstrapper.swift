@@ -322,6 +322,61 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func restoreLegacyMediaArticle(articleID: Int64, enclosureID: Int64) async -> Result<Bool, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.restoreLegacyMediaArticle(articleId: articleID, enclosureId: enclosureID) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
+    func restoreLegacyPlaybackArticle(articleID: Int64) async -> Result<Bool, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.restoreLegacyPlaybackArticle(articleId: articleID) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
+    func restoreLegacyLocalPlaybackArticle(
+        _ snapshot: LegacyPlaybackArticleImport
+    ) async -> Result<Bool, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        let legacy = LegacyLocalPlaybackArticle(
+            articleId: snapshot.articleID,
+            feedId: snapshot.feedID,
+            title: snapshot.title,
+            url: snapshot.url,
+            commentsUrl: snapshot.commentsURL,
+            publishedAt: snapshot.publishedAt,
+            isRead: snapshot.isRead,
+            isStarred: snapshot.isStarred,
+            rawHtmlContent: snapshot.rawHTMLContent,
+            readingTimeMinutes: snapshot.readingTimeMinutes,
+            preview: snapshot.preview,
+            imageUrl: snapshot.imageURL,
+            enclosureId: snapshot.enclosureID,
+            enclosureUrl: snapshot.enclosureURL,
+            enclosureMimeType: snapshot.enclosureMimeType
+        )
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.restoreLegacyLocalPlaybackArticle(snapshot: legacy) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
+    func repairLegacyDownloadMetadata() async -> Result<LegacyMediaRepairResult, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.repairLegacyDownloadMetadata() }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
     func importLegacyDownload(
         enclosureID: Int64,
         localFile: String,

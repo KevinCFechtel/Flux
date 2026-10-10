@@ -142,7 +142,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testPlaybackMigrationTreatsImportedAlreadyPresentAndAmbiguousAsTerminal() {
+    func testPlaybackMigrationTreatsImportedAndAlreadyPresentAsTerminalButAmbiguousAsRetryable() {
         XCTAssertEqual(
             IOSLegacyMigrationCoordinator.playbackMigrationOutcome(
                 for: LegacyPlaybackImportResult(
@@ -174,7 +174,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                     alreadyPresent: 0
                 )
             ),
-            .imported
+            .retryableFailure
         )
     }
 
@@ -191,6 +191,249 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             ),
             .retryableFailure
         )
+    }
+
+    @MainActor
+    func testPlaybackMigrationPrefersSafeLocalRestoreOverRemoteFetch() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(
+            server: "https://legacy.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let (bootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: defaults
+        )
+        markAccountAsMigrated(account, defaults: defaults)
+
+        let snapshot = LegacyPlaybackArticleImport(
+            articleID: 10,
+            feedID: 100,
+            title: "Episode",
+            url: "https://example.test/10",
+            commentsURL: "",
+            publishedAt: "2026-01-01T00:00:00Z",
+            isRead: true,
+            isStarred: false,
+            rawHTMLContent: "",
+            readingTimeMinutes: 0,
+            preview: "",
+            imageURL: nil,
+            enclosureID: 1000,
+            enclosureURL: "https://cdn.test/10.mp3",
+            enclosureMimeType: "audio/mpeg"
+        )
+        var localRestores = 0
+        var remoteRestores = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyPlaybackReader: {
+                [.init(articleID: 10, positionMs: 12_345)]
+            },
+            legacyPlaybackArticleReader: { ids in
+                XCTAssertEqual(ids, [10])
+                return [snapshot]
+            },
+            legacyDownloadReader: {
+                [try! self.makeLegacyDownload(enclosureID: 1000)]
+            },
+            legacyPlaybackLocalRestorer: { received in
+                localRestores += 1
+                XCTAssertEqual(received, snapshot)
+                return .success(true)
+            },
+            legacyPlaybackRemoteRestorer: { _ in
+                remoteRestores += 1
+                return .success(true)
+            },
+            legacyPlaybackImporter: { records in
+                XCTAssertEqual(records.map(\.articleId), [10])
+                return .success(
+                    LegacyPlaybackImportResult(
+                        imported: 1,
+                        skippedMissing: 0,
+                        skippedAmbiguous: 0,
+                        alreadyPresent: 0
+                    )
+                )
+            }
+        )
+
+        XCTAssertEqual(await coordinator.migratePlaybackProgressIfNeeded(), .imported)
+        XCTAssertEqual(localRestores, 1)
+        XCTAssertEqual(remoteRestores, 0)
+        XCTAssertTrue(
+            defaults.bool(
+                forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"
+            )
+        )
+    }
+
+    @MainActor
+    func testPlaybackRemote404WithoutDownloadIsDiscardedAndCompletesGreen() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(
+            server: "https://legacy.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let (bootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: defaults
+        )
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.legacyMigration.account.v1.completed"
+        )
+
+        var remoteRestores = 0
+        var importedRecords: [[Int64]] = []
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyPlaybackReader: {
+                [.init(articleID: 53, positionMs: 9_000)]
+            },
+            legacyPlaybackArticleReader: { _ in [] },
+            legacyDownloadReader: { [] },
+            legacyPlaybackRemoteRestorer: { articleID in
+                XCTAssertEqual(articleID, 53)
+                remoteRestores += 1
+                return .success(false)
+            },
+            legacyPlaybackImporter: { records in
+                importedRecords.append(records.map(\.articleId))
+                return .success(
+                    LegacyPlaybackImportResult(
+                        imported: 0,
+                        skippedMissing: 0,
+                        skippedAmbiguous: 0,
+                        alreadyPresent: 0
+                    )
+                )
+            }
+        )
+
+        XCTAssertEqual(await coordinator.migratePlaybackProgressIfNeeded(), .imported)
+        XCTAssertEqual(remoteRestores, 1)
+        XCTAssertEqual(importedRecords, [[]])
+        XCTAssertTrue(
+            defaults.bool(
+                forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"
+            )
+        )
+        let summary = try XCTUnwrap(coordinator.migrationSummary())
+        XCTAssertTrue(summary.playbackCompleted)
+        XCTAssertTrue(summary.playbackDetails.contains("1 old playback position discarded"))
+        XCTAssertTrue(summary.playbackDetails.contains("no local download"))
+        XCTAssertNil(
+            defaults.dictionary(
+                forKey: "FluxNews.iOS.legacyMigration.playback.remoteRetryAfter.v1"
+            )
+        )
+    }
+
+    @MainActor
+    func testPlaybackRemote404WithLegacyDownloadRemainsRetryable() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(
+            server: "https://legacy.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let (bootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: defaults
+        )
+        markAccountAsMigrated(account, defaults: defaults)
+
+        let download = try makeLegacyDownload(enclosureID: 5300)
+        var remoteRestores = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyPlaybackReader: {
+                [.init(articleID: 53, positionMs: 9_000)]
+            },
+            legacyPlaybackArticleReader: { _ in [] },
+            legacyDownloadReader: {
+                [LegacyDownloadImport(
+                    enclosureID: download.enclosureID,
+                    sourceFile: download.sourceFile,
+                    articleID: 53
+                )]
+            },
+            legacyPlaybackRemoteRestorer: { articleID in
+                XCTAssertEqual(articleID, 53)
+                remoteRestores += 1
+                return .success(false)
+            },
+            legacyPlaybackImporter: { _ in
+                .success(
+                    LegacyPlaybackImportResult(
+                        imported: 0,
+                        skippedMissing: 1,
+                        skippedAmbiguous: 0,
+                        alreadyPresent: 0
+                    )
+                )
+            }
+        )
+
+        XCTAssertEqual(
+            await coordinator.migratePlaybackProgressIfNeeded(),
+            .retryableFailure
+        )
+        XCTAssertEqual(remoteRestores, 1)
+        XCTAssertEqual(
+            await coordinator.migratePlaybackProgressIfNeeded(),
+            .retryableFailure
+        )
+        XCTAssertEqual(remoteRestores, 1)
+        let retryState = defaults.dictionary(
+            forKey: "FluxNews.iOS.legacyMigration.playback.remoteRetryAfter.v1"
+        ) as? [String: Double]
+        XCTAssertNotNil(retryState?["53"])
+        XCTAssertFalse(
+            defaults.bool(
+                forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"
+            )
+        )
+    }
+
+    @MainActor
+    func testIOSMigrationSummaryRemembersManuallySkippedPlaybackReasons() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.account.v1.completed")
+        for key in [
+            "mediaSettings.v1", "feedPreferences.v1", "globalPreferences.v1",
+            "settingsFollowup.v2.local", "settingsFollowup.v2.core",
+            "settingsFollowup.v2.startup", "toolbar.v1", "widgetDefaults.v1",
+        ] {
+            defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.\(key).completed")
+        }
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.verified.v2")
+        defaults.set("79 missing article(s)", forKey: "FluxNews.iOS.legacyMigration.playback.pendingReason")
+        let coordinator = IOSLegacyMigrationCoordinator(bootstrapper: bootstrapper, defaults: defaults)
+        XCTAssertTrue(coordinator.migrationSummary()?.canFinishWithSkippedItems == true)
+        XCTAssertTrue(coordinator.finishMigrationWithSkippedItems())
+        let summary = try XCTUnwrap(coordinator.migrationSummary())
+        XCTAssertTrue(summary.completed)
+        XCTAssertTrue(summary.acknowledged)
+        XCTAssertEqual(summary.completionKind, "completed_with_skipped_items")
+        XCTAssertEqual(summary.playbackDetails, "79 missing article(s)")
+        XCTAssertFalse(coordinator.finishMigrationWithSkippedItems())
     }
 
     @MainActor
@@ -686,8 +929,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(first, .retryableFailure)
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
         let second = await awaitPlaybackOutcome(coordinator)
-        XCTAssertEqual(second, .imported)
-        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
+        XCTAssertEqual(second, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.playback.v1.completed"))
     }
 
     @MainActor
@@ -1196,6 +1439,29 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: try legacyDownloadDestination(32, under: mediaRoot).path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: record.sourceFile.path))
+    }
+
+    @MainActor
+    func testOldCompletedDownloadMarkerIsRecheckedOnlyOnce() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed")
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyDownloadReader: { reads += 1; return [] },
+            mediaRootProvider: { nil }
+        )
+        let first = await coordinator.migrateDownloadsIfNeeded()
+        XCTAssertEqual(first, .imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.verified.v2"))
+        let second = await coordinator.migrateDownloadsIfNeeded()
+        XCTAssertEqual(second, .alreadyCompleted)
+        XCTAssertEqual(reads, 1)
     }
 
     @MainActor

@@ -1052,6 +1052,114 @@ impl FluxCore {
         self.store
             .download_finished(enclosure_id, local_file, file_size_bytes)
     }
+    /// Rehydrate a historical playback article only when Miniflux identifies
+    /// exactly one audio enclosure, preserving the Core's ambiguity policy.
+    /// `Ok(false)` is reserved for confirmed remote absence (HTTP 404/410), so
+    /// platform migration can distinguish stale progress from unresolved data.
+    pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("legacy playback article ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self.sync_gate.lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            if self.store.enclosures_for_article(article_id)?.iter()
+                .any(|e| e.enclosure.mime_type.to_ascii_lowercase().starts_with("audio/")) {
+                return Ok(true);
+            }
+            let remote = match self.remote.fetch_article_by_id(article_id) {
+                Ok(remote) => remote,
+                Err(error) if matches!(error.http_status(), Some(404 | 410)) => return Ok(false),
+                Err(error) => return Err(error),
+            };
+            if remote.article.id != article_id {
+                return Err(CoreError::data("legacy playback article identity mismatch"));
+            }
+            let audios = remote.enclosures.iter()
+                .filter(|e| e.article_id == article_id
+                    && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
+                .collect::<Vec<_>>();
+            if audios.len() != 1 {
+                return Err(CoreError::data(
+                    "legacy playback article does not have exactly one audio enclosure",
+                ));
+            }
+            self.store.restore_legacy_media_article(
+                &remote.article, &remote.enclosures, audios[0].id,
+            )
+        });
+        self.diagnostics.flush();
+        result
+    }
+
+    /// Rehydrate a historical playback article from a platform-verified local
+    /// legacy snapshot without contacting Miniflux. The Store preserves native
+    /// rows and requires the legacy feed to still belong to the current catalog.
+    pub fn restore_legacy_local_playback_article(
+        &self,
+        article: &domain::Article,
+        enclosure: &Enclosure,
+    ) -> Result<bool, CoreError> {
+        if article.id <= 0 || enclosure.id <= 0 || enclosure.article_id != article.id {
+            return Err(CoreError::data("invalid legacy local playback snapshot"));
+        }
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .restore_legacy_local_playback_article(article, enclosure)
+    }
+
+    /// Hydrate a historical, read article for a verified legacy download.
+    /// Never fetch arbitrary URLs and never overwrite native article state.
+    /// Missing remote entries or mismatched enclosure IDs remain retryable.
+    pub fn restore_legacy_media_article(
+        &self,
+        article_id: i64,
+        enclosure_id: i64,
+    ) -> Result<bool, CoreError> {
+        if article_id <= 0 || enclosure_id <= 0 {
+            return Err(CoreError::data("legacy media IDs must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self.sync_gate.lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            if let Some(existing) = self.store.enclosure(enclosure_id)? {
+                return Ok(existing.enclosure.article_id == article_id);
+            }
+            let remote = match self.remote.fetch_article_by_id(article_id) {
+                Ok(remote) => remote,
+                Err(error) if matches!(error.http_status(), Some(404 | 410)) => {
+                    tracing::info!(target: "migration", "legacy media article unavailable article_id={article_id}");
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
+            };
+            if remote.article.id != article_id {
+                tracing::warn!(target: "migration", "legacy media article identity mismatch article_id={article_id}");
+                return Ok(false);
+            }
+            let restored = self.store.restore_legacy_media_article(
+                &remote.article,
+                &remote.enclosures,
+                enclosure_id,
+            )?;
+            tracing::info!(target: "migration",
+                "legacy media hydration article_id={} enclosure_id={} restored={}",
+                article_id, enclosure_id, restored);
+            Ok(restored)
+        });
+        self.diagnostics.flush();
+        result
+    }
+
+    pub fn repair_legacy_download_metadata(&self) -> Result<(u32, u32), CoreError> {
+        let _sync = self.sync_gate.lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.repair_legacy_download_metadata()
+    }
+
     /// Registers a verified legacy file copied by a platform adapter. Unlike
     /// normal transfer completion, this never replaces existing Core state.
     pub fn import_legacy_download(

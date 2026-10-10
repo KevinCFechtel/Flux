@@ -8,20 +8,37 @@ DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-8X9VDP43J9}"
 CONFIGURATION="Release"
 BUILD_NUMBER=""
+VERSION_NAME=""
 
 usage() {
   cat <<'EOF'
-Usage: archive.sh [--configuration "Release|Upgrade Test"] [--build-number BUILD_NUMBER]
+Usage: archive.sh [developmentRelease|productionRelease] [buildNumber versionName]
+       archive.sh [--configuration "Release|Upgrade Test"] [--build-number BUILD_NUMBER] [--version-name VERSION_NAME]
 
 Examples:
   archive.sh
   archive.sh --build-number 115
-  archive.sh --configuration "Upgrade Test" --build-number 115
+  archive.sh productionRelease 3001 3.0.0
+  archive.sh developmentRelease 3001 3.0.0
+  archive.sh --configuration "Upgrade Test" --build-number 3001 --version-name 3.0.0
 
 Release archives the parallel native-development identity.
 Upgrade Test archives the production identity used for Flutter-to-native upgrade validation.
 EOF
 }
+
+if [[ $# -gt 0 && "${1}" != -* ]]; then
+  case "$1" in
+    developmentRelease) CONFIGURATION=Release ;;
+    productionRelease) CONFIGURATION="Upgrade Test" ;;
+    *) echo "Unknown archive variant: $1" >&2; exit 2 ;;
+  esac
+  shift
+  if [[ $# -gt 0 && "${1}" != -* ]]; then
+    [[ $# -ge 2 && "${2}" != -* ]] || { echo "Pass buildNumber and versionName together." >&2; exit 2; }
+    BUILD_NUMBER="$1"; VERSION_NAME="$2"; shift 2
+  fi
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +47,9 @@ while [[ $# -gt 0 ]]; do
       CONFIGURATION="$2"
       shift 2
       ;;
+    --version-name)
+      [[ $# -ge 2 ]] || { echo "Missing version name." >&2; exit 2; }
+      VERSION_NAME="$2"; shift 2 ;;
     --build-number)
       [[ $# -ge 2 ]] || { echo "Missing value for --build-number." >&2; exit 2; }
       BUILD_NUMBER="$2"
@@ -71,10 +91,9 @@ esac
 
 ARCHIVE_PATH="${ARCHIVE_PATH:-${DEFAULT_ARCHIVE_PATH}}"
 
-if [[ -n "${BUILD_NUMBER}" && ! "${BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Build number must be a positive integer: ${BUILD_NUMBER}" >&2
-  exit 1
-fi
+source "${SCRIPT_DIR}/versioning.sh"
+[[ -z "${BUILD_NUMBER}" || -n "${VERSION_NAME}" ]] || { echo "Pass versionName with buildNumber." >&2; exit 2; }
+flux_ios_prepare_version_settings "${BUILD_NUMBER}" "${VERSION_NAME}"
 
 for command_name in awk codesign plutil xcodebuild /usr/libexec/PlistBuddy; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Required command missing: ${command_name}" >&2; exit 1; }
@@ -104,6 +123,7 @@ fi
 
 configured_build_number="$(awk -F ' = ' '$1 ~ /^[[:space:]]*CURRENT_PROJECT_VERSION$/ { print $2; exit }' <<<"${build_settings}")"
 [[ -n "${BUILD_NUMBER}" ]] || BUILD_NUMBER="${configured_build_number}"
+flux_ios_prepare_version_settings "${BUILD_NUMBER}" "${VERSION_NAME}"
 [[ "${BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]] || {
   echo "Configured build number is not a positive integer: ${BUILD_NUMBER:-<missing>}" >&2
   exit 1
@@ -121,7 +141,7 @@ xcodebuild_args=(
   -archivePath "${ARCHIVE_PATH}"
   -allowProvisioningUpdates
   CODE_SIGN_STYLE=Automatic
-  CURRENT_PROJECT_VERSION="${BUILD_NUMBER}"
+  "${IOS_VERSION_SETTINGS[@]}"
   SWIFT_COMPILATION_MODE=wholemodule
 )
 if [[ -n "${DEVELOPMENT_TEAM:-}" ]]; then
@@ -154,10 +174,18 @@ archived_widget_bundle_identifier="$(plutil -extract CFBundleIdentifier raw "${a
 }
 
 archived_build_number="$(plutil -extract CFBundleVersion raw "${archived_info_plist}")"
+archived_version_name="$(plutil -extract CFBundleShortVersionString raw "${archived_info_plist}")"
 [[ "${archived_build_number}" == "${BUILD_NUMBER}" ]] || {
   echo "Archived build number mismatch: ${archived_build_number} (expected ${BUILD_NUMBER})." >&2
   exit 1
 }
+
+if [[ -n "${VERSION_NAME}" && "${archived_version_name}" != "${VERSION_NAME}" ]]; then
+  echo "Archived version name mismatch: ${archived_version_name} (expected ${VERSION_NAME})." >&2; exit 1
+fi
+widget_version_name="$(plutil -extract CFBundleShortVersionString raw "${archived_widget_info_plist}")"
+widget_build_number="$(plutil -extract CFBundleVersion raw "${archived_widget_info_plist}")"
+[[ "${widget_version_name}" == "${archived_version_name}" && "${widget_build_number}" == "${archived_build_number}" ]] || { echo "Widget version/build mismatch." >&2; exit 1; }
 
 archived_package_type="$(plutil -extract CFBundlePackageType raw "${archived_info_plist}")"
 [[ "${archived_package_type}" == "APPL" ]] || {
@@ -186,7 +214,14 @@ trap 'rm -f -- "${ENTITLEMENTS_FILE}"' EXIT
 
 verify_app_group_entitlement() {
   local component="$1"
-  codesign -d --entitlements - "${component}" > "${ENTITLEMENTS_FILE}" 2>/dev/null
+  if ! codesign -d --entitlements - --xml "${component}" > "${ENTITLEMENTS_FILE}" 2>/dev/null; then
+    echo "Could not extract signed entitlements for ${component}." >&2
+    exit 1
+  fi
+  if [[ ! -s "${ENTITLEMENTS_FILE}" ]] || ! plutil -lint "${ENTITLEMENTS_FILE}" >/dev/null 2>&1; then
+    echo "Signed entitlements for ${component} are missing or not a valid XML plist." >&2
+    exit 1
+  fi
   local actual_group
   actual_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${ENTITLEMENTS_FILE}" 2>/dev/null || true)"
   [[ "${actual_group}" == "${EXPECTED_APP_GROUP_IDENTIFIER}" ]] || {
@@ -206,6 +241,7 @@ echo "${IDENTITY_NAME} archive: ${ARCHIVE_PATH}"
 echo "Host Bundle ID: ${archived_bundle_identifier}"
 echo "Widget Bundle ID: ${archived_widget_bundle_identifier}"
 echo "App Group: ${EXPECTED_APP_GROUP_IDENTIFIER}"
+echo "Version: ${archived_version_name}"
 echo "Build number: ${archived_build_number}"
 echo "Package type: ${archived_package_type}"
 echo "Icon name: ${archived_icon_name}"

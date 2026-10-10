@@ -1,5 +1,13 @@
 # Phase D1.3: Production Upgrade Feasibility
 
+> **Status: HISTORICAL FEASIBILITY PROOF — FINAL D9 PRODUCTION UPGRADE ACCEPTED 10 OCTOBER 2026**
+>
+> This document preserves the original feasibility/probe contract. The final
+> productive Flutter-to-native TestFlight upgrade was later accepted under D9;
+> current migration behavior and acceptance status live in
+> `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` and
+> `PHASE_D_NATIVE_IOS_IPADOS.md`.
+
 ## Verified legacy contract
 
 The historical FluxNews revision `8f8161787d99b6bedb3d17404bb370b53c869aae`
@@ -96,21 +104,67 @@ The macOS scripts under `apple/macos/Build/` and these iOS scripts all ultimatel
 use `apple/Build/build-uniffi.sh`; macOS additionally stages its generated Swift
 files and embeds the macOS library for its app target.
 
-## NativeDev TestFlight distribution
+## Versioned iOS builds (aligned with Android)
 
-Archive and export a physical-device nativeDev build with:
+The iOS `build-app.sh` and `archive.sh` scripts accept the same positional
+`variant buildNumber versionName` pattern as Android. Both use
+`apple/ios/Build/versioning.sh` for validation and pass Xcode build-setting
+overrides rather than rewriting source `Info.plist` files. The app and widget
+both resolve `CFBundleShortVersionString` from `MARKETING_VERSION` and
+`CFBundleVersion` from `CURRENT_PROJECT_VERSION`.
 
 ```bash
-DEVELOPMENT_TEAM=<your-team-id> apple/ios/Build/archive.sh --build-number 3
-apple/ios/Build/export-testflight.sh
+# Build an installable production-identity upgrade test:
+./apple/ios/Build/build-app.sh productionRelease 3001 3.0.0 --destination 'generic/platform=iOS'
+
+# Create a signed archive with the production Flutter bundle identity:
+./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
+
+# Parallel nativeDev application/archive:
+./apple/ios/Build/build-app.sh developmentRelease 3001 3.0.0 --destination 'generic/platform=iOS'
+./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
 ```
 
-`export-testflight.sh` writes the IPA locally for manual upload with Apple's
-Transporter app; the repository does not contain a direct-upload script.
+The iOS build scripts accept positive decimal build numbers, including the existing
+Flutter production scheme (e.g. `2026092601` from `FluxNews/pubspec.yaml`).
+App Store Connect remains authoritative for upload acceptance. Build number
+`3001` is only an example and may be older than the installed Flutter build;
+for a production in-place upgrade prefer the next unused higher value, such as
+`2026101001`. The existing `--configuration`, `--build-number` and new
+`--version-name` flags remain usable. `Upgrade Test` still targets the
+production Flutter identity only for on-device migration validation, not
+automatic production App Store upload.
 
-The archive is written to `.build/Archives/FluxNews-nativeDev.xcarchive` and
-the exported IPA is written under `dist/TestFlightExport` by default.
-These generated directories are safe to delete. The archive and export scripts
-reject the production Bundle ID before distribution. NativeDev TestFlight can
-coexist with the Flutter production app, but it does not test Flutter-to-native
-migration; use the separate Upgrade-Test configuration for that validation.
+## Transporter / TestFlight distribution
+
+Both archive identities can now be exported through the same guarded script.
+The export does not submit the app for review, upload the IPA, or publish a
+release. Transporter uploads the resulting local IPA to App Store Connect;
+use an internal TestFlight tester to validate the production Flutter upgrade.
+
+```bash
+# Existing Flutter production bundle ID, for a true in-place TestFlight upgrade:
+./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
+./apple/ios/Build/export-testflight.sh productionRelease
+# IPA: dist/ProductionExport/*.ipa
+
+# Separately installable development identity:
+./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
+./apple/ios/Build/export-testflight.sh developmentRelease
+# IPA: dist/TestFlightExport/*.ipa
+```
+
+Omitting the export variant remains backward compatible with NativeDev.
+The `--archive` and `--export-path` overrides remain supported for both
+identities, but the script refuses archives or exported IPAs whose app/widget
+Bundle IDs, display names or build/version numbers do not match their expected
+identity. It also checks the archived app and widget signatures and App Group
+entitlements before export. Export uses an App Store Connect distribution
+method with automatic signing and the configured Apple Developer team; matching
+distribution certificates/profiles, approved entitlements, and App Store Connect
+permissions are required.
+
+For migration acceptance, install the TestFlight version **over** an existing
+Flutter production installation without deleting the app. This release route
+is intended for TestFlight validation; public App Store rollout still requires
+separate review and release decisions.

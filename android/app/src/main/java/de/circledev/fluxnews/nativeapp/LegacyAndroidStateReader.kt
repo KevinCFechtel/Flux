@@ -22,6 +22,53 @@ import org.json.JSONObject
  * It never initializes the plugin, opens legacy SQLite in place, or edits any legacy source.
  */
 internal class LegacyAndroidStateReader(private val context: Context) {
+    /**
+     * Productive E9 reader for the one retained account identity. This reuses the
+     * exact E1-F FlutterSecureStorage decoder and remains strictly read-only.
+     */
+    internal fun readAccountImport(): LegacyAndroidAccountReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidAccountReadResult.Absent
+        val secureValues = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!secureValues.readable) return LegacyAndroidAccountReadResult.Unavailable
+        return LegacyAndroidImportParsing.account(secureValues.values)
+            ?.let(LegacyAndroidAccountReadResult::Found)
+            ?: LegacyAndroidAccountReadResult.Absent
+    }
+
+    internal fun readSettingsImport(): LegacyAndroidSettingsReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidSettingsReadResult.Unavailable
+        val values = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!values.readable) return LegacyAndroidSettingsReadResult.Unavailable
+        return LegacyAndroidSettingsReadResult.Found(LegacyAndroidImportParsing.settings(values.values))
+    }
+
+    internal fun readPlaybackImports(): LegacyAndroidPlaybackReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidPlaybackReadResult.Unavailable
+        val secure = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!secure.readable) return LegacyAndroidPlaybackReadResult.Unavailable
+        val shared = context.getSharedPreferences(FLUTTER_SHARED_PREFERENCES, Context.MODE_PRIVATE).all
+            .mapNotNull { (key, value) -> (value as? String)?.let { key to it } }.toMap()
+        return LegacyAndroidPlaybackReadResult.Found(
+            LegacyAndroidImportParsing.playback(shared, secure.values),
+        )
+    }
+
+    internal fun readDownloadImports(): LegacyAndroidDownloadReadResult {
+        if (context.packageName != PRODUCTION_PACKAGE) return LegacyAndroidDownloadReadResult.Unavailable
+        val secure = LegacyFlutterSecureStorageReader(context).readAll()
+        if (!secure.readable) return LegacyAndroidDownloadReadResult.Unavailable
+        val database = inspectDatabase()
+        if (database.present && !database.readable) return LegacyAndroidDownloadReadResult.Unavailable
+        return LegacyAndroidDownloadReadResult.Found(
+            LegacyAndroidImportParsing.downloads(
+                secure.values,
+                File(context.filesDir, "audio_cache"),
+                database.attachmentIds,
+                database.attachmentArticleIds,
+            ),
+        )
+    }
+
     internal fun readProbe(): LegacyMigrationProbeResult {
         val before = LegacySourceFingerprints.capture(context)
         val aliasesBefore = legacyAliases()
@@ -68,6 +115,20 @@ internal class LegacyAndroidStateReader(private val context: Context) {
                 val attachmentIds = db.rawQuery("SELECT attachmentID FROM attachments", null).use { cursor ->
                     buildSet<Long> { while (cursor.moveToNext()) add(cursor.getLong(0)) }
                 }
+                // Read the association from the same read-only SQLite snapshot as
+                // the legacy enclosure IDs. Never infer an article ID from an enclosure ID.
+                val attachmentArticleIds = db.rawQuery(
+                    "SELECT a.attachmentID,a.newsID FROM attachments a INNER JOIN news n ON n.newsID=a.newsID",
+                    null,
+                ).use { cursor ->
+                    buildMap<Long, Long> {
+                        while (cursor.moveToNext()) {
+                            val enclosureId = cursor.getLong(0)
+                            val articleId = cursor.getLong(1)
+                            if (enclosureId > 0 && articleId > 0) put(enclosureId, articleId)
+                        }
+                    }
+                }
                 val relationshipsReadable = db.rawQuery(
                     "SELECT COUNT(*) FROM attachments INNER JOIN news ON attachments.newsID = news.newsID", null,
                 ).use { it.moveToFirst(); true }
@@ -84,6 +145,7 @@ internal class LegacyAndroidStateReader(private val context: Context) {
                     ).use { it.moveToFirst(); it.getInt(0) },
                     articleAttachmentRelationshipsReadable = relationshipsReadable,
                     attachmentIds = attachmentIds,
+                    attachmentArticleIds = attachmentArticleIds,
                 )
             }
         } catch (_: Exception) {
@@ -311,6 +373,7 @@ internal data class DatabaseEvidence(
     val audioAttachmentCount: Int? = null,
     val articleAttachmentRelationshipsReadable: Boolean = false,
     val attachmentIds: Set<Long> = emptySet(),
+    val attachmentArticleIds: Map<Long, Long> = emptyMap(),
 ) {
     companion object { fun absent() = DatabaseEvidence(false, false) }
 }
@@ -376,4 +439,267 @@ internal data class LegacyMigrationProbeResult(
         put("nonDestructive", JSONObject().put("sourceFingerprintsUnchanged", sourceFingerprintsUnchanged)
             .put("keystoreAliasesUnchanged", keystoreAliasesUnchanged))
     }.toString()
+}
+
+
+internal sealed interface LegacyAndroidAccountReadResult {
+    data object Absent : LegacyAndroidAccountReadResult
+    data object Unavailable : LegacyAndroidAccountReadResult
+    data class Found(val account: LegacyAndroidAccountImport) : LegacyAndroidAccountReadResult
+}
+
+internal data class LegacyAndroidDownloadImport(
+    val enclosureId: Long,
+    val sourceFile: File,
+    val articleId: Long? = null,
+)
+
+internal sealed interface LegacyAndroidDownloadReadResult {
+    data object Unavailable : LegacyAndroidDownloadReadResult
+    data class Found(val records: List<LegacyAndroidDownloadImport>) : LegacyAndroidDownloadReadResult
+}
+
+internal data class LegacyAndroidPlaybackProgressImport(
+    val articleId: Long,
+    val positionMs: ULong,
+)
+
+internal sealed interface LegacyAndroidPlaybackReadResult {
+    data object Unavailable : LegacyAndroidPlaybackReadResult
+    data class Found(val records: List<LegacyAndroidPlaybackProgressImport>) : LegacyAndroidPlaybackReadResult
+}
+
+internal sealed interface LegacyAndroidSettingsReadResult {
+    data object Unavailable : LegacyAndroidSettingsReadResult
+    data class Found(val settings: LegacyAndroidSettingsImport) : LegacyAndroidSettingsReadResult
+}
+
+internal data class LegacyAndroidSettingsImport(
+    val backgroundSyncEnabled: Boolean?,
+    val autoDownloadListeningList: Boolean?,
+    val unmeteredDownloadsOnly: Boolean?,
+    val retentionDays: Int?,
+    val deleteAfterPlayback: Boolean?,
+    val openInMinifluxFeedIds: List<Long>,
+    val local: LegacyAndroidLocalSettingsImport,
+    val widget: LegacyAndroidWidgetSeed?,
+)
+
+internal data class LegacyAndroidLocalSettingsImport(
+    val showArticleCount: Boolean?,
+    val hideEmptyNavigation: Boolean?,
+    val markReadOnScrollover: Boolean?,
+    val removeWhenRead: Boolean?,
+    val openArticleInReader: Boolean?,
+    val leadingFull: String?,
+    val leadingAdditional: String?,
+    val trailingFull: String?,
+    val trailingAdditional: String?,
+    val startupMode: Int?,
+    val startupCategoryId: Long?,
+    val startupFeedId: Long?,
+    val actionBar: List<String>?,
+)
+
+internal data class LegacyAndroidWidgetSeed(
+    val scope: String,
+    val scopeId: Long?,
+    val unreadOnly: Boolean,
+    val oldestFirst: Boolean,
+)
+
+internal data class LegacyAndroidAccountImport(
+    val serverUrl: String,
+    val apiKey: String,
+    val customHeaders: List<LegacyAndroidHeaderImport>,
+)
+
+internal data class LegacyAndroidHeaderImport(
+    val name: String,
+    val value: String,
+)
+
+/** Pure retained-state parsing kept separate from Android/Keystore access for regression tests. */
+internal object LegacyAndroidImportParsing {
+    fun downloads(
+        secure: Map<String, String>,
+        audioRoot: File,
+        knownLegacyEnclosureIds: Set<Long>,
+        articleIdsByEnclosureId: Map<Long, Long> = emptyMap(),
+    ): List<LegacyAndroidDownloadImport> {
+        val root = audioRoot.canonicalFile
+        fun verifiedImport(id: Long, file: File): LegacyAndroidDownloadImport? {
+            if (id <= 0L || id !in knownLegacyEnclosureIds) return null
+            val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
+            if (source.parentFile != root ||
+                !source.name.startsWith("audio_") ||
+                !source.isFile ||
+                !source.canRead() ||
+                source.length() <= 0L
+            ) return null
+            return LegacyAndroidDownloadImport(id, source, articleIdsByEnclosureId[id])
+        }
+
+        val keyed = secure.mapNotNull { (key, value) ->
+            val id = Regex("^audio_download_path_(\\d+)$").matchEntire(key)
+                ?.groupValues?.get(1)?.toLongOrNull()
+                ?: return@mapNotNull null
+            verifiedImport(id, File(value))
+        }
+
+        // Flutter's Downloads screen also treats audio_cache itself as source
+        // data. Old absolute sandbox paths can become stale across an upgrade,
+        // so scan only the validated legacy filename form as a read-only fallback.
+        val cached = root.listFiles()
+            ?.asSequence()
+            ?.filter(File::isFile)
+            ?.mapNotNull { file ->
+                val id = LegacyKeyParsing.attachmentIdFromAudioFile(file.name)
+                    ?: return@mapNotNull null
+                verifiedImport(id, file)
+            }
+            ?.toList()
+            .orEmpty()
+
+        return (keyed + cached)
+            .distinctBy { it.enclosureId }
+            .sortedBy { it.enclosureId }
+    }
+
+    fun playback(
+        sharedPreferences: Map<String, String>,
+        legacySecure: Map<String, String>,
+    ): List<LegacyAndroidPlaybackProgressImport> {
+        // Flutter's AudioProgressStore uses SharedPreferences first and only
+        // falls back to secure storage for article IDs absent there.
+        val combined = legacySecure + sharedPreferences
+        return combined.mapNotNull { (key, value) ->
+            val id = key.takeIf { it.startsWith("audio_progress_") }
+                ?.removePrefix("audio_progress_")?.toLongOrNull()?.takeIf { it > 0L }
+                ?: return@mapNotNull null
+            val position = value.trim().toULongOrNull()?.takeIf { it > 0uL }
+                ?: return@mapNotNull null
+            LegacyAndroidPlaybackProgressImport(id, position)
+        }.sortedBy { it.articleId }
+    }
+
+    private fun legacySwipe(raw: String?): String? = when (raw) {
+        "readUnread" -> "readUnread"
+        "bookmark" -> "starUnstar"
+        "open" -> "openOriginal"
+        "openMiniflux" -> "openMiniflux"
+        "openComments" -> "comments"
+        "share" -> "share"
+        "saveToThirdParty" -> "saveToService"
+        "downloadAudio" -> "downloadAudio"
+        "none" -> ""
+        else -> null
+    }
+
+    private fun legacyActionBar(values: Map<String, String>): List<String>? {
+        val selectedRaw = values["androidFloatingToolbarActions"] ?: return null
+        fun strings(raw: String): List<String>? = runCatching {
+            val array = org.json.JSONArray(raw)
+            List(array.length()) { array.getString(it) }
+        }.getOrNull()
+        val selected = strings(selectedRaw) ?: return null
+        val order = values["androidFloatingToolbarActionOrder"]?.let(::strings) ?: selected
+        val mapping = mapOf(
+            "search" to "search",
+            "newsStatus" to "toggleReadFilter",
+            "sortOrder" to "toggleSortOrder",
+            "markAsRead" to "markAllRead",
+            "markAsReadAndNext" to "markAllReadAndNext",
+            "podcasts" to "listeningList",
+            "settings" to "settings",
+        )
+        return (order + selected).distinct().filter { it in selected }
+            .mapNotNull(mapping::get).distinct()
+    }
+
+    private fun legacyWidgetSeed(values: Map<String, String>): LegacyAndroidWidgetSeed? {
+        val keys = setOf("widgetNewsStatus", "widgetUnreadOnly", "widgetFilterType", "widgetFilterId", "widgetSortOrder")
+        if (keys.none(values::containsKey)) return null
+        val oldStatus = values["widgetNewsStatus"]
+        val rawScope = values["widgetFilterType"] ?: when (oldStatus) {
+            "bookmarked" -> "bookmarked"
+            else -> "all"
+        }
+        val scope = when (rawScope) {
+            "bookmarked" -> "bookmarks"
+            "feed" -> "feed"
+            "category" -> "category"
+            else -> "all"
+        }
+        val scopeId = values["widgetFilterId"]?.toLongOrNull()?.takeIf { it > 0 }
+        val safeScope = if (scope in setOf("feed", "category") && scopeId == null) "all" else scope
+        val unread = when (values["widgetUnreadOnly"]) {
+            "true" -> true
+            "false" -> false
+            else -> oldStatus != "all" && oldStatus != "bookmarked"
+        }
+        return LegacyAndroidWidgetSeed(
+            scope = safeScope,
+            scopeId = if (safeScope == "all") null else scopeId,
+            unreadOnly = unread,
+            oldestFirst = values["widgetSortOrder"] == "Oldest first",
+        )
+    }
+
+    fun settings(values: Map<String, String>): LegacyAndroidSettingsImport {
+        fun boolean(key: String) = when (values[key]?.trim()) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
+        val interval = values["backgroundSyncIntervalMinutes"]?.trim()?.toIntOrNull()
+        val feedIds = runCatching {
+            val overrides = JSONObject(values["feedSettingsOverrides"] ?: "{}")
+            overrides.keys().asSequence().mapNotNull { key ->
+                val id = key.toLongOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+                val setting = overrides.optJSONObject(key) ?: return@mapNotNull null
+                if (setting.opt("openMinifluxEntry") is Number &&
+                    setting.optInt("openMinifluxEntry") == 1
+                ) id else null
+            }.sorted().toList()
+        }.getOrDefault(emptyList())
+        val local = LegacyAndroidLocalSettingsImport(
+            showArticleCount = boolean("multilineAppBarText"),
+            hideEmptyNavigation = boolean("showOnlyFeedCategoriesWithNewNews"),
+            markReadOnScrollover = boolean("markAsReadOnScrollOver"),
+            removeWhenRead = boolean("removeNewsFromListWhenRead"),
+            openArticleInReader = if (values["tabAction"] == "expand") true else null,
+            leadingFull = legacySwipe(values["rightSwipeAction"]),
+            leadingAdditional = legacySwipe(values["secondRightSwipeAction"]),
+            trailingFull = legacySwipe(values["leftSwipeAction"]),
+            trailingAdditional = legacySwipe(values["secondLeftSwipeAction"]),
+            startupMode = values["startupCategorie"]?.toIntOrNull()?.takeIf { it in 0..3 },
+            startupCategoryId = values["startupCategorieSelection"]?.toLongOrNull()?.takeIf { it > 0 },
+            startupFeedId = values["startupFeedSelection"]?.toLongOrNull()?.takeIf { it > 0 },
+            actionBar = legacyActionBar(values),
+        )
+        return LegacyAndroidSettingsImport(
+            backgroundSyncEnabled = interval?.takeIf { it >= 0 }?.let { it > 0 },
+            autoDownloadListeningList = boolean("autoDownloadAudioAfterSync"),
+            unmeteredDownloadsOnly = boolean("downloadAudioOnlyOnWifi"),
+            retentionDays = values["audioDownloadRetentionDays"]?.trim()?.toIntOrNull()
+                ?.takeIf { it in setOf(7, 30, 90) },
+            deleteAfterPlayback = boolean("deleteAudioAfterPlayback"),
+            openInMinifluxFeedIds = feedIds,
+            local = local,
+            widget = legacyWidgetSeed(values),
+        )
+    }
+
+    fun account(values: Map<String, String>): LegacyAndroidAccountImport? {
+        val serverUrl = values["minifluxURL"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        val apiKey = values["minifluxAPIKey"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        val headers = legacyCustomHeaders(values)
+            .toSortedMap()
+            .values
+            .mapNotNull { (name, value) ->
+                name.trim().takeIf(String::isNotEmpty)?.let { LegacyAndroidHeaderImport(it, value) }
+            }
+        return LegacyAndroidAccountImport(serverUrl, apiKey, headers)
+    }
 }
