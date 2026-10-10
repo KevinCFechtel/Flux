@@ -1264,6 +1264,9 @@ impl Flux {
             .download_finished(enclosure_id, &local_file, file_size_bytes)
             .map_err(map_error)
     }
+    pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, FluxError> {
+        self.core.restore_legacy_playback_article(article_id).map_err(map_error)
+    }
     pub fn restore_legacy_media_article(
         &self,
         article_id: i64,
