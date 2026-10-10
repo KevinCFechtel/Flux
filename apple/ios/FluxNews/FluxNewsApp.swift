@@ -17,6 +17,9 @@ struct FluxNewsApp: App {
     @StateObject private var bootstrapper = IOSAppRuntime.shared.bootstrapper
     @State private var newsreaderStore = NewsreaderStore()
     @StateObject private var articleListActionPreferences = IOSArticleListActionPreferences()
+    @State private var migrationSummary: IOSLegacyMigrationCoordinator.Summary?
+    @State private var showingMigrationSummary = false
+    @State private var migrationHiddenThisSession = false
 
     var body: some Scene {
         WindowGroup {
@@ -103,6 +106,12 @@ struct FluxNewsApp: App {
                     articleListActionPreferences.reloadFromDefaults()
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
+                    if !migrationHiddenThisSession,
+                       let summary = IOSAppRuntime.shared.legacyMigrationCoordinator.migrationSummary(),
+                       !summary.acknowledged {
+                        migrationSummary = summary
+                        showingMigrationSummary = true
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
@@ -137,10 +146,46 @@ struct FluxNewsApp: App {
                     articleListActionPreferences.reloadFromDefaults()
                             await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
+                            if !migrationHiddenThisSession,
+                               let summary = IOSAppRuntime.shared.legacyMigrationCoordinator.migrationSummary(),
+                               !summary.acknowledged {
+                                migrationSummary = summary
+                                showingMigrationSummary = true
+                            }
                         }
                     } else {
                         IOSAppRuntime.shared.mediaRuntime.sceneWillResignActive()
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
+                    }
+                }
+                .sheet(isPresented: $showingMigrationSummary) {
+                    if let summary = migrationSummary {
+                        IOSLegacyMigrationSummaryView(
+                            summary: summary,
+                            sync: {
+                                await newsreaderStore.syncManually()
+                                let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+                                _ = await coordinator.migratePlaybackProgressIfNeeded()
+                                _ = await coordinator.migrateDownloadsIfNeeded()
+                                migrationSummary = coordinator.migrationSummary()
+                            },
+                            close: {
+                                if summary.completed {
+                                    IOSAppRuntime.shared.legacyMigrationCoordinator.acknowledgeCompletedMigration()
+                                }
+                                migrationHiddenThisSession = true
+                                showingMigrationSummary = false
+                            },
+                            finishPartial: {
+                                let coordinator = IOSAppRuntime.shared.legacyMigrationCoordinator
+                                if coordinator.finishMigrationWithSkippedItems() {
+                                    migrationSummary = coordinator.migrationSummary()
+                                    migrationHiddenThisSession = true
+                                    showingMigrationSummary = false
+                                }
+                            }
+                        )
+                        .interactiveDismissDisabled()
                     }
                 }
         }
