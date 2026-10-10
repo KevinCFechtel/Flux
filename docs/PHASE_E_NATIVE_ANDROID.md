@@ -12,6 +12,12 @@
 
 Phase E replaces the existing Flutter Android client with a first-class native Kotlin Android client over the existing Rust Core and UniFFI boundary.
 
+> **Status-reading note:** E1-E7 sections preserve milestone-local wording from
+> the dates when later physical proofs were still deferred. The E9 section and
+> document header are authoritative for current replacement status; completed
+> E9 production-upgrade evidence supersedes those historical "pending/deferred"
+> statements.
+
 The target is not a Kotlin rewrite of Flux domain logic and not a visual copy of the iOS application.
 
 Phase E must:
@@ -377,7 +383,7 @@ Non-secret native preferences use one process-scoped Preferences DataStore (1.2.
 
 ### E1-F — Production-upgrade migration feasibility
 
-E1-F is implemented; physical production-upgrade acceptance remains pending. The isolated production-identity Migration Probe has a read-only native reader for the exact Flutter secure-storage format and for legacy database, playback, media, widget, and auto-backup discovery. It writes only a redacted cache report, compares legacy-source fingerprints and relevant Keystore aliases before/after, and has a signer/version-guarded in-place upgrade script. It performs no migration or new-Core/store write.
+E1-F is implemented. Its physical production-upgrade acceptance was deliberately deferred at this E1 checkpoint and was later completed through the E9 real-device production-upgrade pass. The isolated production-identity Migration Probe has a read-only native reader for the exact Flutter secure-storage format and for legacy database, playback, media, widget, and auto-backup discovery. It writes only a redacted cache report, compares legacy-source fingerprints and relevant Keystore aliases before/after, and has a signer/version-guarded in-place upgrade script. It performs no migration or new-Core/store write.
 
 On a production-identity test build installed over the current Flutter app, prove read-only access to:
 
@@ -412,12 +418,12 @@ it together with `android/Build/build-app.sh productionRelease` and shell syntax
 on Linux. The baseline pins JDK 17, Android SDK platform 36, Build Tools 36.0.0, NDK
 27.0.12077973, Rust 1.98.0 and the `aarch64-linux-android`/`x86_64-linux-android` targets.
 It does not start an emulator or run targeted E1-B through E1-F platform acceptance suites.
-Those remain targeted proofs; the physical E1-F production upgrade remains a mandatory E9
-gate.
+Those remain targeted proofs. The physical E1-F production-upgrade requirement was
+subsequently satisfied by the E9 real-device upgrade pass.
 
 Phase E1 COMPLETE. All nine E1 exit conditions are met: the production-identity emulator
-proof satisfies the read-only migration-spike condition, while its physical-device repetition
-remains deferred to E9. E2 NEXT.
+proof satisfies the read-only migration-spike condition, while the production-upgrade physical-device repetition was subsequently
+completed in E9. E2 NEXT.
 
 ### E1 exit conditions
 
@@ -731,7 +737,7 @@ Acceptance corrections implemented during E3-E include:
 - Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading, removing per-row BoxWithConstraints, avoiding Timeline-wide recomposition on scroll start, and separating volatile row presentation from the structural list snapshot;
 - read/unread presentation is geometry-stable like iOS: the headline keeps one fixed font weight, feed/publication/preview/accessory state changes are colour/opacity-only, and star/unread use permanently reserved slots so marking a row read cannot change its measured height or text wrapping.
 
-The deferred physical UniFFI runtime/production-upgrade proof remains a later release/runtime acceptance responsibility and is not represented here as completed. E9 remains the authoritative final Flutter-to-native production-upgrade gate.
+This E3 checkpoint originally deferred the physical UniFFI/production-upgrade proof to E9. The production Flutter-to-native upgrade path was subsequently accepted on physical hardware during E9; the current E9 section records the remaining focused Playback Verification v2 recheck.
 
 **Phase E3 is COMPLETE.**
 ### Baseline renderer
