@@ -286,6 +286,10 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             defaults: defaults
         )
         markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.legacyMigration.account.v1.completed"
+        )
 
         var remoteRestores = 0
         var importedRecords: [[Int64]] = []
