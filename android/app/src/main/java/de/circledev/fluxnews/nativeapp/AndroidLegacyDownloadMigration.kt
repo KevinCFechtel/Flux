@@ -47,6 +47,8 @@ internal class AndroidLegacyDownloadMigration(
                 is LegacyAndroidDownloadReadResult.Found -> result.records
             }
             var shouldRetry = false
+            var missingEnclosures = 0
+            var failedFiles = 0
             for (record in records) {
                 val reference = "downloads/legacy/enclosure-${record.enclosureId}.audio"
                 val destination = AndroidMediaTransferFileLayout.destination(mediaRoot, reference)
@@ -92,6 +94,7 @@ internal class AndroidLegacyDownloadMigration(
                         LegacyDownloadImportOutcome.MISSING_ENCLOSURE -> {
                             if (created) destination.delete()
                             shouldRetry = true
+                            missingEnclosures++
                         }
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -100,13 +103,23 @@ internal class AndroidLegacyDownloadMigration(
                     // If Core may have accepted this file before the exception,
                     // retain it for the next idempotent import attempt.
                     shouldRetry = true
+                    failedFiles++
                 }
             }
-            if (!shouldRetry) preferences.write(DOWNLOADS_DONE, true)
+            if (!shouldRetry) {
+                preferences.write(DOWNLOADS_DONE, true)
+                preferences.remove(DOWNLOADS_STATUS)
+            } else {
+                preferences.write(DOWNLOADS_STATUS, buildList {
+                    if (missingEnclosures > 0) add("$missingEnclosures missing audio attachment(s)")
+                    if (failedFiles > 0) add("$failedFiles file(s) could not be adopted")
+                }.joinToString("; "))
+            }
         }
     }
 
     companion object {
         internal val DOWNLOADS_DONE = AndroidPreferenceKey.boolean("migration-e9-downloads-done")
+        internal val DOWNLOADS_STATUS = AndroidPreferenceKey.string("migration-e9-downloads-status")
     }
 }
