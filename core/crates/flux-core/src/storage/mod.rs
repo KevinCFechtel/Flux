@@ -7999,6 +7999,36 @@ mod tests {
     }
 
     #[test]
+    fn historical_media_restore_requires_current_feed_and_matching_audio_identity() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+
+        // No remotely synced feed/category: do not create orphan articles.
+        assert!(!store.restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id).unwrap());
+        assert!(store.enclosure(enclosure.id).unwrap().is_none());
+
+        store.reconcile_with_enclosures(
+            &[Category { id: 1, title: "Category".into() }],
+            &[Feed { id: 10, category_id: 1, title: "Feed".into() }],
+            &[], &[],
+        ).unwrap();
+
+        // Wrong or non-audio enclosures may never count as verified.
+        assert!(!store.restore_legacy_media_article(&article, &[enclosure.clone()], 9999).unwrap());
+        assert!(!store.restore_legacy_media_article(
+            &article, &[Enclosure { mime_type: "video/mp4".into(), ..enclosure.clone() }], enclosure.id,
+        ).unwrap());
+        assert!(store.enclosure(enclosure.id).unwrap().is_none());
+
+        assert!(store.restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id).unwrap());
+        assert_eq!(store.enclosure(enclosure.id).unwrap().unwrap().enclosure.article_id, article.id);
+        // A retry must be harmless.
+        assert!(store.restore_legacy_media_article(&article, &[enclosure], 1000).unwrap());
+    }
+
+    #[test]
     fn media_download_request_lifecycle() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
