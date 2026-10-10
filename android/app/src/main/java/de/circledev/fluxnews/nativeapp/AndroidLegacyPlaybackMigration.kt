@@ -13,6 +13,7 @@ import uniffi.flux_uniffi.SyncCompleted
  */
 internal class AndroidLegacyPlaybackMigration(
     private val legacyReader: () -> LegacyAndroidPlaybackReadResult,
+    private val legacyDownloadReader: () -> LegacyAndroidDownloadReadResult,
     private val preferenceStore: AndroidPreferenceStore,
     private val credentialStore: AndroidCredentialStore,
     private val coreRuntime: AndroidCoreRuntime,
@@ -24,6 +25,7 @@ internal class AndroidLegacyPlaybackMigration(
         coreRuntime: AndroidCoreRuntime,
     ) : this(
         legacyReader = LegacyAndroidStateReader(context)::readPlaybackImports,
+        legacyDownloadReader = LegacyAndroidStateReader(context)::readDownloadImports,
         preferenceStore = preferenceStore,
         credentialStore = credentialStore,
         coreRuntime = coreRuntime,
@@ -42,24 +44,45 @@ internal class AndroidLegacyPlaybackMigration(
                 LegacyAndroidPlaybackReadResult.Unavailable -> return@withLock
                 is LegacyAndroidPlaybackReadResult.Found -> result.records
             }
-            // Playback migration runs before download migration. Hydrate read,
-            // non-starred historical articles before matching persisted positions.
-            // Failures remain retryable; never discard any legacy progress.
+            val discardedArticleIds = parseDiscardedArticleIds(
+                preferenceStore.read(PLAYBACK_DISCARDED_IDS, ""),
+            ).toMutableSet()
+            val downloadArticleIds = downloadedArticleIdsOrNull(legacyDownloadReader())
+
+            // Playback migration runs before download migration. A confirmed
+            // 404/410 may be discarded only when the complete read-only legacy
+            // download scan proves there is no matching local audio file.
+            // Connectivity errors, ambiguous identity and local downloads remain
+            // retryable. Core reserves false specifically for HTTP 404/410.
             for (record in records) {
+                if (record.articleId in discardedArticleIds) continue
                 try {
-                    coreRuntime.remoteForGeneration(sessionGeneration) {
+                    val restored = coreRuntime.remoteForGeneration(sessionGeneration) {
                         it.restoreLegacyPlaybackArticle(record.articleId)
+                    }
+                    if (!restored &&
+                        downloadArticleIds != null &&
+                        record.articleId !in downloadArticleIds
+                    ) {
+                        discardedArticleIds += record.articleId
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    // An unavailable remote article must not prevent the rest
-                    // of the playback batch from importing.
+                    // Non-404 failures are not negative evidence. Keep the
+                    // record for a later authoritative retry.
                 }
+            }
+            preferenceStore.write(
+                PLAYBACK_DISCARDED_IDS,
+                encodeDiscardedArticleIds(discardedArticleIds),
+            )
+            val importableRecords = records.filterNot {
+                it.articleId in discardedArticleIds
             }
             val outcome = coreRuntime.localForGeneration(sessionGeneration) { core ->
                 core.importLegacyPlayback(
-                    records.map {
+                    importableRecords.map {
                         LegacyPlaybackImport(
                             articleId = it.articleId,
                             positionMs = it.positionMs,
@@ -72,15 +95,21 @@ internal class AndroidLegacyPlaybackMigration(
             // legacy sources have been successfully inspected.
             val missing = outcome.skippedMissing.toInt()
             val ambiguous = outcome.skippedAmbiguous.toInt()
+            val discardedDescription = discardedDescription(discardedArticleIds.size)
             if (missing == 0 && ambiguous == 0) {
                 preferenceStore.write(PLAYBACK_DONE, true)
-                preferenceStore.remove(PLAYBACK_STATUS)
+                if (discardedDescription.isBlank()) {
+                    preferenceStore.remove(PLAYBACK_STATUS)
+                } else {
+                    preferenceStore.write(PLAYBACK_STATUS, discardedDescription)
+                }
             } else {
                 preferenceStore.write(
                     PLAYBACK_STATUS,
                     buildList {
                         if (missing > 0) add("$missing missing article(s)")
                         if (ambiguous > 0) add("$ambiguous ambiguous audio attachment(s)")
+                        if (discardedDescription.isNotBlank()) add(discardedDescription)
                     }.joinToString("; "),
                 )
             }
@@ -90,5 +119,35 @@ internal class AndroidLegacyPlaybackMigration(
     companion object {
         internal val PLAYBACK_DONE = AndroidPreferenceKey.boolean("migration-e9-playback-done")
         internal val PLAYBACK_STATUS = AndroidPreferenceKey.string("migration-e9-playback-status")
+        internal val PLAYBACK_DISCARDED_IDS =
+            AndroidPreferenceKey.string("migration-e9-playback-discarded-ids-v1")
+
+        internal fun parseDiscardedArticleIds(raw: String): Set<Long> =
+            raw.split(',').mapNotNull { it.trim().toLongOrNull()?.takeIf { id -> id > 0L } }.toSet()
+
+        internal fun encodeDiscardedArticleIds(ids: Set<Long>): String =
+            ids.filter { it > 0L }.sorted().joinToString(",")
+
+        /**
+         * Null means local download evidence is incomplete, so a remote miss
+         * must stay retryable. A concrete set is safe negative evidence only
+         * when every discovered legacy file has a read-only article mapping.
+         */
+        internal fun downloadedArticleIdsOrNull(
+            result: LegacyAndroidDownloadReadResult,
+        ): Set<Long>? = when (result) {
+            LegacyAndroidDownloadReadResult.Unavailable -> null
+            is LegacyAndroidDownloadReadResult.Found -> {
+                if (result.records.any { it.articleId == null }) null
+                else result.records.mapNotNull { it.articleId }.toSet()
+            }
+        }
+
+        internal fun discardedDescription(count: Int): String =
+            when (count) {
+                0 -> ""
+                1 -> "1 old playback position discarded: no local download and no longer available on the server."
+                else -> "$count old playback positions discarded: no local download and no longer available on the server."
+            }
     }
 }
