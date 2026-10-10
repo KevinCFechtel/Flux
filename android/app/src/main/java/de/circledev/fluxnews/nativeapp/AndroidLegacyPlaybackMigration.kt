@@ -42,6 +42,21 @@ internal class AndroidLegacyPlaybackMigration(
                 LegacyAndroidPlaybackReadResult.Unavailable -> return@withLock
                 is LegacyAndroidPlaybackReadResult.Found -> result.records
             }
+            // Playback migration runs before download migration. Hydrate read,
+            // non-starred historical articles before matching persisted positions.
+            // Failures remain retryable; never discard any legacy progress.
+            for (record in records) {
+                try {
+                    coreRuntime.remoteForGeneration(sessionGeneration) {
+                        it.restoreLegacyPlaybackArticle(record.articleId)
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // An unavailable remote article must not prevent the rest
+                    // of the playback batch from importing.
+                }
+            }
             val outcome = coreRuntime.localForGeneration(sessionGeneration) { core ->
                 core.importLegacyPlayback(
                     records.map {
