@@ -522,6 +522,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_audio_suffix_still_exposes_embedded_id3_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("enclosure-42.audio");
+        let picture = [0xff, 0xd8, 0xff, 0xd9];
+        let mut payload = vec![0u8];
+        payload.extend_from_slice(b"image/jpeg");
+        payload.extend_from_slice(&[0, 3, 0]);
+        payload.extend_from_slice(&picture);
+        let mut frame = b"APIC".to_vec();
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&payload);
+        std::fs::write(&path, id3_fixture(&frame)).unwrap();
+        assert_eq!(analyze_file(&path).artwork, Some(picture.to_vec()));
+    }
+
+    #[test]
     fn article_timestamps_are_ordered_and_bounded() {
         let chapters = article_chapters(
             "00:00 Intro\n03:42 Topic One\n15:10 Topic Two",
