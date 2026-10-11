@@ -16,6 +16,12 @@
 > is green on main (Apple #123, attempt 2). No known Phase-D replacement blocker
 > remains.
 >
+> Post-completion structural cleanup was merged on 11 October 2026. The former
+> large `ArticleListView.swift`, `NewsreaderStore.swift`, and `ContentView.swift`
+> implementation surfaces were split into focused iOS source files without
+> changing Timeline behavior, state ownership, Core/UniFFI semantics, migration
+> behavior, or the frozen UIKit architecture. PR #28 passed Apple CI before merge.
+>
 > On 2026-09-11, the owner approved replacing the Article Timeline with an owned
 > UIKit Timeline and native UIKit cells. The implementation initially used a
 > `UICollectionView` baseline and later evolved to the current `UITableView`

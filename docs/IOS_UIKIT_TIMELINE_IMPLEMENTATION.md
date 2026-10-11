@@ -216,16 +216,20 @@ not an instruction to reset or overwrite later work.
 
 | Current path | How it relates to the replacement |
 |---|---|
-| `apple/ios/FluxNews/ArticleListView.swift` | Productive `UITableView` Timeline controller, native reusable article cells, deterministic prepared layout, Scrollover geometry, image/prefetch integration, and Undo overlay. This is the current implementation baseline. |
-| `apple/ios/FluxNews/NewsreaderStore.swift` | Stable snapshots, per-row presentation, Core operations, pending writes, generations, Undo/counts. Refactor the existing ownership/scheduling; do not create a second source of truth. |
-| `apple/ios/FluxNews/ContentView.swift` | Timeline entry point, iPhone/iPad shell, native navigation host and reset behavior. Preserve the shell's product behavior when embedding the new controller. |
-| `apple/ios/FluxNews/ArticleImagePipeline.swift` | Existing ImageIO downsampling, memory cache, request deduplication and prefetch. Adapt consumer lifetime/cancellation as required. |
-| `apple/ios/FluxNews/SearchView.swift` | Uses the same `IOSUIKitArticleTimelineView` renderer as the Article List, with Search-owned pagination/mutation state and Scrollover disabled. Keep presentation settings aligned with the main Timeline. |
-| `apple/shared/FluxApple/` | Existing shared presentation policies and macOS exposure tracker. Reuse actual shared semantics; do not transplant macOS geometry/timing or broadly refactor macOS. |
-| `apple/ios/FluxNewsTests/NewsreaderD23MutationTests.swift` | Current detection and mutation tests. Preserve valid behavior coverage; replace old-sensor tests and fake array-draining helpers with tests of the new productive paths. |
-| `apple/ios/FluxNewsTests/NewsreaderPresentationTests.swift` | Presentation, image/prefetch and related regression coverage; inspect current cases and keep relevant guarantees. |
-| `core/crates/flux-core/src/lib.rs` | Existing `set_read_state_bulk` domain boundary. Use it; do not add a Scrollover-specific Core API or change frozen delivery behavior as part of a renderer rewrite. |
-| `apple/ios/FluxNews.xcodeproj/project.pbxproj` | Register new/moved sources and tests as required by the existing project. |
+| `apple/ios/FluxNews/ArticleListView.swift` | Thin Article List entry/bridge that composes the productive UIKit Timeline and surrounding list behavior. |
+| `apple/ios/FluxNews/IOSUIKitArticleTimelineController.swift` | Productive `UITableView` Timeline controller, diffable snapshot ownership, scrolling/geometry integration, prefetch and native table interactions. |
+| `apple/ios/FluxNews/IOSUIKitArticleCell.swift` | Native reusable article-cell rendering and deterministic prepared layout application. |
+| `apple/ios/FluxNews/IOSArticleTimelinePolicies.swift` and `IOSArticleTimelinePresentation.swift` | Timeline presentation policies and value-model derivation extracted from the former monolithic Article List source without changing behavior. |
+| `apple/ios/FluxNews/IOSUIKitTimelinePerformance.swift` and `IOSFeedIconPresentation.swift` | Performance-sensitive Timeline helpers plus image/feed-icon presentation and bounded preparation support. |
+| `apple/ios/FluxNews/IOSArticleListActions.swift` and `IOSArticleListChrome.swift` | Article-list actions, feedback/chrome and shell presentation extracted from `ArticleListView.swift`. |
+| `apple/ios/FluxNews/NewsreaderStore.swift` and `IOSNewsreaderRequestLifecycle.swift` | Stable snapshots, Core operations, pending writes, generations, Undo/counts and request lifecycle. The central state machine remains in `NewsreaderStore.swift`. |
+| `apple/ios/FluxNews/ContentView.swift` | iPhone/iPad root shell and navigation host. Supporting presentation types are split into focused sources where appropriate; root ownership and product behavior remain unchanged. |
+| `apple/ios/FluxNews/ArticleImagePipeline.swift` | Existing ImageIO downsampling, memory cache, request deduplication and prefetch. |
+| `apple/ios/FluxNews/SearchView.swift` | Uses the same `IOSUIKitArticleTimelineView` renderer as the Article List, with Search-owned pagination/mutation state and Scrollover disabled. |
+| `apple/shared/FluxApple/` | Shared Apple presentation semantics only; no second domain or durable state owner. |
+| `apple/ios/FluxNewsTests/NewsreaderD23MutationTests.swift` and `NewsreaderPresentationTests.swift` | Productive Timeline mutation, geometry, presentation and image/prefetch regression coverage. |
+| `core/crates/flux-core/src/lib.rs` | Existing `set_read_state_bulk` domain boundary. Use it; do not add a Scrollover-specific Core API or change frozen delivery behavior as part of renderer work. |
+| `apple/ios/FluxNews.xcodeproj/project.pbxproj` | Registers the focused Timeline sources in the existing iOS app target. |
 
 Search uses the same UIKit Timeline renderer as the normal Article List. The old
 SwiftUI article-row chain was removed after its last production caller

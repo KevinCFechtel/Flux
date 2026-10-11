@@ -11,6 +11,12 @@
 >
 > Historical requirement wording below is retained as the implemented contract,
 > not as an open checklist.
+>
+> Post-completion structural cleanup was merged on 11 October 2026. The large
+> `PopoverContentView.swift` and `BrowserStore.swift` implementation surfaces
+> were decomposed into focused macOS presentation/support files while preserving
+> the existing store, lifecycle, playback, transfer, notification, Settings and
+> window behavior. PR #29 passed Apple CI before merge.
 
 ## 1. Goal and boundaries
 

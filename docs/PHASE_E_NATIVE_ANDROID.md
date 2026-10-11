@@ -6,6 +6,14 @@
 >
 > Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D implementation and the physical Flutter-to-native iOS production upgrade are complete/accepted as of 10 October 2026. Phase E replacement implementation and migration acceptance are also complete; Android CI #486 is green and the later shared Apple gate is green on main (Apple #123, attempt 2). Remaining Play/F-Droid work is distribution, not E9 implementation acceptance.
 >
+> Post-completion structural cleanup was merged on 11 October 2026. The large
+> `AndroidArticleTimeline.kt` and `AdaptiveAppShell.kt` sources were split into
+> focused Timeline, row, shell, model/policy and navigation files without changing
+> Compose lifecycle, Timeline/store ownership, paging, Scrollover, navigation,
+> Core/UniFFI, persistence or migration semantics. Baseline and Startup Profiles
+> were regenerated with the canonical generator after the Kotlin top-level moves.
+> PR #30 passed Android CI #487 before merge.
+>
 > This document is the authoritative implementation contract for the native Android replacement. ARCHITECTURE_DECISIONS.md remains the primary architecture authority and MOBILE_PRODUCT_SEMANTICS.md remains the shared native-mobile product contract. Where this document describes Android mechanisms, those mechanisms implement the shared contracts rather than redefining the product domain.
 
 ## 1. Goal and non-goals
