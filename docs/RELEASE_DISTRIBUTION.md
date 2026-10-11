@@ -131,6 +131,8 @@ release build publish automatically.
 
 A native F-Droid path is still required.
 
+**Prerequisite:** Complete the reproducible source-build and scanner feasibility gate B2 in [POST_REPLACEMENT_FOLLOWUP_PLAN.md](POST_REPLACEMENT_FOLLOWUP_PLAN.md) before implementing the publication workflow. Pinned Cargo-derived AARs and JNA require provenance/build checks; scanner failure has not yet been established.
+
 The repository must gain both:
 
 1. canonical local F-Droid release preparation; and
@@ -226,6 +228,8 @@ replace a reliable Transporter-based release process.
 
 The primary macOS distribution should likewise be the Mac App Store.
 
+**Mac release prerequisite and approved decision:** The macOS app has **never been released**. Its host app currently lacks the App Sandbox entitlement; the existing Developer ID/notarization path is not a Mac App Store export. Enable and validate the host sandbox, outbound network access, actual file-dialog capabilities and App Group provisioning **before** Mac App Store archive/export scripting. The developer explicitly accepts losing all existing unsandboxed local development data on their machine. Initialize a fresh sandbox storage/credential environment: **no database/download/Keychain migration, `container-migration.plist`, legacy-location fallback or compatibility layer is required**. See B1 in [POST_REPLACEMENT_FOLLOWUP_PLAN.md](POST_REPLACEMENT_FOLLOWUP_PLAN.md).
+
 The existing `apple/macos/Build/build-app.sh` is currently a build/validation
 script, not a complete App Store distribution path.
 
@@ -235,7 +239,7 @@ The final macOS App Store path should:
 
 - use the production Xcode configuration;
 - build/archive the host app and Widget extension;
-- retain required App Group and sandbox entitlements;
+- establish and validate the previously missing host App Sandbox entitlement, required outbound network/user-selected-file permissions, and host/widget App Group provisioning;
 - use the correct Mac App Store distribution signing/provisioning;
 - apply explicit app/extension build and marketing versions;
 - validate bundle identifiers and embedded extension metadata;
@@ -309,9 +313,9 @@ Implement in this order:
 2. **Normalize Android Play preparation.**
    Wrap the existing production AAB flow without changing its signing model.
 
-3. **Implement native Android F-Droid local preparation.**
-   Port only the still-required metadata/signing/reproducibility behavior from
-   the old Flutter repository.
+3. **Validate F-Droid build/scanner feasibility, then implement native preparation.**
+   Complete B2 in `POST_REPLACEMENT_FOLLOWUP_PLAN.md` first. Port only the still-
+   required metadata/signing/reproducibility behavior from the old Flutter repository.
 
 4. **Add Android F-Droid build/publish GitHub Action.**
    Make it call the canonical scripts and validate update compatibility before
@@ -321,9 +325,10 @@ Implement in this order:
    Convert the existing archive + App Store Connect export path to the shared
    release interface and rename TestFlight-specific naming where appropriate.
 
-6. **Add macOS archive/export.**
-   Create the missing App Store Connect/Transporter preparation path with proper
-   Mac App Store signing and entitlement validation.
+6. **Enable and validate the macOS sandbox, then add macOS archive/export.**
+   Complete B1 in `POST_REPLACEMENT_FOLLOWUP_PLAN.md` first, with fresh developer
+   data (no migration), and only then create the missing App Store Connect/
+   Transporter path with proper Mac App Store signing and entitlement validation.
 
 7. **Optionally add Apple release-artifact workflows.**
    Only after local scripts are authoritative and stable.
@@ -340,10 +345,12 @@ This release-scripting follow-up is complete when:
 - one documented top-level interface can prepare each supported distribution
   target;
 - Android Play AAB preparation is deterministic and versioned;
+- the F-Droid-style source build and scanner feasibility checks pass before publishing is automated;
 - Android has a native F-Droid build/publish workflow in this repository;
 - F-Droid update compatibility over the existing Flutter-distributed app is
   validated;
 - iOS can produce a validated production App Store Connect IPA for Transporter;
+- the previously unreleased macOS app passes a fresh-install sandbox acceptance without migrating local development data;
 - macOS can produce a validated Mac App Store Connect artifact for Transporter;
 - Apple host apps and extensions are version/signing/entitlement checked;
 - optional CI artifact jobs delegate to the same local scripts;
