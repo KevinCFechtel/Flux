@@ -22,6 +22,12 @@
 > changing Timeline behavior, state ownership, Core/UniFFI semantics, migration
 > behavior, or the frozen UIKit architecture. PR #28 passed Apple CI before merge.
 >
+> Release/distribution scripting is tracked separately in
+> [RELEASE_DISTRIBUTION.md](RELEASE_DISTRIBUTION.md). iOS already has archive and
+> export building blocks, but they should be normalized into the shared release
+> interface and continue to prepare App Store Connect artifacts for Transporter
+> rather than making CI publication the primary distribution path.
+>
 > On 2026-09-11, the owner approved replacing the Article Timeline with an owned
 > UIKit Timeline and native UIKit cells. The implementation initially used a
 > `UICollectionView` baseline and later evolved to the current `UITableView`
