@@ -87,6 +87,28 @@ final class IOSMediaRuntimeTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    func testDetachedAndSuspendedRuntimeRejectOldSessionEvents() async throws {
+        let core = try makeCore()
+        var calls = 0
+        let runtime = makeRuntime(
+            onSuccessfulSync: { calls += 1 },
+            reconcilePlaybackAfterSuccessfulSync: { calls += 1 }
+        )
+        runtime.attach(to: core)
+        let beforeSuspend = runtime.lifecycleGeneration
+        runtime.prepareForLocalStateRebuild()
+        runtime.handle(event: syncCompletedEvent(), core: core, generation: beforeSuspend)
+        runtime.handle(event: syncCompletedEvent(), core: core, generation: runtime.lifecycleGeneration)
+        XCTAssertEqual(calls, 0)
+
+        runtime.localStateRebuildFinished(with: core)
+        let activeGeneration = runtime.lifecycleGeneration
+        XCTAssertGreaterThan(activeGeneration, beforeSuspend)
+        runtime.detach()
+        runtime.handle(event: syncCompletedEvent(), core: core, generation: activeGeneration)
+        XCTAssertEqual(calls, 0)
+    }
+
     func testStaleCoreOrGenerationSyncCompletedEventDoesNotRunSuccessfulSyncHooks() async throws {
         let staleCore = try makeCore()
         let currentCore = try makeCore()
