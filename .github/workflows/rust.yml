@@ -31,6 +31,8 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path core/Cargo.toml --all --check
       - name: Run Rust workspace tests
+        if: success() || failure()
         run: cargo test --manifest-path core/Cargo.toml --workspace
       - name: Lint Rust workspace
+        if: success() || failure()
         run: cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets
