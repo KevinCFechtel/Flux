@@ -10,6 +10,7 @@ This directory is intentionally small.
 - `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` — final native replacement-completion contract: retained Flutter migration/parity release gates, Settings/widget completion work, and explicit retired/replaced legacy behaviors.
 - `PHASE_E_NATIVE_ANDROID.md` — authoritative Phase-E contract for the native Android replacement, including Kotlin/Compose/UniFFI foundation, production migration, adaptive UI, background work, widgets, media, Android Auto, testing, and E1–E9 sequencing.
 - `RELEASE_DISTRIBUTION.md` — authoritative next-step plan for unified cross-platform release scripting and store-specific distribution for Android, iOS and macOS.
+- `POST_REPLACEMENT_FOLLOWUP_PLAN.md` — explicit post-E9 stabilization, Android feature-parity and store-readiness follow-up plan, including the approved macOS clean-sandbox start without migration.
 - `PHASE_D_D1_STATUS.md` — historical snapshot of the completed/frozen D1 foundation and early D2.1 progress; it is not a current status authority.
 
 ## Phase status
@@ -20,7 +21,7 @@ This directory is intentionally small.
 - **Phase D — Native iOS/iPadOS:** implementation complete. D7 is architecture-frozen; D8 is deferred and not required for replacement; D9 production Flutter-to-native migration is real-device accepted as of 10 October 2026, including recovered legacy downloads and terminal handling of stale playback positions with no local download and confirmed 404/410. The final replacement regression gate is green, and the later iOS structural-refactor validation also passed Apple CI #125 on main. Future shared changes must continue to pass the canonical gate. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative.
 - **Phase E — Native Android:** E1 through E9 are complete and real-device accepted. The signed production Flutter-to-native upgrade path and Playback Verification v2 both completed successfully on 10 October 2026; the v2 pass correctly re-opened only the previously manually skipped playback stage and completed green while identifying stale historical positions with no local download and confirmed 404/410. Android CI #486 closed the replacement acceptance and the later Android structural-refactor gate also passed Android CI #487. `PHASE_E_NATIVE_ANDROID.md` is the Phase-E implementation/sequencing authority.
 
-There is no remaining known replacement-blocking implementation or migration-acceptance gap across macOS, iOS/iPadOS, or Android. The remaining planned work is release/distribution infrastructure: unified release scripting across all native apps, Apple App Store Connect/Transporter preparation, Android Play packaging, and a native F-Droid build/publish workflow. See `RELEASE_DISTRIBUTION.md`.
+There is no remaining known replacement-blocking implementation or migration-acceptance gap across macOS, iOS/iPadOS, or Android. Follow-up stabilization, Android feature-parity and store-readiness tasks are tracked separately in `POST_REPLACEMENT_FOLLOWUP_PLAN.md`; unified release scripting and the Apple/Play/F-Droid distribution deliverables remain tracked in `RELEASE_DISTRIBUTION.md`. These follow-ups do not invalidate the completed E9 implementation/migration acceptance.
 
 ## Reference evidence
 
