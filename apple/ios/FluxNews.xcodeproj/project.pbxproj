@@ -58,6 +58,19 @@
 		A54 /* IOSAppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48 /* IOSAppDiagnostics.swift */; };
 		A55 /* ArticleListActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B49 /* ArticleListActionsSettingsView.swift */; };
 		A56 /* IOSConfigurationBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50 /* IOSConfigurationBackup.swift */; };
+		RFA1 /* FluxNews/IOSArticleTimelinePolicies.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB1 /* FluxNews/IOSArticleTimelinePolicies.swift */; };
+		RFA2 /* FluxNews/IOSArticleTimelinePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB2 /* FluxNews/IOSArticleTimelinePresentation.swift */; };
+		RFA3 /* FluxNews/IOSUIKitArticleTimelineController.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB3 /* FluxNews/IOSUIKitArticleTimelineController.swift */; };
+		RFA4 /* FluxNews/IOSUIKitTimelinePerformance.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB4 /* FluxNews/IOSUIKitTimelinePerformance.swift */; };
+		RFA5 /* FluxNews/IOSUIKitArticleCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB5 /* FluxNews/IOSUIKitArticleCell.swift */; };
+		RFA6 /* FluxNews/IOSFeedIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB6 /* FluxNews/IOSFeedIconView.swift */; };
+		RFA7 /* FluxNews/IOSFeedIconPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB7 /* FluxNews/IOSFeedIconPresentation.swift */; };
+		RFA8 /* FluxNews/IOSNewsreaderRequestLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB8 /* FluxNews/IOSNewsreaderRequestLifecycle.swift */; };
+		RFA9 /* FluxNews/IOSArticleRowPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB9 /* FluxNews/IOSArticleRowPresentation.swift */; };
+		RFA10 /* FluxNews/IOSArticleListActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB10 /* FluxNews/IOSArticleListActions.swift */; };
+		RFA11 /* FluxNews/IOSArticleListChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB11 /* FluxNews/IOSArticleListChrome.swift */; };
+		RFA12 /* FluxNews/IOSActionFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB12 /* FluxNews/IOSActionFeedback.swift */; };
+		RFA13 /* FluxNews/IOSSystemPresentationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = RFB13 /* FluxNews/IOSSystemPresentationViews.swift */; };
 		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
 		A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* ../shared/FluxApple/BrowserPresentation.swift */; };
 		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
@@ -178,6 +191,19 @@
 		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
 		B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/LegacyStateDiscoveryTests.swift; sourceTree = "<group>"; };
 		B9 /* ../shared/FluxApple/BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
+		RFB1 /* FluxNews/IOSArticleTimelinePolicies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSArticleTimelinePolicies.swift; sourceTree = "<group>"; };
+		RFB2 /* FluxNews/IOSArticleTimelinePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSArticleTimelinePresentation.swift; sourceTree = "<group>"; };
+		RFB3 /* FluxNews/IOSUIKitArticleTimelineController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleTimelineController.swift; sourceTree = "<group>"; };
+		RFB4 /* FluxNews/IOSUIKitTimelinePerformance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitTimelinePerformance.swift; sourceTree = "<group>"; };
+		RFB5 /* FluxNews/IOSUIKitArticleCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleCell.swift; sourceTree = "<group>"; };
+		RFB6 /* FluxNews/IOSFeedIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSFeedIconView.swift; sourceTree = "<group>"; };
+		RFB7 /* FluxNews/IOSFeedIconPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSFeedIconPresentation.swift; sourceTree = "<group>"; };
+		RFB8 /* FluxNews/IOSNewsreaderRequestLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSNewsreaderRequestLifecycle.swift; sourceTree = "<group>"; };
+		RFB9 /* FluxNews/IOSArticleRowPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSArticleRowPresentation.swift; sourceTree = "<group>"; };
+		RFB10 /* FluxNews/IOSArticleListActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSArticleListActions.swift; sourceTree = "<group>"; };
+		RFB11 /* FluxNews/IOSArticleListChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSArticleListChrome.swift; sourceTree = "<group>"; };
+		RFB12 /* FluxNews/IOSActionFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSActionFeedback.swift; sourceTree = "<group>"; };
+		RFB13 /* FluxNews/IOSSystemPresentationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSSystemPresentationViews.swift; sourceTree = "<group>"; };
 		BW0 /* FluxNewsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FluxNewsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BW1 /* FluxNewsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsWidgets.swift; sourceTree = "<group>"; };
 		BW2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -261,6 +287,19 @@
 				B11 /* FluxNews/NewsreaderStore.swift */,
 				B17 /* FluxNews/ReaderRequestState.swift */,
 				B12 /* FluxNews/ArticleListView.swift */,
+				RFB1 /* FluxNews/IOSArticleTimelinePolicies.swift */,
+				RFB2 /* FluxNews/IOSArticleTimelinePresentation.swift */,
+				RFB3 /* FluxNews/IOSUIKitArticleTimelineController.swift */,
+				RFB4 /* FluxNews/IOSUIKitTimelinePerformance.swift */,
+				RFB5 /* FluxNews/IOSUIKitArticleCell.swift */,
+				RFB6 /* FluxNews/IOSFeedIconView.swift */,
+				RFB7 /* FluxNews/IOSFeedIconPresentation.swift */,
+				RFB8 /* FluxNews/IOSNewsreaderRequestLifecycle.swift */,
+				RFB9 /* FluxNews/IOSArticleRowPresentation.swift */,
+				RFB10 /* FluxNews/IOSArticleListActions.swift */,
+				RFB11 /* FluxNews/IOSArticleListChrome.swift */,
+				RFB12 /* FluxNews/IOSActionFeedback.swift */,
+				RFB13 /* FluxNews/IOSSystemPresentationViews.swift */,
 				B13 /* FluxNews/NewsNavigationView.swift */,
 				B14 /* FluxNews/DeveloperDiagnosticsView.swift */,
 				B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */,
@@ -515,6 +554,19 @@
 				A9 /* FluxNews/NewsreaderStore.swift in Sources */,
 				A15 /* FluxNews/ReaderRequestState.swift in Sources */,
 				A10 /* FluxNews/ArticleListView.swift in Sources */,
+				RFA1 /* FluxNews/IOSArticleTimelinePolicies.swift in Sources */,
+				RFA2 /* FluxNews/IOSArticleTimelinePresentation.swift in Sources */,
+				RFA3 /* FluxNews/IOSUIKitArticleTimelineController.swift in Sources */,
+				RFA4 /* FluxNews/IOSUIKitTimelinePerformance.swift in Sources */,
+				RFA5 /* FluxNews/IOSUIKitArticleCell.swift in Sources */,
+				RFA6 /* FluxNews/IOSFeedIconView.swift in Sources */,
+				RFA7 /* FluxNews/IOSFeedIconPresentation.swift in Sources */,
+				RFA8 /* FluxNews/IOSNewsreaderRequestLifecycle.swift in Sources */,
+				RFA9 /* FluxNews/IOSArticleRowPresentation.swift in Sources */,
+				RFA10 /* FluxNews/IOSArticleListActions.swift in Sources */,
+				RFA11 /* FluxNews/IOSArticleListChrome.swift in Sources */,
+				RFA12 /* FluxNews/IOSActionFeedback.swift in Sources */,
+				RFA13 /* FluxNews/IOSSystemPresentationViews.swift in Sources */,
 				A11 /* FluxNews/NewsNavigationView.swift in Sources */,
 				A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */,
 				A54 /* IOSAppDiagnostics.swift in Sources */,
