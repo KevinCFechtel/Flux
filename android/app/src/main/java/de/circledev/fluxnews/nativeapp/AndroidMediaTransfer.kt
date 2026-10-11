@@ -80,6 +80,17 @@ internal object AndroidMediaTransferFileLayout {
     }
 }
 
+/** Tags distinguish previously enqueued constraints without cancelling running work. */
+internal object AndroidMediaTransferPolicyTags {
+    private const val PREFIX = "flux-media-network:"
+
+    fun tag(networkType: NetworkType): String = PREFIX + networkType.name
+
+    // Legacy requests have no policy tag; update them once to reconcile their constraints.
+    fun needsUpdate(tags: Set<String>, desired: NetworkType): Boolean =
+        tag(desired) !in tags
+}
+
 internal data class AndroidMediaTransferProgress(
     val enclosureId: Long,
     val bytesDownloaded: Long,
@@ -172,18 +183,46 @@ internal class AndroidMediaTransferCoordinator(
             .setRequiredNetworkType(networkType)
             .build()
 
+        // WorkManager KEEP does not change constraints on previously scheduled work.
+        // Keep an identity-stable WorkRequest and update only when the policy changes;
+        // updateWork preserves the enqueue time and does not cancel a running worker.
+        val activeTransfers = withContext(Dispatchers.IO) {
+            runCatching { workManager.getWorkInfosByTag(TRANSFER_TAG).get() }
+                .getOrDefault(emptyList())
+                .filterNot { it.state.isFinished }
+                .mapNotNull { info ->
+                    AndroidMediaTransferWorkerInput.enclosureId(info)?.let { it to info }
+                }
+                .toMap()
+        }
         requestedTransfers.values.forEach { work ->
-            val request = OneTimeWorkRequestBuilder<AndroidMediaDownloadWorker>()
+            val existing = activeTransfers[work.enclosureId]
+            val builder = OneTimeWorkRequestBuilder<AndroidMediaDownloadWorker>()
                 .setInputData(AndroidMediaTransferWorkerInput.data(work.enclosureId))
                 .setConstraints(constraints)
                 .addTag(TRANSFER_TAG)
                 .addTag(AndroidMediaTransferWorkerInput.enclosureTag(work.enclosureId))
-                .build()
-            workManager.enqueueUniqueWork(
-                transferWorkName(work.enclosureId),
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
+                .addTag(AndroidMediaTransferPolicyTags.tag(networkType))
+            if (existing == null) {
+                workManager.enqueueUniqueWork(
+                    transferWorkName(work.enclosureId),
+                    ExistingWorkPolicy.KEEP,
+                    builder.build(),
+                )
+            } else if (AndroidMediaTransferPolicyTags.needsUpdate(existing.tags, networkType)) {
+                val updated = builder.setId(existing.id).build()
+                withContext(Dispatchers.IO) {
+                    runCatching { workManager.updateWork(updated).get() }
+                        .onFailure { failure ->
+                            diagnostics.record(
+                                AndroidAppLogLevel.Warning,
+                                "media-transfer",
+                                "Could not update download network constraint: " +
+                                    failure.javaClass.simpleName,
+                            )
+                        }
+                }
+            }
         }
 
         requestedDeletions.values.forEach { work ->
