@@ -7412,13 +7412,28 @@ mod tests {
         store
             .set_feed_system_notifications_enabled(20, true)
             .unwrap();
-        assert_eq!(
-            store
-                .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
-                .unwrap()
-                .len(),
-            1
-        );
+        // An older sync result must not notify articles that already existed
+        // when notifications were enabled.
+        assert!(store
+            .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        // Create a genuine post-enable notification candidate for the feed
+        // that will subsequently be removed. This exercises the cascade cleanup.
+        let mut new_article = articles[1].clone();
+        new_article.id = 4;
+        new_article.title = "New after enablement".into();
+        new_article.url = "https://example.test/4".into();
+        let mut refreshed_articles = articles.to_vec();
+        refreshed_articles.push(new_article);
+        let after_enable = store.reconcile(&categories, &feeds, &refreshed_articles).unwrap();
+        let candidates = store
+            .prepare_system_notification_candidates(&after_enable.new_article_ids_by_feed)
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].feed_id, 20);
+        assert_eq!(candidates[0].new_count, 1);
         store
             .set_feed_system_notifications_enabled(10, true)
             .unwrap();
