@@ -3086,9 +3086,18 @@ final class NewsreaderPresentationTests: XCTestCase {
         await gate.waitUntilStarted(count: 2)
         let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
         let visible = Task { try await pipeline.image(for: requests[4]) }
-        for _ in 0..<8 { await Task.yield() }
 
-        let saturated = await pipeline.metrics()
+        // A fixed number of yields does not guarantee that newly created tasks
+        // have entered the image pipeline on a busy CI simulator. Await the
+        // observable saturated queue before asserting priority and bounds.
+        var saturated = await pipeline.metrics()
+        for _ in 0..<100 {
+            if saturated.queuedVisibleRequests == 1 &&
+                saturated.queuedPrefetchRequests == 2 &&
+                saturated.trackedRequests == 5 { break }
+            try await Task.sleep(for: .milliseconds(10))
+            saturated = await pipeline.metrics()
+        }
         XCTAssertEqual(ArticleImagePipeline.maximumConcurrentOperations, 2)
         XCTAssertEqual(saturated.activeOperations, 2)
         XCTAssertEqual(saturated.queuedVisibleRequests, 1)
