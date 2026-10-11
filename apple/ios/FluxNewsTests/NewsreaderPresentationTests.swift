@@ -5566,7 +5566,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let sourceURL = testsDirectory
             .deletingLastPathComponent()
-            .appendingPathComponent("FluxNews/ArticleListView.swift")
+            .appendingPathComponent("FluxNews/IOSUIKitArticleTimelineController.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         let helperStart = try XCTUnwrap(source.range(of: "private func requestFeedIconsForVisibleCells()"))
