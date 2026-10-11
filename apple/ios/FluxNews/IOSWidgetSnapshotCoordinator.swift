@@ -15,7 +15,10 @@ final class IOSWidgetSnapshotCoordinator {
     func attach(to core: Flux) {
         generation &+= 1
         let current = generation
+        if let eventSubscription { try? eventSubscription.unsubscribe() }
         eventSubscription = nil
+        refreshTask?.cancel()
+        refreshTask = nil
         do {
             eventSubscription = try core.subscribeEvents(
                 listener: IOSWidgetSnapshotEventListener(
@@ -34,6 +37,7 @@ final class IOSWidgetSnapshotCoordinator {
 
     func detach() {
         generation &+= 1
+        if let eventSubscription { try? eventSubscription.unsubscribe() }
         eventSubscription = nil
         refreshTask?.cancel()
         refreshTask = nil
@@ -103,7 +107,7 @@ final class IOSWidgetSnapshotCoordinator {
 
 private final class IOSWidgetSnapshotEventListener: EventListener, @unchecked Sendable {
     weak var coordinator: IOSWidgetSnapshotCoordinator?
-    let core: Flux
+    weak var core: Flux?
     let generation: UInt64
 
     init(
@@ -117,7 +121,8 @@ private final class IOSWidgetSnapshotEventListener: EventListener, @unchecked Se
     }
 
     func onEvent(event: CoreEvent) {
-        Task { @MainActor [weak coordinator] in
+        Task { @MainActor [weak coordinator, weak core] in
+            guard let core else { return }
             coordinator?.handle(event: event, core: core, generation: generation)
         }
     }
