@@ -66,6 +66,15 @@
 		A62 /* ReaderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61 /* ReaderPresentation.swift */; };
 		A63 /* AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62 /* AppleCoreExecution.swift */; };
 		A64 /* AppleCoreSessionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63 /* AppleCoreSessionExecutionCoordinator.swift */; };
+		A65 /* SearchResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B64 /* SearchResultsView.swift */; };
+		A66 /* ListeningListViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B65 /* ListeningListViews.swift */; };
+		A67 /* PopoverNavigationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66 /* PopoverNavigationViews.swift */; };
+		A68 /* ArticleRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B67 /* ArticleRowView.swift */; };
+		A69 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B68 /* SettingsView.swift */; };
+		A70 /* FeedManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69 /* FeedManagementViews.swift */; };
+		A71 /* BrowserPresentationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70 /* BrowserPresentationModels.swift */; };
+		A72 /* SystemNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71 /* SystemNotificationManager.swift */; };
+		A73 /* NativeLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72 /* NativeLog.swift */; };
 		D6M1 /* MediaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6M2 /* MediaPresentation.swift */; };
 		D6M3 /* MediaTransferFileLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6M4 /* MediaTransferFileLayout.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
@@ -154,6 +163,15 @@
 		B61 /* ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderPresentation.swift; path = ../../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
 		B62 /* AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreExecution.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
 		B63 /* AppleCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppleCoreSessionExecutionCoordinator.swift; path = ../shared/FluxApple/AppleCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
+		B64 /* SearchResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResultsView.swift; sourceTree = "<group>"; };
+		B65 /* ListeningListViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningListViews.swift; sourceTree = "<group>"; };
+		B66 /* PopoverNavigationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverNavigationViews.swift; sourceTree = "<group>"; };
+		B67 /* ArticleRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleRowView.swift; sourceTree = "<group>"; };
+		B68 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B69 /* FeedManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedManagementViews.swift; sourceTree = "<group>"; };
+		B70 /* BrowserPresentationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPresentationModels.swift; sourceTree = "<group>"; };
+		B71 /* SystemNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationManager.swift; sourceTree = "<group>"; };
+		B72 /* NativeLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLog.swift; sourceTree = "<group>"; };
 		D6M2 /* MediaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaPresentation.swift; path = ../../shared/FluxApple/MediaPresentation.swift; sourceTree = "<group>"; };
 		D6M4 /* MediaTransferFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaTransferFileLayout.swift; path = ../../shared/FluxApple/MediaTransferFileLayout.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -215,6 +233,15 @@
 				B2 /* AppDelegate.swift */,
 				B3 /* BrowserStore.swift */,
 				B4 /* PopoverContentView.swift */,
+				B64 /* SearchResultsView.swift */,
+				B65 /* ListeningListViews.swift */,
+				B66 /* PopoverNavigationViews.swift */,
+				B67 /* ArticleRowView.swift */,
+				B68 /* SettingsView.swift */,
+				B69 /* FeedManagementViews.swift */,
+				B70 /* BrowserPresentationModels.swift */,
+				B71 /* SystemNotificationManager.swift */,
+				B72 /* NativeLog.swift */,
 				B5 /* ScrolloverExposureTracker.swift */,
 				B6 /* Generated/flux_uniffi.swift */,
 				B7 /* KeyboardCommandObserver.swift */,
@@ -426,6 +453,15 @@
 				A2 /* AppDelegate.swift in Sources */,
 				A3 /* BrowserStore.swift in Sources */,
 				A4 /* PopoverContentView.swift in Sources */,
+				A65 /* SearchResultsView.swift in Sources */,
+				A66 /* ListeningListViews.swift in Sources */,
+				A67 /* PopoverNavigationViews.swift in Sources */,
+				A68 /* ArticleRowView.swift in Sources */,
+				A69 /* SettingsView.swift in Sources */,
+				A70 /* FeedManagementViews.swift in Sources */,
+				A71 /* BrowserPresentationModels.swift in Sources */,
+				A72 /* SystemNotificationManager.swift in Sources */,
+				A73 /* NativeLog.swift in Sources */,
 				A5 /* ScrolloverExposureTracker.swift in Sources */,
 				A6 /* Generated/flux_uniffi.swift in Sources */,
 				A7 /* KeyboardCommandObserver.swift in Sources */,
