@@ -248,6 +248,7 @@ private struct IOSPendingScrolloverUndoPresentation {
         invalidateScrolloverSession()
         invalidateManualSyncSession()
         readLifecycle.invalidateSession()
+        if let eventSubscription { try? eventSubscription.unsubscribe() }
         eventSubscription = nil
         core = nil
         replaceArticles([])

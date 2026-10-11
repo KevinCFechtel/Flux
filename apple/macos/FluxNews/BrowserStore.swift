@@ -106,6 +106,13 @@ final class BrowserStore: ObservableObject {
     private var core: Flux?
     private let coreSessionExecutionCoordinator = AppleCoreSessionExecutionCoordinator()
     private var eventSubscription: EventSubscription?
+    private var eventSessionGeneration: UInt64 = 0
+
+    private func endEventSubscription() {
+        eventSessionGeneration &+= 1
+        if let eventSubscription { try? eventSubscription.unsubscribe() }
+        eventSubscription = nil
+    }
     private var lastAutomaticSyncAttempt: Date?
     private var periodicSyncTimer: Timer?
     private var hasMeaningfullyInteracted = false
@@ -228,6 +235,8 @@ final class BrowserStore: ObservableObject {
 
         switch setup {
         case let .success((settings, subscription)):
+            endEventSubscription()
+            listener.generation = eventSessionGeneration
             core = configuredCore
             onCoreConfigured?(configuredCore)
             configuredServer = server
@@ -904,7 +913,8 @@ final class BrowserStore: ObservableObject {
         }
     }
 
-    func handle(event: CoreEvent) {
+    func handle(event: CoreEvent, generation: UInt64) {
+        guard generation == eventSessionGeneration, core != nil else { return }
         switch event {
         case .articleReadStateChanged, .articleStarredStateChanged:
             refreshWidgetSnapshot()
@@ -1536,7 +1546,7 @@ final class BrowserStore: ObservableObject {
                     try CredentialStore.remove()
                     try CredentialStore.setLaunchAtLogin(false)
                     self.resetNativeSettings()
-                    self.eventSubscription = nil
+                    self.endEventSubscription()
                     self.core = nil
                     self.configuredServer = nil
                     self.minifluxVersion = nil
@@ -1977,4 +1987,19 @@ final class BrowserStore: ObservableObject {
 
 
 private final class WeakBrowserStore: @unchecked Sendable { weak var value: BrowserStore?; init(_ value: BrowserStore) { self.value = value } }
-private final class BrowserEventListener: EventListener, @unchecked Sendable { weak var store: BrowserStore?; init(store: BrowserStore) { self.store = store }; func onEvent(event: CoreEvent) { Task { @MainActor [weak store] in store?.handle(event: event) } } }
+private final class BrowserEventListener: EventListener, @unchecked Sendable {
+    weak var store: BrowserStore?
+    // Assigned when a successfully configured subscription becomes active.
+    // Core calls may arrive before then, so the generation must be captured per callback.
+    private let lock = NSLock()
+    private var storedGeneration: UInt64 = 0
+    var generation: UInt64 {
+        get { lock.lock(); defer { lock.unlock() }; return storedGeneration }
+        set { lock.lock(); defer { lock.unlock() }; storedGeneration = newValue }
+    }
+    init(store: BrowserStore) { self.store = store }
+    func onEvent(event: CoreEvent) {
+        let generation = generation
+        Task { @MainActor [weak store] in store?.handle(event: event, generation: generation) }
+    }
+}

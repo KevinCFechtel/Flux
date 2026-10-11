@@ -1748,6 +1748,15 @@ impl EventSubscription {
         self.core.unsubscribe_events(self.id).map_err(map_error)
     }
 }
+
+// UniFFI's foreign handle may be released without an explicit unsubscribe.
+// Always release the Core listener before dropping the last subscription Arc.
+// unsubscribe_events is idempotent, so an earlier explicit call stays safe.
+impl Drop for EventSubscription {
+    fn drop(&mut self) {
+        let _ = self.core.unsubscribe_events(self.id);
+    }
+}
 #[uniffi::export]
 impl DiagnosticSubscription {
     pub fn unsubscribe(&self) {
