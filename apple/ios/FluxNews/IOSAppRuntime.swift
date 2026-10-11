@@ -96,17 +96,28 @@ final class IOSMediaRuntime {
         _ = nowPlayingCoordinator
     }
 
-    func attach(to core: Flux) {
-        let replacingCore = self.core != nil && self.core !== core
-        if self.core !== core { lifecycleGeneration &+= 1 }
-        self.core = core
-        coreAccessState = .attached
+    private func endEventSubscription() {
+        if let eventSubscription { try? eventSubscription.unsubscribe() }
         eventSubscription = nil
+    }
+
+    private func subscribe(to core: Flux) {
         do {
             eventSubscription = try core.subscribeEvents(
                 listener: IOSMediaRuntimeEventListener(runtime: self, core: core, generation: lifecycleGeneration)
             )
         } catch {}
+    }
+
+    func attach(to core: Flux) {
+        let replacingCore = self.core != nil && self.core !== core
+        // Invalidate callbacks from the old subscription even when reattaching
+        // the same Core after a local-state rebuild.
+        lifecycleGeneration &+= 1
+        endEventSubscription()
+        self.core = core
+        coreAccessState = .attached
+        subscribe(to: core)
         if replacingCore { playbackCoordinator.replaceCore(with: core) }
         else { playbackCoordinator.attach(to: core) }
         transferCoordinator.attach(to: core, generation: lifecycleGeneration)
@@ -116,6 +127,7 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForCoreReplacement
+        endEventSubscription()
         await playbackCoordinator.suspendForCoreLifecycle()
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
@@ -125,6 +137,7 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         coreAccessState = .attached
         if let core {
+            subscribe(to: core)
             playbackCoordinator.resumeCoreAccess(core)
             transferCoordinator.attach(to: core, generation: lifecycleGeneration)
         }
@@ -134,6 +147,7 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
+        endEventSubscription()
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
@@ -142,7 +156,7 @@ final class IOSMediaRuntime {
     func detach() {
         guard core != nil || coreAccessState != .detached else { return }
         lifecycleGeneration &+= 1
-        eventSubscription = nil
+        endEventSubscription()
         core = nil
         coreAccessState = .detached
         transferCoordinator.detach(generation: lifecycleGeneration, clearingAccountIdentity: true)
@@ -150,16 +164,21 @@ final class IOSMediaRuntime {
     }
 
     func handle(event: CoreEvent, core: Flux, generation: UInt64) {
-        guard generation == lifecycleGeneration, self.core === core else { return }
+        guard generation == lifecycleGeneration, self.core === core,
+              coreAccessState == .attached else { return }
         guard case .syncDidComplete = event else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            guard generation == lifecycleGeneration, self.core === core else { return }
+            guard generation == lifecycleGeneration, self.core === core,
+                  coreAccessState == .attached else { return }
             if let reconcilePlaybackAfterSuccessfulSync {
                 await reconcilePlaybackAfterSuccessfulSync()
             } else {
                 await playbackCoordinator.reconcileAfterSuccessfulSync()
             }
+            // The preceding await may have suspended across a Core replacement.
+            guard generation == lifecycleGeneration, self.core === core,
+                  coreAccessState == .attached else { return }
             await onSuccessfulSync?()
         }
     }
@@ -174,7 +193,7 @@ final class IOSMediaRuntime {
 
 private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Sendable {
     weak var runtime: IOSMediaRuntime?
-    let core: Flux
+    weak var core: Flux?
     let generation: UInt64
 
     init(runtime: IOSMediaRuntime, core: Flux, generation: UInt64) {
@@ -185,7 +204,10 @@ private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Send
 
     func onEvent(event: CoreEvent) {
         guard case .syncDidComplete = event else { return }
-        Task { @MainActor [weak runtime] in runtime?.handle(event: event, core: core, generation: generation) }
+        Task { @MainActor [weak runtime, weak core] in
+            guard let core else { return }
+            runtime?.handle(event: event, core: core, generation: generation)
+        }
     }
 }
 
