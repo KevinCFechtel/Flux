@@ -2953,6 +2953,15 @@ impl Store {
             [feed_id],
         )
         .map_err(sql_error)?;
+        if enabled {
+            // Establish a durable baseline: replayed IDs from an earlier sync may not
+            // generate notifications after the user enables delivery.
+            tx.execute(
+                "INSERT INTO system_notified_articles(article_id) SELECT id FROM articles WHERE feed_id=?1 ON CONFLICT(article_id) DO NOTHING",
+                [feed_id],
+            )
+            .map_err(sql_error)?;
+        }
         tx.commit().map_err(sql_error)
     }
 
@@ -3037,6 +3046,15 @@ impl Store {
                     [feed_id],
                 )
                 .map_err(sql_error)?;
+                if enabled {
+                    // Match single-feed toggles: previously visible articles are
+                    // already part of the baseline, even if sync replays their IDs.
+                    tx.execute(
+                        "INSERT INTO system_notified_articles(article_id) SELECT id FROM articles WHERE feed_id=?1 ON CONFLICT(article_id) DO NOTHING",
+                        [feed_id],
+                    )
+                    .map_err(sql_error)?;
+                }
             }
             if let Some(mode) = patch.detail_rendering {
                 tx.execute(
@@ -6387,6 +6405,17 @@ mod tests {
         assert_eq!(foreign_key_count, 0);
     }
 
+    // Legacy migration fixtures must include the notification tables introduced
+    // in schema v5. The tests below otherwise model impossible v7-v13 schemas.
+    fn add_legacy_notification_fixture_tables(connection: &Connection) {
+        connection.execute_batch(
+            "CREATE TABLE pending_system_notifications (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE);
+             CREATE TABLE system_notified_articles (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE);
+             CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL);
+             CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id));",
+        ).unwrap();
+    }
+
     #[test]
     fn v8_migration_preserves_phase_a_data_and_creates_enclosures() {
         let temp = TempDir::new().unwrap();
@@ -6394,6 +6423,7 @@ mod tests {
         let path = data.join("flux.sqlite3");
         let connection = Connection::open(&path).unwrap();
         connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); INSERT INTO core_settings VALUES ('base_url','https://miniflux.example'); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Feed'); INSERT INTO articles VALUES (3,2,'Title','https://example.test/post','', '2024-01-01T00:00:00Z',1,0,'<p>Saved</p>',1,0,'Saved',NULL,1); PRAGMA user_version=7;").unwrap();
+        add_legacy_notification_fixture_tables(&connection);
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
@@ -6662,6 +6692,7 @@ mod tests {
         let (data, cache, media) = roots(&temp);
         let connection = Connection::open(data.join("flux.sqlite3")).unwrap();
         connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); CREATE TABLE enclosures (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, url TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER, remote_media_progression_seconds INTEGER NOT NULL, remote_present INTEGER NOT NULL DEFAULT 1); INSERT INTO categories VALUES(1,'Category'); INSERT INTO feeds VALUES(2,1,'Feed'); INSERT INTO articles VALUES(3,2,'Article','https://example.test/article','','2024-01-01T00:00:00Z',1,0,'',1,0,'',NULL,1); INSERT INTO enclosures VALUES(10,3,'https://cdn.test/episode.mp3','audio/mpeg',123,4,0); PRAGMA user_version=8;").unwrap();
+        add_legacy_notification_fixture_tables(&connection);
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
@@ -6703,6 +6734,7 @@ mod tests {
              INSERT INTO pending_media_progress_mutations VALUES(10,5,1); \
              PRAGMA user_version=12;",
         ).unwrap();
+        add_legacy_notification_fixture_tables(&connection);
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
@@ -6742,6 +6774,7 @@ mod tests {
              INSERT INTO media_downloads VALUES(11,'failed','manual',NULL,NULL,NULL,'network'); \
              PRAGMA user_version=13;",
         ).unwrap();
+        add_legacy_notification_fixture_tables(&connection);
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
@@ -7379,13 +7412,28 @@ mod tests {
         store
             .set_feed_system_notifications_enabled(20, true)
             .unwrap();
-        assert_eq!(
-            store
-                .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
-                .unwrap()
-                .len(),
-            1
-        );
+        // An older sync result must not notify articles that already existed
+        // when notifications were enabled.
+        assert!(store
+            .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        // Create a genuine post-enable notification candidate for the feed
+        // that will subsequently be removed. This exercises the cascade cleanup.
+        let mut new_article = articles[1].clone();
+        new_article.id = 4;
+        new_article.title = "New after enablement".into();
+        new_article.url = "https://example.test/4".into();
+        let mut refreshed_articles = articles.to_vec();
+        refreshed_articles.push(new_article);
+        let after_enable = store.reconcile(&categories, &feeds, &refreshed_articles).unwrap();
+        let candidates = store
+            .prepare_system_notification_candidates(&after_enable.new_article_ids_by_feed)
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].feed_id, 20);
+        assert_eq!(candidates[0].new_count, 1);
         store
             .set_feed_system_notifications_enabled(10, true)
             .unwrap();

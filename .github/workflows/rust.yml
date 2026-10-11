@@ -1,0 +1,41 @@
+name: Rust
+
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - ".github/workflows/rust.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "core/**"
+      - ".github/workflows/rust.yml"
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    name: Rust workspace regression gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt,clippy
+      # Existing workspace formatting predates this gate. Report it without
+      # blocking the new test gate until the mechanical formatting PR lands.
+      - name: Audit existing Rust formatting
+        continue-on-error: true
+        run: cargo fmt --manifest-path core/Cargo.toml --all --check
+      - name: Run Rust workspace tests
+        if: success() || failure()
+        run: cargo test --manifest-path core/Cargo.toml --workspace
+      - name: Lint Rust workspace
+        if: success() || failure()
+        run: cargo clippy --manifest-path core/Cargo.toml --workspace --all-targets
