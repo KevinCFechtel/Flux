@@ -43,6 +43,15 @@
 	<string>$(FLUX_WIDGET_URL_SCHEME)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Flux displays and downloads arbitrary user-subscribed feed media via URLSession,
+		     and streams podcast enclosures via AVFoundation. Their hostnames are not known
+		     at build time. AVFoundation's media-only exception does not cover URLSession.
+		     App Store justification and security caveats: docs/APPLE_HTTP_MEDIA_ATS.md. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
