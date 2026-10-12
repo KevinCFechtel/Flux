@@ -33,6 +33,8 @@ internal fun BackgroundSyncSettingsScreen(
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val bgLoadError = stringResource(R.string.audit_bg_load)
+    val bgSaveError = stringResource(R.string.audit_bg_save)
 
     suspend fun reload() {
         backgroundSync.enabled().fold(
@@ -41,7 +43,7 @@ internal fun BackgroundSyncSettingsScreen(
                 error = null
             },
             onFailure = {
-                error = "Background sync setting could not be loaded. Please try again."
+                error = bgLoadError
             },
         )
     }
@@ -55,7 +57,7 @@ internal fun BackgroundSyncSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
-            "Allow FluxNews to refresh your Miniflux account periodically while the app is not open.",
+            stringResource(R.string.audit_bg_explanation),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
@@ -64,7 +66,7 @@ internal fun BackgroundSyncSettingsScreen(
             CircularProgressIndicator()
         } else {
             SettingsSwitchRow(
-                title = "Background Sync",
+                title = stringResource(R.string.audit_bg_title),
                 checked = current,
                 enabled = !saving,
             ) { requested ->
@@ -77,7 +79,7 @@ internal fun BackgroundSyncSettingsScreen(
                         onSuccess = { reload() },
                         onFailure = {
                             enabled = previous
-                            error = "Background sync setting could not be saved. Please try again."
+                            error = bgSaveError
                         },
                     )
                     saving = false
@@ -85,7 +87,7 @@ internal fun BackgroundSyncSettingsScreen(
             }
 
             Text(
-                "Android schedules background refresh using WorkManager. FluxNews requests a 30-minute interval, but Android may run it later depending on battery, Doze and other system conditions. A network connection is required.",
+                stringResource(R.string.audit_bg_schedule),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

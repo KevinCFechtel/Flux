@@ -143,7 +143,7 @@ internal fun AndroidCompactMiniPlayer(
 
                 Column(Modifier.weight(1f)) {
                     Text(
-                        playback.articleTitle?.ifBlank { "Audio" } ?: "Audio",
+                        playback.articleTitle?.ifBlank { stringResource(R.string.article_audio) } ?: stringResource(R.string.article_audio),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,

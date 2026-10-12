@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -100,6 +101,7 @@ internal fun AdaptiveAppShell(
         mutableStateOf(retainedTimelineSelection != null)
     }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
+    val navigationLoadError = stringResource(R.string.audit_navigation_load)
 
     LaunchedEffect(sessionGeneration) {
         searchStore.activateSession(sessionGeneration)
@@ -115,7 +117,7 @@ internal fun AdaptiveAppShell(
                 projection = coreRuntime.local { core -> core.navigationProjection(NavigationCountMode.UNREAD) },
             )
         } catch (_: Exception) {
-            NewsNavigationModel(error = "Navigation data could not be loaded.")
+            NewsNavigationModel(error = navigationLoadError)
         }
     }
 
@@ -493,7 +495,7 @@ private fun SecondaryDestination(title: String, message: String, onBack: () -> U
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.audit_back),
                         )
                     }
                 },

@@ -141,7 +141,7 @@ internal fun AndroidListeningListDestination(
                             )
                             state.feeds.forEach { feed ->
                                 DropdownMenuItem(
-                                    text = { Text(feed.feedTitle.ifBlank { "Unknown Feed" }) },
+                                    text = { Text(feed.feedTitle.ifBlank { stringResource(R.string.audit_unknown_feed) }) },
                                     onClick = {
                                         feedMenuOpen = false
                                         coroutineScope.launch { store.setFeedId(feed.feedId) }
@@ -365,7 +365,7 @@ private fun AndroidListeningListRow(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
-                    item.title.ifBlank { "Untitled News" },
+                    item.title.ifBlank { stringResource(R.string.audit_untitled_news) },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
@@ -384,7 +384,7 @@ private fun AndroidListeningListRow(
                         size = 16.dp,
                     )
                     Text(
-                        item.feedTitle.ifBlank { "Unknown Feed" },
+                        item.feedTitle.ifBlank { stringResource(R.string.audit_unknown_feed) },
                         modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -735,9 +735,9 @@ private fun AndroidListeningListProgress(
         }
         val durationLabel = durationMs?.let { " / " + androidMediaTime(it) }.orEmpty()
         val statusLabel = when (status) {
-            PlaybackStatus.NOT_STARTED -> "Not started"
-            PlaybackStatus.IN_PROGRESS -> "In progress"
-            PlaybackStatus.COMPLETED -> "Completed"
+            PlaybackStatus.NOT_STARTED -> stringResource(R.string.audit_playback_not_started)
+            PlaybackStatus.IN_PROGRESS -> stringResource(R.string.audit_playback_in_progress)
+            PlaybackStatus.COMPLETED -> stringResource(R.string.audit_playback_completed)
         }
         Text(
             androidMediaTime(positionMs) + durationLabel + " · " + statusLabel,

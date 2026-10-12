@@ -50,6 +50,8 @@ internal fun ConfigurationBackupScreen(
     onDismiss: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val backupWriteError = stringResource(R.string.audit_backup_write)
+    val backupExported = stringResource(R.string.audit_backup_exported)
     val scope = rememberCoroutineScope()
     var exportPassword by remember { mutableStateOf("") }
     var exportConfirmation by remember { mutableStateOf("") }
@@ -69,8 +71,8 @@ internal fun ConfigurationBackupScreen(
             try {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
                     ?: throw IllegalStateException("No writable output stream.")
-                status = "Configuration backup exported."
-            } catch (_: Exception) { error = "The selected location could not be written." }
+                status = backupExported
+            } catch (_: Exception) { error = backupWriteError }
             working = false
         }
     }
@@ -96,7 +98,7 @@ internal fun ConfigurationBackupScreen(
                     app.syncCoordinator.requestSync(SyncReason.MANUAL)
                     status = "Configuration restored. Synchronization will start now."
                     onRestored()
-                } catch (failure: Exception) { error = backupMessage(failure) }
+                } catch (failure: Exception) { error = backupMessage(failure, context) }
                 working = false
             }
         }) { Text(stringResource(R.string.backup_restore), color = MaterialTheme.colorScheme.error) } },
@@ -115,7 +117,7 @@ internal fun ConfigurationBackupScreen(
                     try {
                         pendingExport = controller.export(exportPassword)
                         createDocument.launch("FluxNews Configuration Backup ${LocalDate.now()}.fluxbackup")
-                    } catch (failure: Exception) { error = backupMessage(failure); pendingExport = null }
+                    } catch (failure: Exception) { error = backupMessage(failure, context); pendingExport = null }
                     working = false
                 }
             }) { Text(stringResource(R.string.backup_export_action)) }
@@ -146,16 +148,16 @@ private fun Context.readBackup(uri: Uri): ByteArray {
     throw IllegalStateException("No readable input stream.")
 }
 
-private fun backupMessage(error: Exception): String = when (error) {
-    is ConfigBackupException.EmptyPassword -> "Enter a backup password."
-    is ConfigBackupException.NotFluxBackup -> "Not a valid FluxNews backup."
-    is ConfigBackupException.UnsupportedVersion -> "This backup uses an unsupported format."
-    is ConfigBackupException.PlatformMismatch -> "This backup was created for another platform."
-    is ConfigBackupException.DecryptionFailed -> "The backup could not be decrypted. The password may be incorrect or the file may be damaged."
-    is ConfigBackupException.InvalidCryptoMetadata, is ConfigBackupException.MalformedPayload, is ConfigBackupException.InvalidContents -> "The backup is damaged or contains invalid data."
-    is ConfigBackupException.InputTooLarge, AndroidConfigurationBackupException.FileTooLarge -> "The selected backup is too large."
-    AndroidConfigurationBackupException.InvalidPlatformSettings -> "This backup contains unsupported Android settings."
-    AndroidConfigurationBackupException.NoConfiguredAccount -> "Configure a Miniflux account before exporting a backup."
-    AndroidConfigurationBackupException.RollbackFailed -> "The restore failed and the previous configuration could not be recovered. Restart FluxNews before making further changes."
-    else -> "The configuration backup operation failed."
+private fun backupMessage(error: Exception, context: android.content.Context): String = when (error) {
+    is ConfigBackupException.EmptyPassword -> context.getString(R.string.backup_empty_password)
+    is ConfigBackupException.NotFluxBackup -> context.getString(R.string.backup_invalid)
+    is ConfigBackupException.UnsupportedVersion -> context.getString(R.string.backup_unsupported)
+    is ConfigBackupException.PlatformMismatch -> context.getString(R.string.backup_platform)
+    is ConfigBackupException.DecryptionFailed -> context.getString(R.string.backup_decrypt)
+    is ConfigBackupException.InvalidCryptoMetadata, is ConfigBackupException.MalformedPayload, is ConfigBackupException.InvalidContents -> context.getString(R.string.backup_corrupt)
+    is ConfigBackupException.InputTooLarge, AndroidConfigurationBackupException.FileTooLarge -> context.getString(R.string.backup_too_large)
+    AndroidConfigurationBackupException.InvalidPlatformSettings -> context.getString(R.string.backup_android_settings)
+    AndroidConfigurationBackupException.NoConfiguredAccount -> context.getString(R.string.backup_no_account)
+    AndroidConfigurationBackupException.RollbackFailed -> context.getString(R.string.backup_rollback)
+    else -> context.getString(R.string.backup_operation_failed)
 }

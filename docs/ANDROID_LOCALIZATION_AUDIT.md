@@ -40,6 +40,42 @@ The entries above have been migrated to Android string resources in this PR. A f
 
 **Decision:** keep C1 extraction **in progress**, Weblate resource structure **established**, translation catalogs **awaiting reviewed translations**.
 
+## Broader source audit — 2026-10-12 (PR #46 head)
+
+The extended review covered the production Kotlin source tree (71 files), including Compose screens, state models, media sessions, notifications, widget and background subsystems. This is a **source-level audit**, not an emulator/device acceptance test. It inspected additional patterns excluded from the original high-confidence CI guard: immediate snackbar literals, `ifBlank` placeholders, error-state assignments, Media3 labels and non-Compose notifications.
+
+### Confirmed translatable findings still open
+
+| Area | Kotlin source / approximate line on PR #46 | Examples | Required action |
+| --- | --- | --- | --- |
+| Timeline action failures | `AndroidArticleTimelineView.kt:140` | Invalid Miniflux URL snackbar | Resource and composable-safe resolution |
+| Search action failures | `AndroidSearch.kt:662–663, 679` | Invalid web URL; could not open article; Miniflux URL | Resource and configuration-aware message |
+| Listening List fallback metadata | `AndroidListeningListDestination.kt:144, 368, 387` | Unknown Feed, Untitled News | Resources instead of English fallbacks |
+| Audio player metadata | `AndroidMediaPlayerSheet.kt:491` | Audio fallback title | Resource |
+| Per-feed settings | `AndroidFeedSettingsScreen.kt:100–121, 147–221` | Load/save/permission error and five option titles | Resources for state messages and headings |
+| Bulk feed operations | `AndroidBulkFeedSettingsScreen.kt:85, 102, 114` | Load/save/notification-permission errors | Resources for errors |
+| Core article settings | `CoreArticleSettingsSection.kt:43, 52, 72, 84, 92, 106, 127` | Load/save errors and setting titles | Resource-based state and UI |
+| Config backup | `ConfigurationBackupScreen.kt:73` | Cannot write selected location | Localized error |
+| Navigation startup | `AdaptiveAppShell.kt:118` | Navigation data could not be loaded | Localized model error |
+| Legacy migration status | `AndroidLegacyMigrationNotice.kt:65–68` | Step/status descriptions; skipped items | Resource strings, formatted placeholders |
+| Audio enclosure chooser | `AndroidArticleActions.kt:216` | Audio N fallback | Resource with formatted index |
+| Android Auto projection compatibility fallback | `AndroidAutoMediaLibrary.kt` | Context-free English defaults retained for helper/test usage | Confirm if any production call lacks context; eliminate English fallback if possible without breaking tests |
+| User-configurable action labels | `SettingsShell.kt:264` | `+ ${action.displayName}` (display name may itself be hardcoded) | Trace origin of `displayName` and move user labels to resources |
+
+This is **not a proof of zero undiscovered UI strings**. The reported files/locations are confirmed examples from source inspection; more patterns can appear in the full CI inventory. Symbols such as checkmarks/arrows and clipboard labels are not necessarily translatable prose; review them for accessibility separately.
+
+### Items not requiring UI translation
+
+`AndroidBackgroundSync.kt` retry/exception text, diagnostic-only `AndroidSystemNotifications.kt` exception logging, API identifiers, deep-link IDs and internal media identifiers remain technical. They must not be indiscriminately moved to resources.
+
+### Resource structure
+
+At the audit snapshot the base Android `values/strings.xml` contains approximately **260 string keys** and **3 plurals**, with no duplicate base string key found by the resource inspection. Locale catalogs exist for German, Spanish, Galician, Dutch, Tamil and Turkish, but language-complete translated content is not yet established. Formatting correctness and localization behavior still require targeted CI/runtime verification.
+
+### Audit verdict
+
+**C1 NOT YET TECHNICALLY COMPLETE.** Meaningful untranslated UI text persists in settings, state-driven messages, search/timeline actions and fallback content. PR #46 addresses media and notification surfaces but does not clear these examples. Expand the CI heuristic for future changes, maintain the full informational inventory, resolve the findings, and then perform device/emulator acceptance with another system locale. Do not equate green CI with 100% extraction.
+
 ## Android Auto and foreground download follow-up
 
 After the audited Compose cleanup (#45, merge `1b729995ee9059ae6cfd3057fecba0df6c582b7b`), this follow-up moves the confirmed Android Auto browse root/filter labels, missing feed/article titles, media command display labels and MediaTransfer foreground-notification channel/title/body into Android string resources. Android Auto feed-count subtitles now use Android plural forms. The production Media3 session supplies its Android `Context` to browse projections; helper calls without a context retain their old English fallback for compatibility with call sites/tests.

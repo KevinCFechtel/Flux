@@ -86,6 +86,7 @@ internal fun AndroidMediaPlayerSheet(
     val playback by coordinator.state.collectAsState()
     val sleepTimer by coordinator.sleepTimer.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val audit_show_notes_failText = stringResource(R.string.audit_show_notes_fail)
     val previewEnclosure = remember(previewItem, playback.enclosureId) {
         previewItem?.let { item ->
             item.activeEnclosureId
@@ -202,7 +203,7 @@ internal fun AndroidMediaPlayerSheet(
                 },
                 onFailure = {
                     if (showNotesRequestGeneration == requestGeneration) {
-                        showNotesError = "Show Notes could not be loaded."
+                        showNotesError = audit_show_notes_failText
                         showNotesLoading = false
                     }
                 },
@@ -365,7 +366,7 @@ internal fun AndroidMediaPlayerSheet(
                                                         showNotesLoading = false
                                                     },
                                                     onFailure = {
-                                                        showNotesError = "Show Notes could not be loaded."
+                                                        showNotesError = audit_show_notes_failText
                                                         showNotesLoading = false
                                                     },
                                                 )
@@ -384,7 +385,7 @@ internal fun AndroidMediaPlayerSheet(
                                                     showNotesLoading = false
                                                 },
                                                 onFailure = {
-                                                    showNotesError = "Show Notes could not be loaded."
+                                                    showNotesError = audit_show_notes_failText
                                                     showNotesLoading = false
                                                 },
                                             )
@@ -488,7 +489,7 @@ private fun AndroidMediaPlayerControls(
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Text(
-                displayedTitle?.ifBlank { "Audio" } ?: "Audio",
+                displayedTitle?.ifBlank { stringResource(R.string.article_audio) } ?: stringResource(R.string.article_audio),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,

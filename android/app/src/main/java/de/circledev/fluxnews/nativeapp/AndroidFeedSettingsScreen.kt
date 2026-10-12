@@ -82,6 +82,9 @@ internal fun AndroidFeedSettingsScreen(
     val coreRuntime = application.coreRuntime
     val notifications = LocalAndroidSystemNotifications.current
     val scope = rememberCoroutineScope()
+    val audit_feed_loadText = stringResource(R.string.audit_feed_load)
+    val audit_feed_saveText = stringResource(R.string.audit_feed_save)
+    val audit_permission_requiredText = stringResource(R.string.audit_permission_required)
 
     var preferences by remember(feedId) { mutableStateOf<FeedPreferences?>(null) }
     var error by remember(feedId) { mutableStateOf<String?>(null) }
@@ -97,7 +100,7 @@ internal fun AndroidFeedSettingsScreen(
             }
             .onFailure {
                 preferences = null
-                error = "Feed settings could not be loaded."
+                error = audit_feed_loadText
             }
     }
 
@@ -108,7 +111,7 @@ internal fun AndroidFeedSettingsScreen(
             error = null
             runCatching { change() }
                 .onSuccess { refreshGeneration += 1 }
-                .onFailure { error = "Feed settings could not be saved." }
+                .onFailure { error = audit_feed_saveText }
             saving = false
         }
     }
@@ -118,7 +121,7 @@ internal fun AndroidFeedSettingsScreen(
     ) { granted ->
         pendingNotificationEnable = false
         if (!granted) {
-            error = "Notification permission is required before System Notifications can be enabled."
+            error = audit_permission_requiredText
         } else {
             update {
                 notifications.setFeedEnabled(feedId, true).getOrThrow()
@@ -144,7 +147,7 @@ internal fun AndroidFeedSettingsScreen(
             CircularProgressIndicator()
         } else {
             SettingsPickerRow(
-                title = "Detail Rendering",
+                title = stringResource(R.string.feed_detail_rendering),
                 selected = current.detailRendering,
                 options = listOf(
                     DetailRenderingMode.RENDERED to "Rendered",
@@ -158,7 +161,7 @@ internal fun AndroidFeedSettingsScreen(
             }
 
             SettingsSwitchRow(
-                title = "Truncate Detail",
+                title = stringResource(R.string.feed_truncate_detail),
                 checked = current.truncateDetail,
                 enabled = !saving,
             ) { enabled ->
@@ -170,7 +173,7 @@ internal fun AndroidFeedSettingsScreen(
             HorizontalDivider()
 
             SettingsSwitchRow(
-                title = "System Notifications",
+                title = stringResource(R.string.feed_system_notifications),
                 checked = current.systemNotificationsEnabled,
                 enabled = !saving && !pendingNotificationEnable,
             ) { enabled ->
@@ -208,7 +211,7 @@ internal fun AndroidFeedSettingsScreen(
             HorizontalDivider()
 
             SettingsSwitchRow(
-                title = "Open in Miniflux",
+                title = stringResource(R.string.feed_open_miniflux),
                 checked = current.openInMiniflux,
                 enabled = !saving,
             ) { enabled ->
@@ -218,7 +221,7 @@ internal fun AndroidFeedSettingsScreen(
             }
 
             SettingsSwitchRow(
-                title = "Automatically Download Audio",
+                title = stringResource(R.string.feed_auto_download_audio),
                 checked = current.autoDownloadAudio,
                 enabled = !saving,
             ) { enabled ->

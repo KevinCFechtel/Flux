@@ -332,7 +332,9 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
 @Composable
 private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifier) {
     var state by remember { mutableStateOf<AndroidMediaSettings.State?>(null) }; var saving by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
-    suspend fun reload() { settings.load().fold({ state = it; error = null }, { error = "Media settings could not be loaded. Please try again." }) }; LaunchedEffect(settings) { reload() }
+    val mediaLoadError = stringResource(R.string.audit_media_load)
+    val mediaSaveError = stringResource(R.string.audit_media_save)
+    suspend fun reload() { settings.load().fold({ state = it; error = null }, { error = mediaLoadError }) }; LaunchedEffect(settings) { reload() }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 val current = state
         if (current == null) CircularProgressIndicator() else {
@@ -350,7 +352,7 @@ val current = state
                     saving = true
                     settings.setDownloadNetworkPolicy(policy).fold(
                         { reload() },
-                        { error = "Media setting could not be saved. Please try again." },
+                        { error = mediaSaveError },
                     )
                     saving = false
                 }
@@ -365,7 +367,7 @@ val current = state
                     saving = true
                     settings.setDownloadRetention(choice).fold(
                         { reload() },
-                        { error = "Media setting could not be saved. Please try again." },
+                        { error = mediaSaveError },
                     )
                     saving = false
                 }
@@ -377,7 +379,7 @@ val current = state
                     saving = true
                     settings.setAutoDownloadListeningList(value).fold(
                         { reload() },
-                        { error = "Media setting could not be saved. Please try again." },
+                        { error = mediaSaveError },
                     )
                     saving = false
                 }
@@ -387,7 +389,7 @@ val current = state
                     saving = true
                     settings.setDeleteAfterPlayback(value).fold(
                         { reload() },
-                        { error = "Media setting could not be saved. Please try again." },
+                        { error = mediaSaveError },
                     )
                     saving = false
                 }
@@ -397,7 +399,7 @@ val current = state
                     saving = true
                     settings.setRemoveCompletedListeningList(value).fold(
                         { reload() },
-                        { error = "Media setting could not be saved. Please try again." },
+                        { error = mediaSaveError },
                     )
                     saving = false
                 }
@@ -410,8 +412,10 @@ val current = state
 @Composable
 private fun DownloadedDataSettingsScreen(downloadedData: AndroidDownloadedData, modifier: Modifier) {
     var summary by remember { mutableStateOf<AndroidDownloadedData.Summary?>(null) }; var loading by remember { mutableStateOf(false) }; var deleting by remember { mutableStateOf(false) }; var confirmDelete by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
-    suspend fun reload() { loading = true; downloadedData.summary().fold({ summary = it; error = null }, { error = "Downloaded data could not be loaded. Please try again." }); loading = false }; LaunchedEffect(downloadedData) { reload() }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.downloads_delete_confirm_title)) }, text = { Text(stringResource(R.string.downloads_delete_confirm_body)) }, confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch { deleting = true; downloadedData.requestDeleteAll().fold({ reload() }, { error = "Downloads could not be deleted. Please try again." }); deleting = false } }) { Text(stringResource(R.string.downloads_delete)) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } })
+    val downloadedLoadError = stringResource(R.string.audit_downloaded_load)
+    val downloadedDeleteError = stringResource(R.string.audit_downloaded_delete)
+    suspend fun reload() { loading = true; downloadedData.summary().fold({ summary = it; error = null }, { error = downloadedLoadError }); loading = false }; LaunchedEffect(downloadedData) { reload() }
+    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.downloads_delete_confirm_title)) }, text = { Text(stringResource(R.string.downloads_delete_confirm_body)) }, confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch { deleting = true; downloadedData.requestDeleteAll().fold({ reload() }, { error = downloadedDeleteError }); deleting = false } }) { Text(stringResource(R.string.downloads_delete)) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } })
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (loading && summary == null) CircularProgressIndicator() else summary?.let { current -> DownloadedDataValueRow(stringResource(R.string.downloads_files), NumberFormat.getIntegerInstance().format(current.fileCount.toLong())); DownloadedDataValueRow(stringResource(R.string.downloads_storage_used), formatBytes(current.totalSizeBytes)); Text(stringResource(R.string.downloads_storage_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); HorizontalDivider(); Button(enabled = !deleting && current.fileCount > 0uL, onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text(stringResource(R.string.downloads_delete_all)) } }
         if (deleting) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text(stringResource(R.string.downloads_deleting)) }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; TextButton(enabled = !loading && !deleting, onClick = { scope.launch { reload() } }) { Text(stringResource(R.string.action_refresh)) }

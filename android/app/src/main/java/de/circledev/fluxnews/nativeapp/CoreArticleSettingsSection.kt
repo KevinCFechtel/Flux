@@ -33,6 +33,10 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val audit_core_loadText = stringResource(R.string.audit_core_load)
+    val audit_core_retentionText = stringResource(R.string.audit_core_retention)
+    val audit_core_limitText = stringResource(R.string.audit_core_limit)
+    val audit_core_immediateText = stringResource(R.string.audit_core_immediate)
 
     fun reload() {
         scope.launch {
@@ -40,7 +44,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
             error = null
             settings.load().fold(
                 onSuccess = { state = it },
-                onFailure = { error = "Core article settings could not be loaded. Please try again." },
+                onFailure = { error = audit_core_loadText },
             )
             loading = false
         }
@@ -49,7 +53,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     LaunchedEffect(settings) {
         settings.load().fold(
             onSuccess = { state = it },
-            onFailure = { error = "Core article settings could not be loaded. Please try again." },
+            onFailure = { error = audit_core_loadText },
         )
         loading = false
     }
@@ -69,7 +73,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
                 ReadArticleRetention.DAYS365,
             )
             SettingsPickerRow(
-                title = "Keep read articles",
+                title = stringResource(R.string.audit_keep_read),
                 selected = current.retention,
                 options = retentionOptions.map { it to it.androidDisplayName() },
                 enabled = !saving,
@@ -81,7 +85,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
                 scope.launch {
                     settings.setRetention(option).onFailure {
                         state = previous
-                        error = "Read article retention setting could not be saved. Please try again."
+                        error = audit_core_retentionText
                     }
                     saving = false
                 }
@@ -89,7 +93,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
 
             val detailLimitOptions = listOf(5_000u, 10_000u, 20_000u)
             SettingsPickerRow(
-                title = "Reader detail limit",
+                title = stringResource(R.string.audit_reader_limit),
                 selected = current.detailCharacterLimit,
                 options = detailLimitOptions.map { option ->
                     option to "${option.toInt().formattedWithGrouping()} characters"
@@ -103,7 +107,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
                 scope.launch {
                     settings.setDetailCharacterLimit(option).onFailure {
                         state = previous
-                        error = "Reader detail limit setting could not be saved. Please try again."
+                        error = audit_core_limitText
                     }
                     saving = false
                 }
@@ -124,7 +128,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
                 scope.launch {
                     settings.setLiveMutationDelivery(enabled).onFailure {
                         state = previous
-                        error = "Immediate article sync setting could not be saved. Please try again."
+                        error = audit_core_immediateText
                     }
                     saving = false
                 }

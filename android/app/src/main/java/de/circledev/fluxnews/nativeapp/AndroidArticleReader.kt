@@ -348,7 +348,7 @@ internal fun AndroidArticleReaderOverlay(
                                     verticalArrangement = Arrangement.Center,
                                 ) {
                                     Text(
-                                        state.errorMessage ?: "Article content could not be loaded.",
+                                        stringResource(R.string.audit_reader_load_fail),
                                         style = MaterialTheme.typography.bodyLarge,
                                     )
                                     Spacer(Modifier.height(12.dp))
@@ -645,9 +645,10 @@ private fun ReaderImageBlock(block: ReaderBlock.Image) {
     }
 }
 
+@Composable
 private fun readerNotice(simplified: Boolean, truncated: Boolean): String? = when {
-    simplified && truncated -> "Some content was simplified and truncated."
-    simplified -> "Some content was simplified."
-    truncated -> "Some content was truncated."
+    simplified && truncated -> stringResource(R.string.audit_reader_simplified_truncated)
+    simplified -> stringResource(R.string.audit_reader_simplified)
+    truncated -> stringResource(R.string.audit_reader_truncated)
     else -> null
 }

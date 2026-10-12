@@ -213,7 +213,7 @@ internal fun AndroidArticleDownloadChooserDialog(
                         },
                         enabled = download?.state != DownloadState.DELETE_REQUESTED,
                     ) {
-                        val type = enclosure.mimeType.ifBlank { "Audio " + (index + 1) }
+                        val type = enclosure.mimeType.ifBlank { stringResource(R.string.audit_audio_number, index + 1) }
                         Text(type + " · " + androidMediaDownloadActionLabel(download?.state))
                     }
                 }

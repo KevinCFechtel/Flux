@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -183,7 +184,7 @@ private fun FluxNewsApp(
         when (val state = bootstrapState) {
             AndroidAccountBootstrap.State.Starting -> StartupProgress()
             AndroidAccountBootstrap.State.AccountRequired -> if (showingRestore) {
-                StandaloneStartupSurface(title = "Restore Configuration") { contentModifier ->
+                StandaloneStartupSurface(title = stringResource(R.string.audit_app_restore)) { contentModifier ->
                     ConfigurationBackupScreen(
                         LocalAndroidConfigurationBackup.current,
                         { showingRestore = false; (bootstrap.state as? AndroidAccountBootstrap.State.Ready)?.let(::acceptActivatedAccount) },
@@ -193,7 +194,7 @@ private fun FluxNewsApp(
                     )
                 }
             } else {
-                StandaloneStartupSurface(title = "Set Up FluxNews") { contentModifier ->
+                StandaloneStartupSurface(title = stringResource(R.string.audit_app_setup)) { contentModifier ->
                     AccountConfigurationScreen(
                         bootstrap,
                         false,
@@ -263,7 +264,7 @@ private fun FluxNewsApp(
     }
 }
 
-@Composable private fun StartupProgress() { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(); Text("Starting FluxNews…", style = MaterialTheme.typography.bodyLarge) } } }
+@Composable private fun StartupProgress() { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(); Text(stringResource(R.string.audit_app_starting), style = MaterialTheme.typography.bodyLarge) } } }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StandaloneStartupSurface(
@@ -294,14 +295,14 @@ private fun RecoverableStartup(
     onRetry: () -> Unit,
     onAccountActivated: (AndroidAccountBootstrap.State.Ready) -> Unit,
 ) {
-    StandaloneStartupSurface(title = "FluxNews could not start") { contentModifier ->
+    StandaloneStartupSurface(title = stringResource(R.string.audit_app_failed)) { contentModifier ->
         Column(modifier = contentModifier) {
             Column(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(message, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onRetry) { Text("Retry") }
+                Button(onClick = onRetry) { Text(stringResource(R.string.list_retry)) }
             }
             AccountConfigurationScreen(
                 bootstrap,

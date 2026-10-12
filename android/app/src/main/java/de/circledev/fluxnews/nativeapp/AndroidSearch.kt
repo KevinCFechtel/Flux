@@ -608,6 +608,8 @@ internal fun AndroidSearchDestination(
     val context = LocalContext.current
     // Resolve translated UI copy during composition, not through LocalContext in event handlers.
     val badArticleUrlMessage = stringResource(R.string.search_bad_article_url)
+    val articleOpenError = stringResource(R.string.audit_article_open)
+    val minifluxUrlError = stringResource(R.string.audit_miniflux_url)
     val badCommentsUrlMessage = stringResource(R.string.search_bad_comments_url)
     val shareFailedMessage = stringResource(R.string.search_share_failed)
     val linkCopiedMessage = stringResource(R.string.search_link_copied)
@@ -659,8 +661,8 @@ internal fun AndroidSearchDestination(
         actionScope.launch {
             when (val destination = openResolver.resolve(article, preferences.openArticle)) {
                 AndroidNormalOpenDestination.Reader -> readerStore.open(article, AndroidReaderSource.Search)
-                is AndroidNormalOpenDestination.Web -> if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) snackbar.showSnackbar("The article does not have a valid web URL.")
-                null -> snackbar.showSnackbar("The article could not be opened.")
+                is AndroidNormalOpenDestination.Web -> if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) snackbar.showSnackbar(badArticleUrlMessage)
+                null -> snackbar.showSnackbar(articleOpenError)
             }
         }
     }
@@ -676,7 +678,7 @@ internal fun AndroidSearchDestination(
                 store.requestSetRead(article.id, true, providesFeedback = false)
                 actionScope.launch {
                     val url = store.resolveMinifluxEntryUrl(article.id)
-                    if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
+                    if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar(minifluxUrlError)
                 }
             }
             AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(badCommentsUrlMessage)
