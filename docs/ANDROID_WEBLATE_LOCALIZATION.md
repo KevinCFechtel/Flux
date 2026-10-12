@@ -53,3 +53,7 @@ The Android GitHub Actions workflow runs `python3 android/Build/check-localizati
 For a local, non-blocking **full inventory** run `python3 android/Build/check-localization.py --all`; output is file:line plus rule. The full inventory is reporting-only and does not declare C1 complete. When a flagged literal genuinely cannot be translated, document a narrow exception on that line with `// l10n-ignore: reason`. Avoid blanket suppression. This guard is heuristic and **does not cover every dynamically constructed user-facing message**; continue manual review for notifications, workers and formatted messages.
 
 The CI step uses full Git history and the pull-request base SHA (or the previous push SHA on main) so the diff check is reproducible; it fails on new violations.
+
+## Latest C1 audit
+
+See [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md) for confirmed remaining Kotlin UI literals, the blocking incremental guard versus the informational full inventory, and release closeout criteria. C1 remains in progress; green CI does not imply complete localization or reviewed translations.
