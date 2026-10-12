@@ -46,7 +46,7 @@ internal fun SupportDiagnosticsScreen(diagnostics: AndroidAppDiagnostics, modifi
         HorizontalDivider(); TextButton(onClick = { confirmClear = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.diagnostics_clear)) }
         Text(stringResource(R.string.diagnostics_retention), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text(stringResource(R.string.diagnostics_clear_confirm)) }, text = { Text(stringResource(R.string.diagnostics_clear_description))) }, confirmButton = { TextButton(onClick = { diagnostics.clear(); confirmClear = false }) { Text(stringResource(R.string.diagnostics_clear)) } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) } })
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text(stringResource(R.string.diagnostics_clear_confirm)) }, text = { Text(stringResource(R.string.diagnostics_clear_description)) }, confirmButton = { TextButton(onClick = { diagnostics.clear(); confirmClear = false }) { Text(stringResource(R.string.diagnostics_clear)) } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) } })
 }
 
 @Composable
@@ -67,8 +67,8 @@ private fun AndroidLogViewer(diagnostics: AndroidAppDiagnostics, onBack: () -> U
         OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.diagnostics_search)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Box { OutlinedButton(onClick = { menuOpen = true }) { Text(stringResource(R.string.diagnostics_level, stringResource(filter.titleRes))) }; DropdownMenu(menuOpen, { menuOpen = false }) { AndroidLogLevelFilter.entries.forEach { item -> DropdownMenuItem({ Text(stringResource(item.titleRes)) }, { filter = item; menuOpen = false }) } } }
         Text(pluralStringResource(R.plurals.diagnostics_visible_records, visible.size, visible.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (visible.isEmpty()) Text(stringResource(R.string.diagnostics_no_results)), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        visible.forEach { entry -> Card(Modifier.fillMaxWidth().clickable { copy(context, AndroidAppDiagnostics.recordText(entry)) }) { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${entry.level.name.uppercase()} · ${entry.category}", style = MaterialTheme.typography.labelLarge); Text(entry.timestamp, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(entry.message, style = MaterialTheme.typography.bodyMedium); Text(stringResource(R.string.diagnostics_tap_copy)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+        if (visible.isEmpty()) Text(stringResource(R.string.diagnostics_no_results), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        visible.forEach { entry -> Card(Modifier.fillMaxWidth().clickable { copy(context, AndroidAppDiagnostics.recordText(entry)) }) { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${entry.level.name.uppercase()} · ${entry.category}", style = MaterialTheme.typography.labelLarge); Text(entry.timestamp, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(entry.message, style = MaterialTheme.typography.bodyMedium); Text(stringResource(R.string.diagnostics_tap_copy), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
     }
 }
 
