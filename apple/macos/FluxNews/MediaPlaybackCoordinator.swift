@@ -6,8 +6,12 @@ import Combine
 
 enum MediaPlaybackPaths {
     static var mediaRootURL: URL {
-        FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
+        // Internal downloads must remain in the app's sandbox container.
+        // The pre-release developer's former ~/Movies/FluxNews data is deliberately
+        // not migrated when enabling the sandbox.
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("FluxNews", isDirectory: true)
+            .appendingPathComponent("Media", isDirectory: true)
     }
 }
 

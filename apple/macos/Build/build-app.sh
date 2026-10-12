@@ -111,10 +111,12 @@ verify_app_group_entitlement() {
 }
 
 verify_app_group_entitlement "${APP_DIR}"
-if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLEMENTS_FILE}" >/dev/null 2>&1; then
-  echo "Host App Sandbox entitlement changed unexpectedly." >&2
-  exit 1
-fi
+for capability in com.apple.security.app-sandbox com.apple.security.network.client com.apple.security.files.user-selected.read-write; do
+  [[ "$(/usr/libexec/PlistBuddy -c "Print :${capability}" "${ENTITLEMENTS_FILE}")" == "true" ]] || {
+    echo "Required host Sandbox entitlement is missing: ${capability}" >&2
+    exit 1
+  }
+done
 verify_app_group_entitlement "${WIDGET_EXTENSION}"
 
 codesign -d --entitlements :- "${WIDGET_EXTENSION}" > "${ENTITLEMENTS_FILE}"
