@@ -126,3 +126,18 @@ A focused third pass confirmed additional **directly displayed** literals overlo
 Mapped 39 known legacy string messages to Android resources in `AndroidLocalizedLegacyMessages.kt` and applied the presentation resolver for timeline error and action snackbars, search feedback and paging errors, account activation and startup messages, Listening List loading errors, and player errors. This deliberately preserves current store/test string contracts and resolves resources on the UI side (without introducing `Context` into jobs). The English model literals are not removed, so the mapping is an interim compatibility bridge rather than a strong type-safe localization model. Messages not in this mapping fall back unchanged and require targeted acceptance and further review.
 
 **Outstanding before C1 closeout:** Complete source-level re-audit of all 71 Kotlin files after this change (the follow-up sampled high-risk screens and store paths), verify widget scope title generation and offline sync display paths, review persisted migration status strings, run an actual alternate-locale acceptance check, and confirm a green Android workflow for the final commit. Do not mark C1 complete on the basis of this mapping alone.
+
+### Full 72-file source-pattern inventory — 2026-10-12
+
+After adding the localization bridge, the production tree contains **72 Kotlin files** under `android/app/src/main` (previous audit: 71). Each was revisited through a line-oriented source-pattern search for quoted labels adjacent to Compose text, accessibility and state messages, feedback emissions, fallbacks, and status fields. This is still a **heuristic** audit, not AST/data-flow proof.
+
+The sweep exposed additional direct labels in `AdaptiveAppShell.kt` (navigation collapse/expand) and `ConfigurationBackupScreen.kt` (successful restore message); extracted in `fd409d7`. The earlier `51afc42` and `6fc778d` changes cover several other direct labels and bridge known store-produced messages to resources.
+
+**Still requiring decisions/acceptance:**
+- `AndroidWidgetContract.kt`: projection reader creates English scope titles (All News, Bookmarks, Category, Feed) without an Android Context; verify the provider or replace projection display titles at its context-aware boundary.
+- `AndroidLegacySettingsMigration.kt` and `AndroidLegacyMigrationNotice.kt`: persisted migration status/reason prose can reach the dialog and is not fully translated by the existing default-step remapping.
+- `AndroidAccountBootstrap.kt`, `AndroidArticleTimeline.kt`, `AndroidSearch.kt`, `AndroidListeningList.kt`, `AndroidMediaPlaybackCoordinator.kt`, and `AndroidSyncCoordinator.kt`: English model/store messages remain as compatibility literals and are mapped only when present in `AndroidLocalizedLegacyMessages.kt`; dynamic/unmapped external errors require verification.
+- Context-free `AndroidAutoMediaLibrary.kt` compatibility call paths deliberately retain English fallback; verify the production media service always supplies Context.
+- Clipboard labels and technical diagnostic exception strings are not ordinary visible UI copy; accessibility and platform surfaces warrant a separate check.
+
+**Status: C1 not closed.** The sweep does not replace an instrumented runtime locale acceptance test. Verify CI on the latest commit before any merge, and explicitly check widget headlines, migration skipped reasons, Android Auto and source error paths in another locale.
