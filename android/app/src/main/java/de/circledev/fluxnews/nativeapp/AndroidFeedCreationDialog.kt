@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.CreateFeedRequest
@@ -50,6 +51,20 @@ internal object AndroidFeedCreationPolicy {
 
     fun isDuplicateCategory(title: String, existing: List<AndroidNavigationCategoryRef>): Boolean =
         existing.any { it.title.trim().equals(title.trim(), ignoreCase = true) }
+
+    fun failureResource(error: Throwable, isFeed: Boolean): Int {
+        val description = error.message.orEmpty()
+        return when {
+            listOf("already exists", "already subscribed", "duplicate", "409").any { description.contains(it, ignoreCase = true) } ->
+                if (isFeed) R.string.feed_already_subscribed else R.string.feed_category_already_exists
+            listOf("unauthorized", "authentication").any { description.contains(it, ignoreCase = true) } ->
+                R.string.feed_auth_failed
+            listOf("connect", "network", "timeout").any { description.contains(it, ignoreCase = true) } ->
+                R.string.feed_connection_failed
+            isFeed -> R.string.feed_create_failed
+            else -> R.string.feed_category_create_failed
+        }
+    }
 
     fun failureMessage(error: Throwable, isFeed: Boolean): String {
         val description = error.message.orEmpty()
@@ -96,13 +111,13 @@ internal fun AndroidAddFeedDialog(
     var candidates by remember { mutableStateOf<List<DiscoveredSubscription>>(emptyList()) }
     var selectedCandidate by remember { mutableIntStateOf(0) }
     var working by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorResource by remember { mutableStateOf<Int?>(null) }
     val normalizedUrl = AndroidFeedCreationPolicy.validUrl(url)
-    val categoryLabel = categories.firstOrNull { it.id == categoryId }?.title ?: "Miniflux default"
+    val categoryLabel = categories.firstOrNull { it.id == categoryId }?.title ?: stringResource(R.string.feed_default_category)
 
     suspend fun create(feedUrl: String) {
         working = true
-        error = null
+        errorResource = null
         runCatching {
             coreRuntime.remoteForGeneration(sessionGeneration) { core ->
                 core.createFeed(
@@ -124,14 +139,14 @@ internal fun AndroidAddFeedDialog(
                 )
             }
         }.onSuccess { onCreated(AndroidCreatedNavigationItem.Feed(it.feedId)) }
-            .onFailure { error = AndroidFeedCreationPolicy.failureMessage(it, isFeed = true) }
+            .onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = true) }
         working = false
     }
 
     fun discover() {
         val submitted = normalizedUrl ?: return
         working = true
-        error = null
+        errorResource = null
         scope.launch {
             runCatching {
                 coreRuntime.remoteForGeneration(sessionGeneration) { core ->
@@ -147,21 +162,21 @@ internal fun AndroidAddFeedDialog(
                 }
             }.onSuccess { found ->
                 when (found.size) {
-                    0 -> error = "Miniflux did not find any feeds at this address."
+                    0 -> errorResource = R.string.feed_discovery_empty
                     1 -> create(found.single().url)
                     else -> {
                         candidates = found
                         selectedCandidate = 0
                     }
                 }
-            }.onFailure { error = AndroidFeedCreationPolicy.failureMessage(it, isFeed = true) }
+            }.onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = true) }
             working = false
         }
     }
 
     AlertDialog(
         onDismissRequest = { if (!working) onDismiss() },
-        title = { Text(if (candidates.isEmpty()) "Add Feed" else "Choose a Feed") },
+        title = { Text(stringResource(if (candidates.isEmpty()) R.string.nav_add_feed else R.string.feed_choose)) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
@@ -170,19 +185,19 @@ internal fun AndroidAddFeedDialog(
                 if (candidates.isEmpty()) {
                     OutlinedTextField(
                         value = url,
-                        onValueChange = { url = it; error = null },
-                        label = { Text("Website or feed URL") },
-                        placeholder = { Text("https://example.com") },
+                        onValueChange = { url = it; errorResource = null },
+                        label = { Text(stringResource(R.string.feed_url_label)) },
+                        placeholder = { Text(stringResource(R.string.feed_url_hint)) },
                         singleLine = true,
                         enabled = !working,
                         isError = url.isNotBlank() && normalizedUrl == null,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "Miniflux will discover the available feeds at this address.",
+                        stringResource(R.string.feed_discovery_explanation),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Text("Category", style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.feed_category), style = MaterialTheme.typography.labelLarge)
                     androidx.compose.foundation.layout.Box {
                         OutlinedButton(
                             onClick = { categoryMenuExpanded = true },
@@ -193,7 +208,7 @@ internal fun AndroidAddFeedDialog(
                             onDismissRequest = { categoryMenuExpanded = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Miniflux default") },
+                                text = { Text(stringResource(R.string.feed_default_category)) },
                                 onClick = { categoryId = null; categoryMenuExpanded = false },
                             )
                             categories.forEach { category ->
@@ -224,8 +239,8 @@ internal fun AndroidAddFeedDialog(
                         }
                     }
                 }
-                if (error != null) Text(
-                    error.orEmpty(),
+                if (errorResource != null) Text(
+                    stringResource(errorResource!!),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -239,13 +254,13 @@ internal fun AndroidAddFeedDialog(
                     if (candidates.isEmpty()) discover()
                     else scope.launch { create(candidates[selectedCandidate].url) }
                 },
-            ) { Text(if (candidates.isEmpty()) "Continue" else "Add") }
+            ) { Text(stringResource(if (candidates.isEmpty()) R.string.action_continue else R.string.action_add)) }
         },
         dismissButton = {
             TextButton(enabled = !working, onClick = {
-                if (candidates.isNotEmpty()) { candidates = emptyList(); error = null }
+                if (candidates.isNotEmpty()) { candidates = emptyList(); errorResource = null }
                 else onDismiss()
-            }) { Text(if (candidates.isEmpty()) "Cancel" else "Back") }
+            }) { Text(stringResource(if (candidates.isEmpty()) R.string.action_cancel else R.string.action_back)) }
         },
     )
 }
@@ -261,30 +276,30 @@ internal fun AndroidAddCategoryDialog(
     val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorResource by remember { mutableStateOf<Int?>(null) }
     val normalized = AndroidFeedCreationPolicy.categoryTitle(title)
     val duplicate = normalized != null && AndroidFeedCreationPolicy.isDuplicateCategory(normalized, categories)
 
     AlertDialog(
         onDismissRequest = { if (!working) onDismiss() },
-        title = { Text("Add Category") },
+        title = { Text(stringResource(R.string.nav_add_category)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
-                    onValueChange = { title = it; error = null },
-                    label = { Text("Category name") },
+                    onValueChange = { title = it; errorResource = null },
+                    label = { Text(stringResource(R.string.feed_category_name)) },
                     singleLine = true,
                     enabled = !working,
                     isError = duplicate,
                 )
                 if (duplicate) Text(
-                    "This category already exists.",
+                    stringResource(R.string.feed_category_already_exists),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (error != null) Text(
-                    error.orEmpty(),
+                if (errorResource != null) Text(
+                    stringResource(errorResource!!),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -297,19 +312,19 @@ internal fun AndroidAddCategoryDialog(
                 onClick = {
                     val submitted = normalized ?: return@TextButton
                     working = true
-                    error = null
+                    errorResource = null
                     scope.launch {
                         runCatching {
                             coreRuntime.remoteForGeneration(sessionGeneration) { core ->
                                 core.createCategory(submitted)
                             }
                         }.onSuccess { onCreated(AndroidCreatedNavigationItem.Category(it.categoryId)) }
-                            .onFailure { error = AndroidFeedCreationPolicy.failureMessage(it, isFeed = false) }
+                            .onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = false) }
                         working = false
                     }
                 },
-            ) { Text("Add") }
+            ) { Text(stringResource(R.string.action_add)) }
         },
-        dismissButton = { TextButton(enabled = !working, onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(enabled = !working, onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

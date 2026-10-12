@@ -1,4 +1,37 @@
 <resources>
+    <!-- Canonical source strings for Weblate. Preserve semantic keys across revisions. -->
+    <string name="nav_news">News</string>
+    <string name="nav_all_news">All News</string>
+    <string name="nav_starred">Starred</string>
+    <string name="nav_listening_list">Listening List</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_feeds">Feeds</string>
+    <string name="nav_add_feed">Add Feed</string>
+    <string name="nav_add_category">Add Category</string>
+    <string name="nav_add_feed_short">+ Feed</string>
+    <string name="nav_add_category_short">+ Category</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_feed_settings">Feed Settings</string>
+    <string name="nav_loading_feeds">Loading feeds…</string>
+    <string name="nav_toggle">Toggle navigation</string>
+    <string name="feed_choose">Choose a Feed</string>
+    <string name="feed_url_label">Website or feed URL</string>
+    <string name="feed_url_hint" translatable="false">https://example.com</string>
+    <string name="feed_discovery_explanation">Miniflux will discover the available feeds at this address.</string>
+    <string name="feed_category">Category</string>
+    <string name="feed_default_category">Miniflux default</string>
+    <string name="feed_discovery_empty">Miniflux did not find any feeds at this address.</string>
+    <string name="feed_already_subscribed">This feed is already subscribed.</string>
+    <string name="feed_category_already_exists">This category already exists.</string>
+    <string name="feed_auth_failed">Miniflux authentication failed. Check your account.</string>
+    <string name="feed_connection_failed">Could not connect to Miniflux. Check your connection and try again.</string>
+    <string name="feed_create_failed">Miniflux could not add this feed. Check the URL and try again.</string>
+    <string name="feed_category_create_failed">Miniflux could not add this category. Try another name.</string>
+    <string name="feed_category_name">Category name</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_add">Add</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_back">Back</string>
     <string name="app_name">FluxNews</string>
     <string name="native_android">Native Android</string>
     <string name="phase_e1a">Phase E1-A</string>
