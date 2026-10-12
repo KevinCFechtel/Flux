@@ -145,3 +145,7 @@ The sweep exposed additional direct labels in `AdaptiveAppShell.kt` (navigation 
 ### Widget provider follow-up — `3045c30`
 
 The real widget provider now translates the All and Bookmarks scope headers through its available Android Context, and uses localized fallback Category/Feed headings when catalog titles are missing. The context-free projection reader still provides legacy English defaults for its internal/test-facing header data. This closes the confirmed provider header display path, but a changed-locale widget refresh remains to be tested.
+
+### Final-check fixup — 2026-10-12
+
+The Android gate for `6aebd3a` failed at Kotlin compilation: `AndroidLegacyMigrationNotice.kt` had one missing parenthesis in the Done/Continue button. The follow-up closes that syntax error. A runtime display-path review additionally found the manual-sync snackbar in `AndroidArticleTimelineShell.kt` bypassing the localization bridge; it now resolves known messages through the Android `Context`. Persisted numeric migration details (missing audio, failed file adoption, missing articles, ambiguous attachments, discarded playback) are now resolved with resource plurals, including skipped-status descriptions. A dedicated JVM test covers the persisted English-format counter matching. These source-level fixes do not establish that another-locale device/emulator acceptance has occurred; target locale catalogs are still awaiting Weblate translations. CI must be rerun on the resulting commit.

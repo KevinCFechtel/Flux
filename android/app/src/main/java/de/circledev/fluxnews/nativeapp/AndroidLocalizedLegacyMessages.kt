@@ -47,3 +47,29 @@ internal fun Context.localizedLegacyUiMessage(message: String): String = when (m
     "Some legacy feeds are missing from the current catalog" -> getString(R.string.l10n_migration_feeds_missing)
     else -> message
 }
+
+
+/**
+ * Migration releases persisted English counter fragments. Localize known counts only at the
+ * display boundary; unknown legacy messages still use the existing fallback.
+ */
+private val legacyMigrationCounters = listOf(
+    Regex("""^(\d+) missing audio attachment\(s\)$""") to R.plurals.l10n_migration_missing_audio,
+    Regex("""^(\d+) file\(s\) could not be adopted$""") to R.plurals.l10n_migration_file_adoption_failed,
+    Regex("""^(\d+) missing article\(s\)$""") to R.plurals.l10n_migration_missing_article,
+    Regex("""^(\d+) ambiguous audio attachment\(s\)$""") to R.plurals.l10n_migration_ambiguous_audio,
+    Regex("""^(\d+) old playback positions? discarded: no local download and no longer available on the server\.$""") to R.plurals.l10n_migration_discarded_playback,
+)
+
+internal fun legacyMigrationCounter(message: String): Pair<Int, Int>? =
+    legacyMigrationCounters.firstNotNullOfOrNull { (pattern, resId) ->
+        pattern.matchEntire(message)?.groupValues?.get(1)?.toIntOrNull()?.let { resId to it }
+    }
+
+internal fun Context.localizedLegacyMigrationStatus(status: String): String =
+    status.split("; ").joinToString("; ") { fragment ->
+        val text = fragment.trim()
+        legacyMigrationCounter(text)?.let { (resId, count) ->
+            resources.getQuantityString(resId, count, count)
+        } ?: localizedLegacyUiMessage(text)
+    }

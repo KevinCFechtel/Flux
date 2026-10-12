@@ -194,10 +194,10 @@ internal fun NewsRootContent(
         }
     }
 
-    LaunchedEffect(syncState, shellSnackbar) {
+    LaunchedEffect(syncState, shellSnackbar, context) {
         val failed = syncState as? AndroidSyncCoordinator.State.Failed
         if (failed?.reason == SyncReason.MANUAL) {
-            shellSnackbar.showSnackbar(failed.message)
+            shellSnackbar.showSnackbar(context.localizedLegacyUiMessage(failed.message))
         }
     }
 

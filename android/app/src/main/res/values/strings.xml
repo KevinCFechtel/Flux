@@ -499,4 +499,9 @@
     <string name="l10n_backup_restored_sync">Configuration restored. Synchronization will start now.</string>
     <string name="l10n_migration_startup_missing">Selected startup feed or category is not in the current catalog</string>
     <string name="l10n_migration_feeds_missing">Some legacy feeds are missing from the current catalog</string>
+    <plurals name="l10n_migration_missing_audio"><item quantity="one">%1$d missing audio attachment</item><item quantity="other">%1$d missing audio attachments</item></plurals>
+    <plurals name="l10n_migration_file_adoption_failed"><item quantity="one">%1$d file could not be adopted</item><item quantity="other">%1$d files could not be adopted</item></plurals>
+    <plurals name="l10n_migration_missing_article"><item quantity="one">%1$d missing article</item><item quantity="other">%1$d missing articles</item></plurals>
+    <plurals name="l10n_migration_ambiguous_audio"><item quantity="one">%1$d ambiguous audio attachment</item><item quantity="other">%1$d ambiguous audio attachments</item></plurals>
+    <plurals name="l10n_migration_discarded_playback"><item quantity="one">%1$d old playback position discarded: no local download and no longer available on the server.</item><item quantity="other">%1$d old playback positions discarded: no local download and no longer available on the server.</item></plurals>
 </resources>
