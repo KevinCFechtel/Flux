@@ -334,12 +334,12 @@ private fun ArticlePublicationRow(
                 painter = painterResource(
                     if (hasAudio) R.drawable.ic_headphones else R.drawable.ic_reading_time,
                 ),
-                contentDescription = if (hasAudio) "Audio duration" else "Reading time",
+                contentDescription = stringResource(if (hasAudio) R.string.l10n_audio_duration else R.string.l10n_reading_time),
                 modifier = Modifier.size(13.dp),
                 tint = supportingColor,
             )
             Text(
-                "${article.readingTimeMinutes} min",
+                stringResource(R.string.l10n_duration_minutes_short, article.readingTimeMinutes.toInt()),
                 style = MaterialTheme.typography.labelSmall,
                 color = supportingColor,
             )

@@ -619,9 +619,9 @@ private fun AndroidMediaPlayerControls(
                         if (sleepTimer.enabled) {
                             sleepTimer.remainingSeconds?.let {
                                 androidPlayerTime(it * 1_000L)
-                            } ?: "On"
+                            } ?: stringResource(R.string.l10n_sleep_on)
                         } else {
-                            "Sleep"
+                            stringResource(R.string.l10n_sleep)
                         },
                     )
                 }
@@ -640,7 +640,7 @@ private fun AndroidMediaPlayerControls(
                     }
                     AndroidMediaSleepTimer.SupportedIntervalsMinutes.forEach { minutes ->
                         DropdownMenuItem(
-                            text = { Text(minutes.toString() + " minutes") },
+                            text = { Text(stringResource(R.string.l10n_duration_minutes, minutes)) },
                             onClick = {
                                 onSleepMenuChange(false)
                                 coordinator.sleepTimer.setInterval(minutes)
@@ -743,9 +743,9 @@ private fun AndroidMediaTransportControls(
                         !previewingInactiveItem &&
                         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
                     ) {
-                        "Pause"
+                        stringResource(R.string.l10n_pause)
                     } else {
-                        "Play"
+                        stringResource(R.string.l10n_play)
                     },
                     modifier = Modifier.size(34.dp),
                 )
@@ -847,9 +847,9 @@ private fun AndroidMediaChapterSection(
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (activeIndex != null) {
-                            "Chapter " + (activeIndex + 1) + " of " + chapters.size
+                            stringResource(R.string.l10n_chapter_of, activeIndex + 1, chapters.size)
                         } else {
-                            "Chapters"
+                            stringResource(R.string.l10n_chapters)
                         },
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -945,12 +945,12 @@ private fun AndroidMediaShowNotesSection(
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Show Notes",
+                        stringResource(R.string.l10n_show_notes),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (expanded) "Tap to collapse" else "Read the article while listening",
+                        if (expanded) stringResource(R.string.l10n_tap_collapse) else stringResource(R.string.l10n_read_while_listening),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

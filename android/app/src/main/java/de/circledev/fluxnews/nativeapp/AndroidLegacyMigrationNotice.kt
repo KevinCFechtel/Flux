@@ -281,7 +281,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                         Column {
                             Text(step.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (step.complete) step.description else if ((step.title == "Playback progress" && state.playbackStatus.isNotBlank()) || (step.title == "Downloads" && state.downloadsStatus.isNotBlank()) || (step.title == "Feeds & startup view" && (state.feedsStatus.isNotBlank() || state.startupStatus.isNotBlank()))) step.description else "Pending – checked after the next successful sync",
+                                if (step.complete) step.description else if ((step.title == "Playback progress" && state.playbackStatus.isNotBlank()) || (step.title == "Downloads" && state.downloadsStatus.isNotBlank()) || (step.title == "Feeds & startup view" && (state.feedsStatus.isNotBlank() || state.startupStatus.isNotBlank()))) step.description else stringResource(R.string.l10n_migration_pending_next_sync),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -295,8 +295,8 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     ) {
                         if (syncing) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(4.dp))
                         Text(
-                            if (syncing) "Sync in progress…"
-                            else "Pending steps will be retried after synchronization.",
+                            if (syncing) stringResource(R.string.l10n_migration_syncing)
+                            else stringResource(R.string.l10n_migration_retry_after_sync),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -321,7 +321,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     }
                 }
                 Button(onClick = onClose) {
-                    Text(if (state.complete) "Done" else "Continue in background")
+                    Text(stringResource(if (state.complete) R.string.l10n_done else R.string.l10n_continue_background)
                 }
             }
         },

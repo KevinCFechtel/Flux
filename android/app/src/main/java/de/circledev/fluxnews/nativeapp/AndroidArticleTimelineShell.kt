@@ -677,9 +677,9 @@ private fun AndroidArticleActionCapsule(
                     text = {
                         Text(
                             if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                                "Show all articles"
+                                stringResource(R.string.l10n_show_all_articles)
                             } else {
-                                "Show unread only"
+                                stringResource(R.string.l10n_show_unread_only)
                             },
                         )
                     },

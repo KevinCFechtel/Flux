@@ -233,13 +233,13 @@ internal fun AndroidListeningListDestination(
                 )
                 Spacer(Modifier.size(16.dp))
                 Text(
-                    "Listening List is Empty",
+                    stringResource(R.string.l10n_list_empty),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.size(6.dp))
                 Text(
-                    "Add audio news to your Listening List to find them here.",
+                    stringResource(R.string.l10n_list_empty_hint),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -401,7 +401,7 @@ private fun AndroidListeningListRow(
                 }
                 if (isNowPlaying) {
                     Text(
-                        "Now Playing",
+                        stringResource(R.string.l10n_now_playing),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -476,7 +476,7 @@ private fun AndroidListeningListRow(
                                     modifier = Modifier.size(16.dp),
                                 )
                             },
-                            text = "Downloaded",
+                            text = stringResource(R.string.l10n_downloaded),
                         )
                         DownloadState.REQUESTED -> AndroidMediaMetric(
                             icon = {
@@ -485,7 +485,7 @@ private fun AndroidListeningListRow(
                                     strokeWidth = 2.dp,
                                 )
                             },
-                            text = "Pending",
+                            text = stringResource(R.string.l10n_pending),
                         )
                         DownloadState.FAILED -> AndroidMediaMetric(
                             icon = {
@@ -495,7 +495,7 @@ private fun AndroidListeningListRow(
                                     modifier = Modifier.size(16.dp),
                                 )
                             },
-                            text = "Retry",
+                            text = stringResource(R.string.l10n_retry),
                         )
                         else -> Unit
                     }
@@ -512,7 +512,7 @@ private fun AndroidListeningListRow(
             ) {
                 Icon(
                     if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = stringResource(if (isPlaying) R.string.l10n_pause else R.string.l10n_play),
                 )
             }
 

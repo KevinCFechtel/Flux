@@ -239,6 +239,7 @@ internal fun AndroidArticleReaderOverlay(
     onOpenOriginal: (ArticleSummary) -> Unit,
 ) {
     val state by store.state.collectAsState()
+    val readerPaneTitle = stringResource(R.string.l10n_reader_pane)
     val article = state.article ?: return
     if (state.source != source) return
 
@@ -320,7 +321,7 @@ internal fun AndroidArticleReaderOverlay(
                             .fillMaxHeight(0.88f)
                             .widthIn(max = 860.dp)
                     }
-                        .semantics { paneTitle = "Article reader" },
+                        .semantics { paneTitle = readerPaneTitle },
                     shape = RoundedCornerShape(28.dp),
                     color = readerContainerColor,
                     tonalElevation = if (compactPortrait) 0.dp else 8.dp,
@@ -627,7 +628,7 @@ private fun ReaderImageBlock(block: ReaderBlock.Image) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AsyncImage(
             model = block.url,
-            contentDescription = block.alt ?: "Article image",
+            contentDescription = block.alt ?: stringResource(R.string.l10n_article_image),
             contentScale = ContentScale.Fit,
             modifier = imageModifier
                 .fillMaxWidth()
