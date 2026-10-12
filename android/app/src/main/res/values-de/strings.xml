@@ -328,4 +328,110 @@
     <plurals name="diagnostics_visible_records"><item quantity="one">%1$d sichtbarer Eintrag</item><item quantity="other">%1$d sichtbare Einträge</item></plurals>
     <plurals name="audit_unread_count"><item quantity="one">%1$d ungelesen</item><item quantity="other">%1$d ungelesen</item></plurals>
     <plurals name="audit_article_count"><item quantity="one">%1$d Artikel</item><item quantity="other">%1$d Artikel</item></plurals>
+    <string name="auto_filter_by_feed">Nach Feed filtern</string>
+    <string name="auto_unknown_feed">Unbekannter Feed</string>
+    <string name="auto_untitled_news">Artikel ohne Titel</string>
+    <string name="auto_back_15">15 Sekunden zurück</string>
+    <string name="auto_forward_30">30 Sekunden vor</string>
+    <string name="media_download_channel">Medien-Downloads</string>
+    <string name="media_downloading_audio">Audio wird heruntergeladen</string>
+    <string name="media_downloading_explanation">FluxNews speichert Medien für die Offline-Wiedergabe.</string>
+    <string name="audit_mark_read">Als gelesen markieren</string>
+    <string name="audit_mark_unread">Als ungelesen markieren</string>
+    <string name="audit_star">Favorisieren</string>
+    <string name="audit_unstar">Favorit entfernen</string>
+    <string name="audit_original">Original</string>
+    <string name="audit_miniflux">Miniflux</string>
+    <string name="audit_read">Gelesen</string>
+    <string name="audit_unread">Ungelesen</string>
+    <string name="audit_share">Teilen</string>
+    <string name="audit_save">Speichern</string>
+    <string name="audit_listening">Listening List</string>
+    <string name="pref_original_link">Originallink</string>
+    <string name="pref_reader">Reader</string>
+    <string name="pref_compact">Kompakt</string>
+    <string name="pref_visual">Visuell</string>
+    <string name="pref_visual_compact">Visuell kompakt</string>
+    <string name="pref_two_lines">2 Zeilen</string>
+    <string name="pref_three_lines">3 Zeilen</string>
+    <string name="pref_five_lines">5 Zeilen</string>
+    <string name="pref_read_unread">Gelesen / Ungelesen</string>
+    <string name="pref_star_unstar">Favorisieren / Favorit entfernen</string>
+    <string name="pref_open_original">Original öffnen</string>
+    <string name="pref_open_miniflux">In Miniflux öffnen</string>
+    <string name="pref_open_comments">Kommentare öffnen</string>
+    <string name="pref_save_external">Bei Drittanbieter speichern</string>
+    <string name="pref_download_audio">Audio herunterladen</string>
+    <string name="pref_none">Keine</string>
+    <string name="pref_filter_sort">Filtern und sortieren</string>
+    <string name="pref_all_unread">Alle / Ungelesen</string>
+    <string name="pref_sort_order">Sortierreihenfolge</string>
+    <string name="pref_startup_category">Kategorie</string>
+    <string name="pref_startup_feed">Feed</string>
+    <string name="pref_retention_forever">Unbegrenzt</string>
+    <string name="pref_retention_7">7 Tage</string>
+    <string name="pref_retention_30">30 Tage</string>
+    <string name="pref_retention_90">90 Tage</string>
+    <string name="pref_nav_explanation">Lege fest, mit welchem Nachrichtenbereich FluxNews startet und ob leere Feeds angezeigt werden.</string>
+    <string name="pref_add_action">+ %1$s</string>
+    <string name="l10n_account_setup">FluxNews einrichten</string>
+    <string name="l10n_account_miniflux">Miniflux-Konto</string>
+    <string name="l10n_account_server_info">Serverinformationen</string>
+    <string name="l10n_account_miniflux_version">Miniflux-Version</string>
+    <string name="l10n_account_custom_headers">Eigene HTTP-Header</string>
+    <string name="l10n_account_data">Kontodaten</string>
+    <string name="l10n_account_http_warning">⚠ Dieser Miniflux-Server verwendet unverschlüsseltes HTTP. Zugangsdaten und Feed-Datenverkehr sind nicht durch HTTPS geschützt.</string>
+    <string name="l10n_account_rebuild_failed">Lokale Daten wurden gelöscht, aber die Synchronisierung konnte nicht abgeschlossen werden.</string>
+    <string name="l10n_account_rebuild_data_explanation">Beim Neuaufbau werden synchronisierte lokale Daten verworfen und erneut von Miniflux heruntergeladen. Konto und Einstellungen bleiben erhalten. Beim Entfernen des Kontos werden auch kontobezogene Daten und Zugangsdaten gelöscht.</string>
+    <string name="l10n_audio_duration">Audiodauer</string>
+    <string name="l10n_reading_time">Lesezeit</string>
+    <string name="l10n_duration_minutes_short">%1$d Min.</string>
+    <string name="l10n_reader_pane">Artikel-Reader</string>
+    <string name="l10n_article_image">Artikelbild</string>
+    <string name="l10n_sleep_on">Ein</string>
+    <string name="l10n_sleep">Sleeptimer</string>
+    <string name="l10n_duration_minutes">%1$d Minuten</string>
+    <string name="l10n_pause">Pause</string>
+    <string name="l10n_play">Abspielen</string>
+    <string name="l10n_chapter_of">Kapitel %1$d von %2$d</string>
+    <string name="l10n_chapters">Kapitel</string>
+    <string name="l10n_show_notes">Shownotes</string>
+    <string name="l10n_tap_collapse">Zum Einklappen tippen</string>
+    <string name="l10n_read_while_listening">Artikel während des Hörens lesen</string>
+    <string name="l10n_list_empty">Die Listening List ist leer</string>
+    <string name="l10n_list_empty_hint">Füge Audionachrichten zur Listening List hinzu, um sie hier wiederzufinden.</string>
+    <string name="l10n_now_playing">Wird gerade abgespielt</string>
+    <string name="l10n_downloaded">Heruntergeladen</string>
+    <string name="l10n_pending">Ausstehend</string>
+    <string name="l10n_retry">Erneut versuchen</string>
+    <string name="l10n_show_all_articles">Alle Artikel anzeigen</string>
+    <string name="l10n_show_unread_only">Nur ungelesene anzeigen</string>
+    <string name="l10n_migration_pending_next_sync">Ausstehend – wird nach der nächsten erfolgreichen Synchronisierung geprüft</string>
+    <string name="l10n_migration_syncing">Synchronisierung läuft…</string>
+    <string name="l10n_migration_retry_after_sync">Ausstehende Schritte werden nach der Synchronisierung erneut versucht.</string>
+    <string name="l10n_done">Fertig</string>
+    <string name="l10n_continue_background">Im Hintergrund fortfahren</string>
+    <string name="l10n_added_list">Zur Listening List hinzugefügt.</string>
+    <string name="l10n_removed_list">Aus der Listening List entfernt.</string>
+    <string name="l10n_mark_all_done">Alle ungelesenen Artikel in diesem Bereich wurden als gelesen markiert.</string>
+    <string name="l10n_account_wait_rebuild">Warte, bis der Neuaufbau der lokalen Daten abgeschlossen ist.</string>
+    <string name="l10n_account_enter_creds">Gib die Miniflux-Server-URL und den API-Schlüssel ein.</string>
+    <string name="l10n_account_url_invalid">Gib eine gültige Miniflux-Server-URL mit HTTP oder HTTPS ein.</string>
+    <string name="l10n_account_unreachable">Der Miniflux-Server ist nicht erreichbar. Überprüfe Server-URL und Netzwerkverbindung.</string>
+    <string name="l10n_account_bad_key">Miniflux hat den API-Schlüssel abgelehnt.</string>
+    <string name="l10n_account_incompatible">Dieser Server stellt den benötigten Miniflux-Endpunkt nicht bereit.</string>
+    <string name="l10n_account_headers_invalid">Eigene Header müssen eindeutige, gültige Namen haben und dürfen keine FluxNews-Transport-Header ersetzen.</string>
+    <string name="l10n_account_server_response">Der Miniflux-Server hat unerwartet geantwortet.</string>
+    <string name="l10n_account_validation_failed">Das Miniflux-Konto konnte nicht überprüft werden.</string>
+    <string name="l10n_collapse_navigation">Navigation einklappen</string>
+    <string name="l10n_expand_navigation">Navigation ausklappen</string>
+    <string name="l10n_backup_restored_sync">Konfiguration wiederhergestellt. Die Synchronisierung startet jetzt.</string>
+    <string name="l10n_migration_startup_missing">Der gewählte Startfeed oder die Startkategorie fehlt im aktuellen Katalog.</string>
+    <string name="l10n_migration_feeds_missing">Einige bisherige Feeds fehlen im aktuellen Katalog.</string>
+    <plurals name="auto_item_count"><item quantity="one">%1$d Eintrag</item><item quantity="other">%1$d Einträge</item></plurals>
+    <plurals name="l10n_migration_missing_audio"><item quantity="one">%1$d fehlender Audioanhang</item><item quantity="other">%1$d fehlende Audioanhänge</item></plurals>
+    <plurals name="l10n_migration_file_adoption_failed"><item quantity="one">%1$d Datei konnte nicht übernommen werden</item><item quantity="other">%1$d Dateien konnten nicht übernommen werden</item></plurals>
+    <plurals name="l10n_migration_missing_article"><item quantity="one">%1$d fehlender Artikel</item><item quantity="other">%1$d fehlende Artikel</item></plurals>
+    <plurals name="l10n_migration_ambiguous_audio"><item quantity="one">%1$d nicht eindeutig zugeordneter Audioanhang</item><item quantity="other">%1$d nicht eindeutig zugeordnete Audioanhänge</item></plurals>
+    <plurals name="l10n_migration_discarded_playback"><item quantity="one">%1$d alte Wiedergabeposition verworfen: kein lokaler Download vorhanden und auf dem Server nicht mehr verfügbar.</item><item quantity="other">%1$d alte Wiedergabepositionen verworfen: keine lokalen Downloads vorhanden und auf dem Server nicht mehr verfügbar.</item></plurals>
 </resources>
