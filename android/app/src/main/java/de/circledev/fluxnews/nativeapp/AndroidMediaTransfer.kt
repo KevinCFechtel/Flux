@@ -517,14 +517,14 @@ internal class AndroidMediaDownloadWorker(
         manager?.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Media downloads",
+                applicationContext.getString(R.string.media_download_channel),
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_sync)
-            .setContentTitle("Downloading audio")
-            .setContentText("FluxNews is saving media for offline playback.")
+            .setContentTitle(applicationContext.getString(R.string.media_downloading_audio))
+            .setContentText(applicationContext.getString(R.string.media_downloading_explanation))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
