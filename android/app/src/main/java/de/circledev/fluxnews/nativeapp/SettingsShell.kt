@@ -218,10 +218,10 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
             options = AndroidArticlePreviewLines.entries.map { it to it.displayName },
         ) { option -> scope.launch { preferences.setPreviewLines(option) } }
         HorizontalDivider()
-        SettingsSwitchRow("Show article count", state.showArticleCount) { scope.launch { preferences.setShowArticleCount(it) } }
-        SettingsSwitchRow("Show relative publication time", state.showRelativePublicationTime) { scope.launch { preferences.setShowRelativePublicationTime(it) } }
-        SettingsSwitchRow("Remove articles when read", state.removeArticlesWhenRead) { scope.launch { preferences.setRemoveArticlesWhenRead(it) } }
-        SettingsSwitchRow("Mark read on scrollover", state.markReadOnScrollover) { scope.launch { preferences.setMarkReadOnScrollover(it) } }
+        SettingsSwitchRow(stringResource(R.string.settings_show_article_count), state.showArticleCount) { scope.launch { preferences.setShowArticleCount(it) } }
+        SettingsSwitchRow(stringResource(R.string.settings_relative_publication), state.showRelativePublicationTime) { scope.launch { preferences.setShowRelativePublicationTime(it) } }
+        SettingsSwitchRow(stringResource(R.string.settings_remove_read), state.removeArticlesWhenRead) { scope.launch { preferences.setRemoveArticlesWhenRead(it) } }
+        SettingsSwitchRow(stringResource(R.string.settings_scrollover_read), state.markReadOnScrollover) { scope.launch { preferences.setMarkReadOnScrollover(it) } }
         CoreArticleSettingsSection(core); ArticleSwipeSettingsSection(preferences, state.swipeConfiguration)
     }
 }
@@ -275,7 +275,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
             "Choose which news scope FluxNews opens with and whether empty feeds are shown.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        SettingsSwitchRow("Hide empty feeds", state.hideEmptyNavigationEntries) {
+        SettingsSwitchRow(stringResource(R.string.settings_hide_empty), state.hideEmptyNavigationEntries) {
             scope.launch { preferences.setHideEmptyNavigationEntries(it) }
         }
         HorizontalDivider()
@@ -336,7 +336,7 @@ private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifi
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 val current = state
         if (current == null) CircularProgressIndicator() else {
-            SettingsSectionTitle("Downloads")
+            SettingsSectionTitle(stringResource(R.string.settings_downloads))
             SettingsPickerRow(
                 title = stringResource(R.string.settings_download_network),
                 selected = current.downloadNetworkPolicy,
@@ -371,8 +371,8 @@ val current = state
                 }
             }
             HorizontalDivider()
-            SettingsSectionTitle("Listening List")
-            SettingsSwitchRow("Automatically download Listening List audio", current.autoDownloadListeningList, !saving) { value ->
+            SettingsSectionTitle(stringResource(R.string.nav_listening_list))
+            SettingsSwitchRow(stringResource(R.string.settings_auto_listening_download), current.autoDownloadListeningList, !saving) { value ->
                 scope.launch {
                     saving = true
                     settings.setAutoDownloadListeningList(value).fold(
@@ -382,7 +382,7 @@ val current = state
                     saving = false
                 }
             }
-            SettingsSwitchRow("Delete download after playback completes", current.deleteAfterPlayback, !saving) { value ->
+            SettingsSwitchRow(stringResource(R.string.settings_delete_after_playback), current.deleteAfterPlayback, !saving) { value ->
                 scope.launch {
                     saving = true
                     settings.setDeleteAfterPlayback(value).fold(
@@ -392,7 +392,7 @@ val current = state
                     saving = false
                 }
             }
-            SettingsSwitchRow("Remove completed items from Listening List", current.removeCompletedListeningList, !saving) { value ->
+            SettingsSwitchRow(stringResource(R.string.settings_remove_completed_listening), current.removeCompletedListeningList, !saving) { value ->
                 scope.launch {
                     saving = true
                     settings.setRemoveCompletedListeningList(value).fold(
