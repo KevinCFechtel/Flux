@@ -81,3 +81,35 @@ At the audit snapshot the base Android `values/strings.xml` contains approximate
 After the audited Compose cleanup (#45, merge `1b729995ee9059ae6cfd3057fecba0df6c582b7b`), this follow-up moves the confirmed Android Auto browse root/filter labels, missing feed/article titles, media command display labels and MediaTransfer foreground-notification channel/title/body into Android string resources. Android Auto feed-count subtitles now use Android plural forms. The production Media3 session supplies its Android `Context` to browse projections; helper calls without a context retain their old English fallback for compatibility with call sites/tests.
 
 This is **not** an assertion that every user-facing dynamic message has been localized. The regex-based guard is intentionally not a complete program analysis; check generated error text, relative dates, dynamically composed summaries, non-Compose and runtime locale behavior before declaring C1 complete. Review the new Android CI and on-device Android Auto + notification surfaces.
+
+## Expanded re-audit after cleanup — 2026-10-12
+
+**Repository scope:** Reviewed **all 71 production Kotlin files** under `android/app/src/main` using an expanded source pattern review (direct Compose labels, state-assigned errors, snackbar calls, fallback metadata, enum display names, system/media/notification labels, and contextual actions). The earlier findings list above documents the baseline, not necessarily the current state. This section is the newer assessment.
+
+**Code changes now covered by PR #47:** Feed and bulk-feed error states and option headings; core article settings error states; media/download settings error states; configuration backup completion/errors; search and timeline direct action snackbar labels; Listening List/media title fallbacks and progress; article chooser/media actions/swipe accessibility; app startup, background-sync controls and help; navigation, migration step/overview display; article Reader notices; Settings selection/display names, timeline action menu and scope counts. PR #46 already handles Android Auto and foreground media-download notifications and has been merged to `main` (`deecb8c`).
+
+**Resources:** 431 `<string>`/`<plurals>` entries in the current base values XML at this snapshot. No duplicate names were found. All resource references in the 17 changed Kotlin source files resolve to keys in the base strings XML. Six target locale directories remain in place; actual translated catalog content has not been verified.
+
+### Residual findings after the second source scan
+
+The following production state/model layers **still construct English message text**. These require attention at the data-to-presentation boundary, not `stringResource()` called directly in background workers:
+
+| Source | Remaining message category | Status |
+| --- | --- | --- |
+| `AndroidAccountBootstrap.kt`, `AndroidAccountPresentation.kt` | Account activation, validation and migration failures | Open |
+| `AndroidArticleTimeline.kt` | List loading, pagination and bulk-read failures | Open |
+| `AndroidListeningList.kt` | Listening List loading failure | Open |
+| `AndroidMediaPlaybackCoordinator.kt` | Playback-completion save failure | Open |
+| `AndroidSearch.kt` | Store-generated paging, read/star, download and integration feedback; direct UI snackbar errors were extracted | Open |
+| `AndroidSyncCoordinator.kt` | Offline-data fallback sync banner text | Open |
+| `AndroidWidgetContract.kt` | Default/Bookmarks label origins | Review non-Compose widget presentation |
+| `AndroidLegacyMigrationNotice.kt` | Raw legacy step identifiers and externally persisted status fragments; display step titles/known defaults now use resources | Review remaining dynamic status details |
+| `AndroidAutoMediaLibrary.kt` | English fallbacks for **context-free helper/test calls**; real service passes Android Context | Nonproduction fallback, retained deliberately |
+| `AndroidArticleActions.kt`, preferences enums | Original English label properties retained for API/test compatibility; reviewed production menus and options use localized presentation wrappers | Compatibility, not an unlocalized UI path |
+| `AndroidArticleReader.kt` | Raw internal read-error message retained; Reader view translates the displayed error | Internal status translated at presentation |
+
+**Verdict: C1 is still open.** The original list of static UI literals has been substantially cleaned, and expanded CI catches more future regressions. The second full-source pattern scan found the model-generated messages above; it does **not** certify that every possible string-flow is localized. The final closeout still needs explicit treatment of the open runtime-display paths and an emulator/device locale acceptance run. Logs, protocol identifiers and fixture articles are excluded intentionally.
+
+### CI validation
+
+The Android workflow runs the expanded `check-localization.py --all` inventory as informational output and `--base` as an incremental block. Successful execution of these checks confirms the scanner runs, not zero English messages. A fully green Android build/lint/test result is additionally required before merging this cleanup PR.
