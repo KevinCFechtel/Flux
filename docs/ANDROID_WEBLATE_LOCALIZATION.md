@@ -44,3 +44,12 @@ Weblate is **not connected or configured on a live instance** by this change. Th
 8. Add or update tests for placeholders and source/translation parity when target catalogs are populated.
 
 Do not count this repository preparation as a completed C1 translation rollout.
+
+
+## Continuous localization guard
+
+The Android GitHub Actions workflow runs `python3 android/Build/check-localization.py --base <base-sha>` before its build and lint steps. It checks **newly added or edited Kotlin lines** in `android/app/src/main` for high-confidence UI literals (Compose `Text`, content descriptions, certain UI labels, and snackbar helpers), while allowing existing localization debt to be cleaned up incrementally. It intentionally does not treat every quoted string as user-visible (URLs, API values, log tags, and keys are not UI translations).
+
+For a local, non-blocking **full inventory** run `python3 android/Build/check-localization.py --all`; output is file:line plus rule. The full inventory is reporting-only and does not declare C1 complete. When a flagged literal genuinely cannot be translated, document a narrow exception on that line with `// l10n-ignore: reason`. Avoid blanket suppression. This guard is heuristic and **does not cover every dynamically constructed user-facing message**; continue manual review for notifications, workers and formatted messages.
+
+The CI step uses full Git history and the pull-request base SHA (or the previous push SHA on main) so the diff check is reproducible; it fails on new violations.
