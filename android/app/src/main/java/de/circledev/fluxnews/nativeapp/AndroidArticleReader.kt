@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -352,7 +353,7 @@ internal fun AndroidArticleReaderOverlay(
                                     )
                                     Spacer(Modifier.height(12.dp))
                                     Button(onClick = { onOpenOriginal(article) }) {
-                                        Text("Open original")
+                                        Text(stringResource(R.string.reader_open_original))
                                     }
                                 }
                             }
@@ -401,12 +402,12 @@ private fun ReaderHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             TextButton(onClick = onOpenOriginal) {
-                Text("Original")
+                Text(stringResource(R.string.reader_original))
             }
             IconButton(onClick = onClose) {
                 Icon(
                     painter = painterResource(R.drawable.ic_close),
-                    contentDescription = "Close article",
+                    contentDescription = stringResource(R.string.reader_close_article),
                 )
             }
         }
@@ -455,7 +456,7 @@ internal fun AndroidReaderDocumentContent(
                 )
                 if (onOpenOriginal != null) {
                     TextButton(onClick = onOpenOriginal) {
-                        Text("Open original")
+                        Text(stringResource(R.string.reader_open_original))
                     }
                 }
             }
