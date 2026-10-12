@@ -13,13 +13,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
 import kotlinx.coroutines.launch
 
-private enum class AndroidLogLevelFilter(val title: String) {
-    All("All"), Trace("Trace"), Debug("Debug"), Info("Info"), Warning("Warning"), Error("Error");
+private enum class AndroidLogLevelFilter(val titleRes: Int) {
+    All(R.string.diagnostics_filter_all), Trace(R.string.diagnostics_filter_trace), Debug(R.string.diagnostics_filter_debug), Info(R.string.diagnostics_filter_info), Warning(R.string.diagnostics_filter_warning), Error(R.string.diagnostics_filter_error);
     fun accepts(level: AndroidAppLogLevel): Boolean = this == All || name == level.name
 }
 
@@ -33,18 +35,18 @@ internal fun SupportDiagnosticsScreen(diagnostics: AndroidAppDiagnostics, modifi
     val context = LocalContext.current
     if (viewerOpen) { AndroidLogViewer(diagnostics, { viewerOpen = false }, modifier); return }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SettingsSectionTitle("Logging")
-        SettingsSwitchRow("Debug Logging", debugEnabled) { enabled -> scope.launch { diagnostics.setDebugLoggingEnabled(enabled); debugEnabled = enabled } }
-        ValueRow("Stored Records", records.size.toString())
-        TextButton(onClick = { viewerOpen = true }) { Text("Log Viewer") }
-        Text("Info, warning and error records are kept even when Debug Logging is off. Debug and trace records are stored only while Debug Logging is enabled.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        HorizontalDivider(); SettingsSectionTitle("Support Export")
-        Button(onClick = { shareDiagnostics(context, diagnostics) }) { Text("Export Diagnostics") }
-        Text("The export contains retained native and Core support records plus app, OS, device and Debug Logging metadata.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        HorizontalDivider(); TextButton(onClick = { confirmClear = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Clear Logs") }
-        Text("Support logs are stored locally with bounded retention. Credentials and registered custom-header values are redacted before records are persisted or exported.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsSectionTitle(stringResource(R.string.diagnostics_logging))
+        SettingsSwitchRow(stringResource(R.string.diagnostics_debug_logging), debugEnabled) { enabled -> scope.launch { diagnostics.setDebugLoggingEnabled(enabled); debugEnabled = enabled } }
+        ValueRow(stringResource(R.string.diagnostics_stored_records), records.size.toString())
+        TextButton(onClick = { viewerOpen = true }) { Text(stringResource(R.string.diagnostics_viewer)) }
+        Text(stringResource(R.string.diagnostics_logging_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider(); SettingsSectionTitle(stringResource(R.string.diagnostics_support_export))
+        Button(onClick = { shareDiagnostics(context, diagnostics) }) { Text(stringResource(R.string.diagnostics_export)) }
+        Text(stringResource(R.string.diagnostics_export_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider(); TextButton(onClick = { confirmClear = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.diagnostics_clear)) }
+        Text(stringResource(R.string.diagnostics_retention), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Logs?") }, text = { Text("This permanently removes the retained local support log. New records will continue to be collected according to the current logging settings.") }, confirmButton = { TextButton(onClick = { diagnostics.clear(); confirmClear = false }) { Text("Clear Logs") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } })
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text(stringResource(R.string.diagnostics_clear_confirm)) }, text = { Text(stringResource(R.string.diagnostics_clear_description)) }, confirmButton = { TextButton(onClick = { diagnostics.clear(); confirmClear = false }) { Text(stringResource(R.string.diagnostics_clear)) } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) } })
 }
 
 @Composable
@@ -56,17 +58,17 @@ private fun AndroidLogViewer(diagnostics: AndroidAppDiagnostics, onBack: () -> U
             IconButton(onClick = onBack) {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_back),
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.settings_back),
                 )
             }
-            TextButton(onClick = {}) { Text("Refresh") }
+            TextButton(onClick = {}) { Text(stringResource(R.string.action_refresh)) }
         }
         Text("Log Viewer", style = MaterialTheme.typography.headlineMedium)
-        OutlinedTextField(search, { search = it }, label = { Text("Search category or message") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Box { OutlinedButton(onClick = { menuOpen = true }) { Text("Level: ${filter.title}") }; DropdownMenu(menuOpen, { menuOpen = false }) { AndroidLogLevelFilter.entries.forEach { item -> DropdownMenuItem({ Text(item.title) }, { filter = item; menuOpen = false }) } } }
-        Text("${visible.size} visible records", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (visible.isEmpty()) Text("No retained records match the selected level and search.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        visible.forEach { entry -> Card(Modifier.fillMaxWidth().clickable { copy(context, AndroidAppDiagnostics.recordText(entry)) }) { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${entry.level.name.uppercase()} · ${entry.category}", style = MaterialTheme.typography.labelLarge); Text(entry.timestamp, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(entry.message, style = MaterialTheme.typography.bodyMedium); Text("Tap to copy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+        OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.diagnostics_search)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Box { OutlinedButton(onClick = { menuOpen = true }) { Text(stringResource(R.string.diagnostics_level, stringResource(filter.titleRes))) }; DropdownMenu(menuOpen, { menuOpen = false }) { AndroidLogLevelFilter.entries.forEach { item -> DropdownMenuItem({ Text(stringResource(item.titleRes)) }, { filter = item; menuOpen = false }) } } }
+        Text(pluralStringResource(R.plurals.diagnostics_visible_records, visible.size, visible.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (visible.isEmpty()) Text(stringResource(R.string.diagnostics_no_results), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        visible.forEach { entry -> Card(Modifier.fillMaxWidth().clickable { copy(context, AndroidAppDiagnostics.recordText(entry)) }) { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("${entry.level.name.uppercase()} · ${entry.category}", style = MaterialTheme.typography.labelLarge); Text(entry.timestamp, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(entry.message, style = MaterialTheme.typography.bodyMedium); Text(stringResource(R.string.diagnostics_tap_copy), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
     }
 }
 

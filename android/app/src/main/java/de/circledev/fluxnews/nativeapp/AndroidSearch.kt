@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import java.util.concurrent.ConcurrentHashMap
@@ -605,6 +606,11 @@ internal fun AndroidSearchDestination(
     val snackbar = remember { SnackbarHostState() }
     val actionScope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Resolve translated UI copy during composition, not through LocalContext in event handlers.
+    val badArticleUrlMessage = stringResource(R.string.search_bad_article_url)
+    val badCommentsUrlMessage = stringResource(R.string.search_bad_comments_url)
+    val shareFailedMessage = stringResource(R.string.search_share_failed)
+    val linkCopiedMessage = stringResource(R.string.search_link_copied)
     val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val searchFocusRequester = remember { FocusRequester() }
@@ -664,7 +670,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleSwipeAction.StarUnstar -> store.requestSetStarred(article.id, !article.isStarred)
             AndroidArticleSwipeAction.OpenOriginal -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage("The article does not have a valid web URL.")
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(badArticleUrlMessage)
             }
             AndroidArticleSwipeAction.OpenMiniflux -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
@@ -673,8 +679,8 @@ internal fun AndroidSearchDestination(
                     if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
                 }
             }
-            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage("The article does not have a valid comments URL.")
-            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage("The article could not be shared.")
+            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(badCommentsUrlMessage)
+            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage(shareFailedMessage)
             AndroidArticleSwipeAction.SaveToService -> store.requestSaveToService(article.id)
             AndroidArticleSwipeAction.ListeningList -> {
                 val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
@@ -701,7 +707,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleContextAction.Reader -> openReader(article)
             AndroidArticleContextAction.OpenMiniflux -> performSwipe(article, AndroidArticleSwipeAction.OpenMiniflux)
             AndroidArticleContextAction.Comments -> performSwipe(article, AndroidArticleSwipeAction.Comments)
-            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage("Link copied.") else showMessage("The article does not have a valid web URL.")
+            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage(linkCopiedMessage) else showMessage(badArticleUrlMessage)
             AndroidArticleContextAction.Share -> performSwipe(article, AndroidArticleSwipeAction.Share)
             AndroidArticleContextAction.SaveToService -> performSwipe(article, AndroidArticleSwipeAction.SaveToService)
         }
@@ -712,10 +718,10 @@ internal fun AndroidSearchDestination(
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(
-                    title = { Text("Search") },
+                    title = { Text(stringResource(R.string.nav_search)) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = "Back to news")
+                            Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.search_back_news))
                         }
                     },
                 )
@@ -736,7 +742,7 @@ internal fun AndroidSearchDestination(
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .focusRequester(searchFocusRequester),
                     singleLine = true,
-                    placeholder = { Text("Search articles") },
+                    placeholder = { Text(stringResource(R.string.search_articles_hint)) },
                     leadingIcon = {
                         IconButton(
                             onClick = ::submitSearch,
@@ -744,7 +750,7 @@ internal fun AndroidSearchDestination(
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_search),
-                                contentDescription = "Search",
+                                contentDescription = stringResource(R.string.nav_search),
                             )
                         }
                     },
@@ -759,7 +765,7 @@ internal fun AndroidSearchDestination(
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_close),
-                                    contentDescription = "Clear search",
+                                    contentDescription = stringResource(R.string.search_clear),
                                 )
                             }
                         }
@@ -781,8 +787,8 @@ internal fun AndroidSearchDestination(
                     val availableWidthDp = availableWidth.value.toInt()
                     when {
                         !state.hasSearched -> SearchMessage(
-                            title = "Search articles",
-                            message = "Find matching entries in your Miniflux account.",
+                            title = stringResource(R.string.search_articles_hint),
+                            message = stringResource(R.string.search_intro),
                             modifier = Modifier.fillMaxSize(),
                             showSearchIcon = true,
                         )
@@ -790,15 +796,15 @@ internal fun AndroidSearchDestination(
                             Modifier.fillMaxSize(),
                         )
                         state.errorMessage != null && state.results.isEmpty() -> SearchMessage(
-                            title = "Search unavailable",
-                            message = state.errorMessage ?: "Search could not be completed.",
+                            title = stringResource(R.string.search_unavailable),
+                            message = state.errorMessage ?: stringResource(R.string.search_failed),
                             modifier = Modifier.fillMaxSize(),
-                            actionLabel = "Retry",
+                            actionLabel = stringResource(R.string.list_retry),
                             onAction = store::retry,
                         )
                         state.results.isEmpty() -> SearchMessage(
-                            title = "No matching articles",
-                            message = "Try a different search term.",
+                            title = stringResource(R.string.search_no_results),
+                            message = stringResource(R.string.search_try_different),
                             modifier = Modifier.fillMaxSize(),
                             showSearchIcon = true,
                         )
@@ -838,7 +844,7 @@ internal fun AndroidSearchDestination(
                                     title = "More results unavailable",
                                     message = state.errorMessage ?: "More results could not be loaded.",
                                     modifier = Modifier.fillMaxWidth(),
-                                    actionLabel = "Retry",
+                                    actionLabel = stringResource(R.string.list_retry),
                                     onAction = store::retryLoadMore,
                                 )
                             }
@@ -867,7 +873,7 @@ internal fun AndroidSearchDestination(
             store = readerStore,
             source = AndroidReaderSource.Search,
             onOpenOriginal = { article ->
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage("The article does not have a valid web URL.")
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(badArticleUrlMessage)
             },
         )
     }

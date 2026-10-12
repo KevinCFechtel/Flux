@@ -6,6 +6,7 @@ on:
       - "android/**"
       - "core/**"
       - ".github/workflows/android.yml"
+      - "docs/ANDROID_WEBLATE_LOCALIZATION.md"
   push:
     branches:
       - main
@@ -29,6 +30,13 @@ jobs:
       ANDROID_NDK_VERSION: "29.0.14206865"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check new Android UI text is localizable
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 android/Build/check-localization.py --base "${BASE_SHA}"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin

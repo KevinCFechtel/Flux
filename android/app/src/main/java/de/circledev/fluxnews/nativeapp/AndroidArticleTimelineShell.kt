@@ -496,7 +496,7 @@ internal fun NewsRootContent(
                     enabled = !markReadRunning,
                     onClick = { markReadRequest = null },
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )

@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import de.circle_dev.flux_news.FluxNewsWidgetProvider
 
@@ -116,19 +117,19 @@ private fun AndroidWidgetConfigurationScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Text("FluxNews Widget", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.widget_configuration_title), style = MaterialTheme.typography.headlineSmall)
 
-        WidgetConfigurationSection(title = "Scope") {
-            WidgetRadioRow("All News", scopeType == AndroidWidgetScopeType.All) {
+        WidgetConfigurationSection(title = stringResource(R.string.widget_scope)) {
+            WidgetRadioRow(stringResource(R.string.widget_all_news), scopeType == AndroidWidgetScopeType.All) {
                 scopeType = AndroidWidgetScopeType.All
                 scopeId = null
             }
-            WidgetRadioRow("Bookmarks", scopeType == AndroidWidgetScopeType.Bookmarks) {
+            WidgetRadioRow(stringResource(R.string.widget_bookmarks), scopeType == AndroidWidgetScopeType.Bookmarks) {
                 scopeType = AndroidWidgetScopeType.Bookmarks
                 scopeId = null
             }
             WidgetRadioRow(
-                "Category",
+                stringResource(R.string.widget_category),
                 scopeType == AndroidWidgetScopeType.Category,
                 enabled = catalog.categories.isNotEmpty(),
             ) {
@@ -143,7 +144,7 @@ private fun AndroidWidgetConfigurationScreen(
                 )
             }
             WidgetRadioRow(
-                "Feed",
+                stringResource(R.string.widget_feed),
                 scopeType == AndroidWidgetScopeType.Feed,
                 enabled = catalog.feeds.isNotEmpty(),
             ) {
@@ -159,20 +160,20 @@ private fun AndroidWidgetConfigurationScreen(
             }
         }
 
-        WidgetConfigurationSection(title = "Articles") {
-            WidgetRadioRow("Unread", readFilter == AndroidWidgetReadFilter.Unread) {
+        WidgetConfigurationSection(title = stringResource(R.string.widget_read_filter)) {
+            WidgetRadioRow(stringResource(R.string.widget_unread_filter), readFilter == AndroidWidgetReadFilter.Unread) {
                 readFilter = AndroidWidgetReadFilter.Unread
             }
-            WidgetRadioRow("All", readFilter == AndroidWidgetReadFilter.All) {
+            WidgetRadioRow(stringResource(R.string.widget_all_articles), readFilter == AndroidWidgetReadFilter.All) {
                 readFilter = AndroidWidgetReadFilter.All
             }
         }
 
-        WidgetConfigurationSection(title = "Sort order") {
-            WidgetRadioRow("Newest first", sortOrder == AndroidWidgetSortOrder.NewestFirst) {
+        WidgetConfigurationSection(title = stringResource(R.string.widget_sort_order)) {
+            WidgetRadioRow(stringResource(R.string.widget_newest_first), sortOrder == AndroidWidgetSortOrder.NewestFirst) {
                 sortOrder = AndroidWidgetSortOrder.NewestFirst
             }
-            WidgetRadioRow("Oldest first", sortOrder == AndroidWidgetSortOrder.OldestFirst) {
+            WidgetRadioRow(stringResource(R.string.widget_oldest_first), sortOrder == AndroidWidgetSortOrder.OldestFirst) {
                 sortOrder = AndroidWidgetSortOrder.OldestFirst
             }
         }
@@ -201,7 +202,7 @@ private fun AndroidWidgetConfigurationScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Add widget")
+            Text(stringResource(R.string.widget_add))
         }
     }
 }
@@ -253,7 +254,7 @@ private fun WidgetCatalogPicker(
             onClick = { expanded = true },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(selected?.title ?: "Choose")
+            Text(selected?.title ?: stringResource(R.string.widget_choose))
         }
         DropdownMenu(
             expanded = expanded,

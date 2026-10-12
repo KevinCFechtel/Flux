@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -418,14 +419,14 @@ private fun AndroidMediaPlayerTopBar(
         if (completed) {
             Box {
                 IconButton(onClick = { onOverflowChange(true) }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Player actions")
+                    Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.player_actions))
                 }
                 DropdownMenu(
                     expanded = overflowOpen,
                     onDismissRequest = { onOverflowChange(false) },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Restart") },
+                        text = { Text(stringResource(R.string.player_restart)) },
                         leadingIcon = {
                             Icon(Icons.Rounded.RestartAlt, contentDescription = null)
                         },
@@ -438,7 +439,7 @@ private fun AndroidMediaPlayerTopBar(
             }
         }
         IconButton(onClick = onDismiss) {
-            Icon(Icons.Rounded.Close, contentDescription = "Close player")
+            Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.player_close))
         }
     }
 }
@@ -629,7 +630,7 @@ private fun AndroidMediaPlayerControls(
                 ) {
                     if (sleepTimer.enabled) {
                         DropdownMenuItem(
-                            text = { Text("Turn off") },
+                            text = { Text(stringResource(R.string.player_turn_off)) },
                             onClick = {
                                 onSleepMenuChange(false)
                                 coordinator.sleepTimer.disable()
@@ -707,7 +708,7 @@ private fun AndroidMediaTransportControls(
         ) {
             Icon(
                 painter = painterResource(androidx.media3.session.R.drawable.media3_icon_skip_back_15),
-                contentDescription = "Back 15 seconds",
+                contentDescription = stringResource(R.string.player_back_15),
                 modifier = Modifier.size(30.dp),
             )
         }
@@ -756,7 +757,7 @@ private fun AndroidMediaTransportControls(
         ) {
             Icon(
                 Icons.Rounded.Forward30,
-                contentDescription = "Forward 30 seconds",
+                contentDescription = stringResource(R.string.player_forward_30),
                 modifier = Modifier.size(30.dp),
             )
         }
@@ -767,7 +768,7 @@ private fun AndroidMediaTransportControls(
         ) {
             Icon(
                 Icons.Rounded.Stop,
-                contentDescription = "Stop",
+                contentDescription = stringResource(R.string.player_stop),
                 modifier = Modifier.size(28.dp),
             )
         }
@@ -790,14 +791,14 @@ private fun AndroidMediaArtwork(
         if (model != null) {
             AsyncImage(
                 model = model,
-                contentDescription = "Media artwork",
+                contentDescription = stringResource(R.string.player_artwork),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.fallback_artwork),
-                contentDescription = "Fallback media artwork",
+                contentDescription = stringResource(R.string.player_fallback_artwork),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -979,7 +980,7 @@ private fun AndroidMediaShowNotesSection(
                             textAlign = TextAlign.Center,
                         )
                         OutlinedButton(onClick = onRetry) {
-                            Text("Retry")
+                            Text(stringResource(R.string.list_retry))
                         }
                     }
                     document != null -> AndroidReaderDocumentContent(

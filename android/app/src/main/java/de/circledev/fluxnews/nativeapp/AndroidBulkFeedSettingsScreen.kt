@@ -35,6 +35,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -134,7 +136,7 @@ internal fun AndroidBulkFeedSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            "Configure one or multiple feeds at once. For quick access to a single feed, long-press it in the feed drawer.",
+            stringResource(R.string.bulk_feeds_explanation),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -144,7 +146,7 @@ internal fun AndroidBulkFeedSettingsScreen(
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text("Search feeds") },
+            label = { Text(stringResource(R.string.bulk_feeds_search)) },
         )
 
         Row(
@@ -152,7 +154,7 @@ internal fun AndroidBulkFeedSettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (selectedFeedIds.isEmpty()) "No feeds selected" else "${selectedFeedIds.size} selected",
+                if (selectedFeedIds.isEmpty()) stringResource(R.string.bulk_feeds_none_selected) else pluralStringResource(R.plurals.bulk_feeds_selected, selectedFeedIds.size, selectedFeedIds.size),
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -160,13 +162,13 @@ internal fun AndroidBulkFeedSettingsScreen(
                 enabled = filteredFeeds.isNotEmpty() && !saving,
                 onClick = { selectedFeedIds = selectedFeedIds + filteredFeeds.map { it.id } },
             ) {
-                Text(if (query.isBlank()) "Select all" else "Select visible")
+                Text(stringResource(if (query.isBlank()) R.string.bulk_feeds_select_all else R.string.bulk_feeds_select_visible))
             }
             TextButton(
                 enabled = selectedFeedIds.isNotEmpty() && !saving,
                 onClick = { selectedFeedIds = emptySet() },
             ) {
-                Text("Clear")
+                Text(stringResource(R.string.bulk_feeds_clear))
             }
         }
 
@@ -174,7 +176,7 @@ internal fun AndroidBulkFeedSettingsScreen(
             CircularProgressIndicator()
         } else if (feeds.isEmpty()) {
             Text(
-                "Feeds become available after the first successful sync.",
+                stringResource(R.string.bulk_feeds_waiting_sync),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {

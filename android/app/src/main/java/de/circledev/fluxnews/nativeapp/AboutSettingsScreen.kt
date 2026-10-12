@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -17,16 +18,16 @@ internal fun AboutSettingsScreen(modifier: Modifier = Modifier) {
     val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("FluxNews", style = MaterialTheme.typography.titleLarge)
-        Text("Version ${packageInfo.versionName ?: "unknown"} (${packageInfo.longVersionCode})", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("A native Miniflux client with a shared Rust core.")
+        Text(stringResource(R.string.about_version, packageInfo.versionName ?: "unknown", packageInfo.longVersionCode), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.about_description))
         HorizontalDivider()
-        SettingsSectionTitle("Open Source")
+        SettingsSectionTitle(stringResource(R.string.about_open_source))
         LinkButton("Flux source code", "https://github.com/KevinCFechtel/Flux")
         LinkButton("Open-source license", "https://github.com/KevinCFechtel/Flux/blob/main/LICENSE")
-        Text("FluxNews includes open-source components. Their license notices remain part of the corresponding source distributions and packaged dependencies.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.about_licenses), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider()
-        SettingsSectionTitle("Legal")
-        Text("FluxNews is an independent Miniflux client. Miniflux is a separate open-source project.", style = MaterialTheme.typography.bodyMedium)
+        SettingsSectionTitle(stringResource(R.string.about_legal))
+        Text(stringResource(R.string.about_independence), style = MaterialTheme.typography.bodyMedium)
         LinkButton("Miniflux project", "https://miniflux.app")
     }
 }

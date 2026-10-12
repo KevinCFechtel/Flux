@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,26 +114,26 @@ internal fun AndroidListeningListDestination(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Listening List") },
+                title = { Text(stringResource(R.string.nav_listening_list)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.list_back),
                         )
                     }
                 },
                 actions = {
                     Box {
                         IconButton(onClick = { feedMenuOpen = true }) {
-                            Icon(Icons.Rounded.FilterList, contentDescription = "Filter by feed")
+                            Icon(Icons.Rounded.FilterList, contentDescription = stringResource(R.string.list_filter_feed))
                         }
                         DropdownMenu(
                             expanded = feedMenuOpen,
                             onDismissRequest = { feedMenuOpen = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("All Feeds") },
+                                text = { Text(stringResource(R.string.list_all_feeds)) },
                                 onClick = {
                                     feedMenuOpen = false
                                     coroutineScope.launch { store.setFeedId(null) }
@@ -151,14 +152,14 @@ internal fun AndroidListeningListDestination(
                     }
                     Box {
                         IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort Listening List")
+                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = stringResource(R.string.list_sort))
                         }
                         DropdownMenu(
                             expanded = sortMenuOpen,
                             onDismissRequest = { sortMenuOpen = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Recently Added") },
+                                text = { Text(stringResource(R.string.list_recently_added)) },
                                 onClick = {
                                     sortMenuOpen = false
                                     coroutineScope.launch {
@@ -167,7 +168,7 @@ internal fun AndroidListeningListDestination(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("Publication Date") },
+                                text = { Text(stringResource(R.string.list_publication_date)) },
                                 onClick = {
                                     sortMenuOpen = false
                                     coroutineScope.launch {
@@ -212,7 +213,7 @@ internal fun AndroidListeningListDestination(
                 )
                 Spacer(Modifier.size(12.dp))
                 Button(onClick = { coroutineScope.launch { store.reload() } }) {
-                    Text("Retry")
+                    Text(stringResource(R.string.list_retry))
                 }
             }
 
@@ -517,7 +518,7 @@ private fun AndroidListeningListRow(
 
             Box {
                 IconButton(onClick = { actionsOpen = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Listening List actions")
+                    Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.list_actions))
                 }
                 AndroidListeningListItemMenu(
                     expanded = actionsOpen,
@@ -654,7 +655,7 @@ private fun AndroidListeningListItemMenu(
             HorizontalDivider()
         }
         DropdownMenuItem(
-            text = { Text("Remove from Listening List") },
+            text = { Text(stringResource(R.string.list_remove)) },
             leadingIcon = {
                 Icon(Icons.Rounded.Close, contentDescription = null)
             },
@@ -678,7 +679,7 @@ private fun AndroidListeningListDownloadMenuItem(
     val id = enclosure.enclosure.id
     when (enclosure.download?.state ?: DownloadState.NOT_DOWNLOADED) {
         DownloadState.NOT_DOWNLOADED -> DropdownMenuItem(
-            text = { Text("Download") },
+            text = { Text(stringResource(R.string.list_download)) },
             leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null) },
             onClick = {
                 onDismiss()
@@ -686,7 +687,7 @@ private fun AndroidListeningListDownloadMenuItem(
             },
         )
         DownloadState.REQUESTED -> DropdownMenuItem(
-            text = { Text("Cancel download") },
+            text = { Text(stringResource(R.string.list_cancel_download)) },
             leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = null) },
             onClick = {
                 onDismiss()
@@ -694,7 +695,7 @@ private fun AndroidListeningListDownloadMenuItem(
             },
         )
         DownloadState.DOWNLOADED -> DropdownMenuItem(
-            text = { Text("Delete download") },
+            text = { Text(stringResource(R.string.list_delete_download)) },
             leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
             onClick = {
                 onDismiss()
@@ -702,7 +703,7 @@ private fun AndroidListeningListDownloadMenuItem(
             },
         )
         DownloadState.FAILED -> DropdownMenuItem(
-            text = { Text("Retry download") },
+            text = { Text(stringResource(R.string.list_retry_download)) },
             leadingIcon = { Icon(Icons.Rounded.RestartAlt, contentDescription = null) },
             onClick = {
                 onDismiss()
@@ -710,7 +711,7 @@ private fun AndroidListeningListDownloadMenuItem(
             },
         )
         DownloadState.DELETE_REQUESTED -> DropdownMenuItem(
-            text = { Text("Deletion pending") },
+            text = { Text(stringResource(R.string.list_deletion_pending)) },
             enabled = false,
             onClick = {},
         )
