@@ -1,15 +1,15 @@
 # Android localization audit — 2026-10-12
 
-**Status: open findings; C1 is not yet fully technically Weblate-ready.**
+**Status: the documented high-confidence UI literals have been extracted in this PR; wider dynamic/background localization audit remains open. C1 is not yet fully technically Weblate-ready.**
 
 ## Scope and methodology
 
 - PR #44 was squashed to `main` as `854a9a1376a5efde8fdf0a398b3a870e05ab7152` after Android CI succeeded on its tip.
 - The repository has **71 Kotlin files in `android/app/src/main`**. This audit inspected representative user-facing source files in the merged tree using the same kinds of literal patterns as `android/Build/check-localization.py`, plus manual attention to more complex displayed text.
 - The CI now runs `python3 android/Build/check-localization.py --all` **as an informational full source inventory on every Android workflow**, and then enforces `--base` for new literals. The full inventory is currently non-blocking, so the Android CI being green does **not** mean all strings were translated.
-- The findings below are **confirmed residual examples**, not a complete list of all remaining dynamically generated text. Review every inventory result and manually audit string concatenation, state-model messages, workers and user-visible notifications before closing C1.
+- The findings below are **confirmed examples addressed by this follow-up**, not a complete list of all remaining dynamically generated text. Review every inventory result and manually audit string concatenation, state-model messages, workers and user-visible notifications before closing C1.
 
-## Confirmed outstanding UI literals
+## Confirmed UI literals addressed in this PR
 
 | Kotlin file | Representative source locations | Outstanding copy |
 | --- | --- | --- |
@@ -22,7 +22,7 @@
 | `AndroidBulkFeedSettingsScreen.kt` | 244, 259, 270, 290, 301 | Feed preference section titles |
 | `SupportDiagnosticsScreen.kt` | 66 | Log Viewer heading |
 
-The pattern scan found no direct matches in the sampled `AndroidArticleReader.kt`, `AndroidListeningListDestination.kt`, `AndroidMediaPlayerSheet.kt`, `AndroidSystemNotifications.kt`, `AndroidWidgetUpdates.kt`, `AndroidFeedCreationDialog.kt` and others; **this is not proof that they have no nonliteral or dynamic user-visible messages**.
+The entries above have been migrated to Android string resources in this PR. A full inventory still needs inspection after CI completes; findings beyond these examples are not yet closed. The pattern scan found no direct matches in the sampled `AndroidArticleReader.kt`, `AndroidListeningListDestination.kt`, `AndroidMediaPlayerSheet.kt`, `AndroidSystemNotifications.kt`, `AndroidWidgetUpdates.kt`, `AndroidFeedCreationDialog.kt` and others; **this is not proof that they have no nonliteral or dynamic user-visible messages**.
 
 ## Closeout criteria
 
