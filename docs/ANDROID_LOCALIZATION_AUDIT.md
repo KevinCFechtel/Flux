@@ -141,3 +141,7 @@ The sweep exposed additional direct labels in `AdaptiveAppShell.kt` (navigation 
 - Clipboard labels and technical diagnostic exception strings are not ordinary visible UI copy; accessibility and platform surfaces warrant a separate check.
 
 **Status: C1 not closed.** The sweep does not replace an instrumented runtime locale acceptance test. Verify CI on the latest commit before any merge, and explicitly check widget headlines, migration skipped reasons, Android Auto and source error paths in another locale.
+
+### Widget provider follow-up — `3045c30`
+
+The real widget provider now translates the All and Bookmarks scope headers through its available Android Context, and uses localized fallback Category/Feed headings when catalog titles are missing. The context-free projection reader still provides legacy English defaults for its internal/test-facing header data. This closes the confirmed provider header display path, but a changed-locale widget refresh remains to be tested.
