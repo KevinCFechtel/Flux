@@ -4,6 +4,25 @@ import AppKit
 import XCTest
 @testable import FluxNews
 
+final class MacSandboxStorageTests: XCTestCase {
+    func testMediaFilesUseApplicationSupportInsteadOfMovies() {
+        let media = MediaPlaybackPaths.mediaRootURL.standardizedFileURL
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.standardizedFileURL
+        XCTAssertTrue(media.path.hasPrefix(support.path + "/"))
+        XCTAssertTrue(media.path.hasSuffix("/FluxNews/Media"))
+    }
+
+    func testHostSandboxEntitlementsMatchRequiredCapabilities() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("FluxNews/FluxNews.entitlements"))
+        let entitlements = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        for key in ["com.apple.security.app-sandbox", "com.apple.security.network.client", "com.apple.security.files.user-selected.read-write"] {
+            XCTAssertEqual(entitlements[key] as? Bool, true, "Missing: \(key)")
+        }
+        XCTAssertEqual(entitlements["com.apple.security.application-groups"] as? [String], ["group.dev.kevincfechtel.fluxNews"])
+    }
+}
+
 @MainActor
 private final class FakePlaybackCore: MediaPlaybackCore {
     var preparation: PlaybackPreparation
