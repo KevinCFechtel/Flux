@@ -110,6 +110,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 LibraryResult.ofItem(
                     AndroidAutoMediaLibraryProjection.rootItem(
                         supportsFeedFilter = browser.maxCommandsForMediaItems > 0,
+                                context = this@AndroidMediaPlaybackService,
                     ),
                     params,
                 ),
@@ -131,7 +132,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                     parentId == AndroidAutoMediaLibraryProjection.ROOT_MEDIA_ID -> snapshot.items
 
                     parentId == AndroidAutoMediaLibraryProjection.FILTER_ROOT_MEDIA_ID ->
-                        AndroidAutoMediaLibraryProjection.filterItems(snapshot)
+                        AndroidAutoMediaLibraryProjection.filterItems(snapshot, this@AndroidMediaPlaybackService)
 
                     AndroidAutoMediaLibraryProjection.isFilterChoice(parentId) -> {
                         val requestedFeedId =
@@ -181,6 +182,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                         LibraryResult.ofItem(
                             AndroidAutoMediaLibraryProjection.rootItem(
                                 supportsFeedFilter = browser.maxCommandsForMediaItems > 0,
+                                context = this@AndroidMediaPlaybackService,
                             ),
                             null,
                         ),
@@ -189,7 +191,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                 mediaId == AndroidAutoMediaLibraryProjection.FILTER_ROOT_MEDIA_ID ->
                     Futures.immediateFuture(
                         LibraryResult.ofItem(
-                            AndroidAutoMediaLibraryProjection.filterRootItem(),
+                            AndroidAutoMediaLibraryProjection.filterRootItem(this@AndroidMediaPlaybackService),
                             null,
                         ),
                     )
@@ -200,7 +202,7 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
                             ?: return@libraryResultFuture LibraryResult.ofError(
                                 SessionError.ERROR_BAD_VALUE,
                             )
-                        AndroidAutoMediaLibraryProjection.filterChoiceItem(snapshot, mediaId)
+                        AndroidAutoMediaLibraryProjection.filterChoiceItem(snapshot, mediaId, this@AndroidMediaPlaybackService)
                             ?.let { LibraryResult.ofItem(it, null) }
                             ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
                     }
@@ -397,18 +399,18 @@ class AndroidMediaPlaybackService : MediaLibraryService(), AndroidMediaPlaybackH
 
         val mediaButtonPreferences = listOf(
             CommandButton.Builder(CommandButton.ICON_SKIP_BACK_15)
-                .setDisplayName("Back 15 seconds")
+                .setDisplayName(getString(R.string.auto_back_15))
                 .setPlayerCommand(Player.COMMAND_SEEK_BACK)
                 .setSlots(CommandButton.SLOT_BACK)
                 .build(),
             CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
-                .setDisplayName("Forward 30 seconds")
+                .setDisplayName(getString(R.string.auto_forward_30))
                 .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
                 .setSlots(CommandButton.SLOT_FORWARD)
                 .build(),
         )
         val filterButton = CommandButton.Builder(CommandButton.ICON_PLAYLIST_ADD)
-            .setDisplayName("Filter by Feed")
+            .setDisplayName(getString(R.string.auto_filter_by_feed))
             .setIconUri(
                 Uri.parse(
                     "android.resource://$packageName/drawable/ic_filter",

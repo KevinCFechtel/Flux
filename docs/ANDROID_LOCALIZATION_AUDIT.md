@@ -39,3 +39,9 @@ The entries above have been migrated to Android string resources in this PR. A f
 - The guard intentionally is heuristic. A valid technical exception needs an in-line `// l10n-ignore: reason`. Do not silently broaden ignores to make CI green.
 
 **Decision:** keep C1 extraction **in progress**, Weblate resource structure **established**, translation catalogs **awaiting reviewed translations**.
+
+## Android Auto and foreground download follow-up
+
+After the audited Compose cleanup (#45, merge `1b729995ee9059ae6cfd3057fecba0df6c582b7b`), this follow-up moves the confirmed Android Auto browse root/filter labels, missing feed/article titles, media command display labels and MediaTransfer foreground-notification channel/title/body into Android string resources. Android Auto feed-count subtitles now use Android plural forms. The production Media3 session supplies its Android `Context` to browse projections; helper calls without a context retain their old English fallback for compatibility with call sites/tests.
+
+This is **not** an assertion that every user-facing dynamic message has been localized. The regex-based guard is intentionally not a complete program analysis; check generated error text, relative dates, dynamically composed summaries, non-Compose and runtime locale behavior before declaring C1 complete. Review the new Android CI and on-device Android Auto + notification surfaces.

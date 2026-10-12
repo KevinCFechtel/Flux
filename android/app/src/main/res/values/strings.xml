@@ -263,4 +263,13 @@
     <string name="feed_system_notifications">System Notifications</string>
     <string name="feed_open_miniflux">Open in Miniflux</string>
     <string name="feed_auto_download_audio">Automatically Download Audio</string>
+    <string name="auto_filter_by_feed">Filter by Feed</string>
+    <string name="auto_unknown_feed">Unknown Feed</string>
+    <string name="auto_untitled_news">Untitled News</string>
+    <string name="auto_back_15">Back 15 seconds</string>
+    <string name="auto_forward_30">Forward 30 seconds</string>
+    <string name="media_download_channel">Media downloads</string>
+    <string name="media_downloading_audio">Downloading audio</string>
+    <string name="media_downloading_explanation">FluxNews is saving media for offline playback.</string>
+    <plurals name="auto_item_count"><item quantity="one">%1$d item</item><item quantity="other">%1$d items</item></plurals>
 </resources>

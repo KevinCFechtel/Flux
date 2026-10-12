@@ -43,12 +43,13 @@ internal object AndroidAutoMediaLibraryProjection {
     @OptIn(UnstableApi::class)
     fun rootItem(
         supportsFeedFilter: Boolean = false,
+        context: Context? = null,
     ): MediaItem =
         MediaItem.Builder()
             .setMediaId(ROOT_MEDIA_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("Listening List")
+                    .setTitle(context?.getString(R.string.nav_listening_list) ?: "Listening List")
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
                     .apply {
                         if (supportsFeedFilter) {
@@ -61,12 +62,12 @@ internal object AndroidAutoMediaLibraryProjection {
             )
             .build()
 
-    fun filterRootItem(): MediaItem =
+    fun filterRootItem(context: Context? = null): MediaItem =
         MediaItem.Builder()
             .setMediaId(FILTER_ROOT_MEDIA_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("Filter by Feed")
+                    .setTitle(context?.getString(R.string.auto_filter_by_feed) ?: "Filter by Feed")
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
@@ -74,23 +75,25 @@ internal object AndroidAutoMediaLibraryProjection {
             )
             .build()
 
-    fun filterItems(snapshot: AndroidAutoMediaLibrarySnapshot): List<MediaItem> =
+    fun filterItems(snapshot: AndroidAutoMediaLibrarySnapshot, context: Context? = null): List<MediaItem> =
         buildList {
             add(
                 filterChoiceItem(
                     mediaId = FILTER_ALL_MEDIA_ID,
-                    title = "All Feeds",
+                    title = context?.getString(R.string.list_all_feeds) ?: "All Feeds",
                     selected = snapshot.selectedFeedId == null,
                     count = snapshot.feeds.sumOf { it.itemCount },
+                    context = context,
                 ),
             )
             snapshot.feeds.forEach { feed ->
                 add(
                     filterChoiceItem(
                         mediaId = FILTER_FEED_PREFIX + feed.feedId,
-                        title = feed.feedTitle.ifBlank { "Unknown Feed" },
+                        title = feed.feedTitle.ifBlank { context?.getString(R.string.auto_unknown_feed) ?: "Unknown Feed" },
                         selected = snapshot.selectedFeedId == feed.feedId,
                         count = feed.itemCount,
+                        context = context,
                     ),
                 )
             }
@@ -109,14 +112,16 @@ internal object AndroidAutoMediaLibraryProjection {
     fun filterChoiceItem(
         snapshot: AndroidAutoMediaLibrarySnapshot,
         mediaId: String,
+        context: Context? = null,
     ): MediaItem? =
-        filterItems(snapshot).firstOrNull { it.mediaId == mediaId }
+        filterItems(snapshot, context).firstOrNull { it.mediaId == mediaId }
 
     private fun filterChoiceItem(
         mediaId: String,
         title: String,
         selected: Boolean,
         count: ULong,
+        context: Context? = null,
     ): MediaItem =
         MediaItem.Builder()
             .setMediaId(mediaId)
@@ -124,7 +129,7 @@ internal object AndroidAutoMediaLibraryProjection {
                 MediaMetadata.Builder()
                     .setTitle(if (selected) "✓ $title" else title)
                     .setSubtitle(
-                        if (count == 1uL) "1 item" else "$count items",
+                        context?.resources?.getQuantityString(R.plurals.auto_item_count, count.coerceAtMost(Int.MAX_VALUE.toULong()).toInt(), count.coerceAtMost(Int.MAX_VALUE.toULong()).toInt()) ?: if (count == 1uL) "1 item" else "$count items",
                     )
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_NEWS)
                     .setIsBrowsable(true)
@@ -156,12 +161,13 @@ internal object AndroidAutoMediaLibraryProjection {
         item: ListeningListItem,
         artworkUri: Uri? = null,
         includeAndroidAutoProgressExtras: Boolean = false,
+        context: Context? = null,
     ): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
         val metadata = MediaMetadata.Builder()
-            .setTitle(item.title.ifBlank { "Untitled News" })
-            .setArtist(item.feedTitle.ifBlank { "Unknown Feed" })
-            .setAlbumTitle(item.feedTitle.ifBlank { "Unknown Feed" })
+            .setTitle(item.title.ifBlank { context?.getString(R.string.auto_untitled_news) ?: "Untitled News" })
+            .setArtist(item.feedTitle.ifBlank { context?.getString(R.string.auto_unknown_feed) ?: "Unknown Feed" })
+            .setAlbumTitle(item.feedTitle.ifBlank { context?.getString(R.string.auto_unknown_feed) ?: "Unknown Feed" })
             .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
             .setArtworkUri(artworkUri)
             .setIsBrowsable(false)
@@ -318,6 +324,7 @@ internal class AndroidAutoMediaLibraryStore(
                             selected.enclosure.id,
                         ),
                         includeAndroidAutoProgressExtras = true,
+                        context = applicationContext,
                     )
                 }
                 AndroidAutoMediaLibrarySnapshot(
