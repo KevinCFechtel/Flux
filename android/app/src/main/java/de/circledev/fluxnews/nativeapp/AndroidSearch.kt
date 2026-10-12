@@ -665,7 +665,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleSwipeAction.StarUnstar -> store.requestSetStarred(article.id, !article.isStarred)
             AndroidArticleSwipeAction.OpenOriginal -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage("The article does not have a valid web URL.")
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(context.getString(R.string.search_bad_article_url))
             }
             AndroidArticleSwipeAction.OpenMiniflux -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
@@ -674,8 +674,8 @@ internal fun AndroidSearchDestination(
                     if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
                 }
             }
-            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage("The article does not have a valid comments URL.")
-            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage("The article could not be shared.")
+            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(context.getString(R.string.search_bad_comments_url))
+            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage(context.getString(R.string.search_share_failed))
             AndroidArticleSwipeAction.SaveToService -> store.requestSaveToService(article.id)
             AndroidArticleSwipeAction.ListeningList -> {
                 val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
@@ -702,7 +702,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleContextAction.Reader -> openReader(article)
             AndroidArticleContextAction.OpenMiniflux -> performSwipe(article, AndroidArticleSwipeAction.OpenMiniflux)
             AndroidArticleContextAction.Comments -> performSwipe(article, AndroidArticleSwipeAction.Comments)
-            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage("Link copied.") else showMessage("The article does not have a valid web URL.")
+            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage(context.getString(R.string.search_link_copied)) else showMessage(context.getString(R.string.search_bad_article_url))
             AndroidArticleContextAction.Share -> performSwipe(article, AndroidArticleSwipeAction.Share)
             AndroidArticleContextAction.SaveToService -> performSwipe(article, AndroidArticleSwipeAction.SaveToService)
         }
@@ -782,8 +782,8 @@ internal fun AndroidSearchDestination(
                     val availableWidthDp = availableWidth.value.toInt()
                     when {
                         !state.hasSearched -> SearchMessage(
-                            title = "Search articles",
-                            message = "Find matching entries in your Miniflux account.",
+                            title = stringResource(R.string.search_articles_hint),
+                            message = stringResource(R.string.search_intro),
                             modifier = Modifier.fillMaxSize(),
                             showSearchIcon = true,
                         )
@@ -791,15 +791,15 @@ internal fun AndroidSearchDestination(
                             Modifier.fillMaxSize(),
                         )
                         state.errorMessage != null && state.results.isEmpty() -> SearchMessage(
-                            title = "Search unavailable",
-                            message = state.errorMessage ?: "Search could not be completed.",
+                            title = stringResource(R.string.search_unavailable),
+                            message = state.errorMessage ?: stringResource(R.string.search_failed),
                             modifier = Modifier.fillMaxSize(),
-                            actionLabel = "Retry",
+                            actionLabel = stringResource(R.string.list_retry),
                             onAction = store::retry,
                         )
                         state.results.isEmpty() -> SearchMessage(
-                            title = "No matching articles",
-                            message = "Try a different search term.",
+                            title = stringResource(R.string.search_no_results),
+                            message = stringResource(R.string.search_try_different),
                             modifier = Modifier.fillMaxSize(),
                             showSearchIcon = true,
                         )
@@ -839,7 +839,7 @@ internal fun AndroidSearchDestination(
                                     title = "More results unavailable",
                                     message = state.errorMessage ?: "More results could not be loaded.",
                                     modifier = Modifier.fillMaxWidth(),
-                                    actionLabel = "Retry",
+                                    actionLabel = stringResource(R.string.list_retry),
                                     onAction = store::retryLoadMore,
                                 )
                             }
@@ -868,7 +868,7 @@ internal fun AndroidSearchDestination(
             store = readerStore,
             source = AndroidReaderSource.Search,
             onOpenOriginal = { article ->
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage("The article does not have a valid web URL.")
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(context.getString(R.string.search_bad_article_url))
             },
         )
     }
