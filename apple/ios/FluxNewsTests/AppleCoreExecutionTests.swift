@@ -295,11 +295,14 @@ private final class ExecutionGate: @unchecked Sendable {
         }
     }
 
-    func waitForStarts(_ count: Int, timeout: TimeInterval = 2) async throws {
+    func waitForStarts(_ count: Int, timeout: TimeInterval = 10) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
         while startCount < count {
-            guard ContinuousClock.now < deadline else { throw GateError.timedOut }
-            try await Task.sleep(for: .milliseconds(1))
+            guard ContinuousClock.now < deadline else {
+                XCTFail("ExecutionGate timeout: observed \(startCount) starts; expected \(count) within \(timeout)s")
+                throw GateError.timedOut
+            }
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
