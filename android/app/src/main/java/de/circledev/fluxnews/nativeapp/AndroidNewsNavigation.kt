@@ -51,6 +51,8 @@ internal fun NewsNavigationContent(
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
     onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
+    onAddFeed: () -> Unit,
+    onAddCategory: () -> Unit,
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -165,12 +167,19 @@ internal fun NewsNavigationContent(
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Text(
-            "Feeds",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Feeds",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text("+ Feed") }
+            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text("+ Category") }
+        }
 
         if (projection == null) {
             Text(
