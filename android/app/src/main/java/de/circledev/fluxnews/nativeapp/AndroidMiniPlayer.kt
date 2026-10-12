@@ -31,6 +31,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -165,7 +166,7 @@ internal fun AndroidCompactMiniPlayer(
             ) {
                 Icon(
                     painter = painterResource(androidx.media3.session.R.drawable.media3_icon_skip_back_15),
-                    contentDescription = "Back 15 seconds",
+                    contentDescription = stringResource(R.string.player_back_15),
                 )
             }
 
