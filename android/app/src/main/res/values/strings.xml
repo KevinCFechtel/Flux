@@ -127,4 +127,27 @@
     <string name="downloads_delete_all">Delete All Downloads</string>
     <string name="downloads_deleting">Deleting Downloads…</string>
     <string name="action_refresh">Refresh</string>
+    <string name="list_back">Back</string>
+    <string name="list_filter_feed">Filter by feed</string>
+    <string name="list_all_feeds">All Feeds</string>
+    <string name="list_sort">Sort Listening List</string>
+    <string name="list_recently_added">Recently Added</string>
+    <string name="list_publication_date">Publication Date</string>
+    <string name="list_retry">Retry</string>
+    <string name="list_actions">Listening List actions</string>
+    <string name="list_remove">Remove from Listening List</string>
+    <string name="list_download">Download</string>
+    <string name="list_cancel_download">Cancel download</string>
+    <string name="list_delete_download">Delete download</string>
+    <string name="list_retry_download">Retry download</string>
+    <string name="list_deletion_pending">Deletion pending</string>
+    <string name="player_actions">Player actions</string>
+    <string name="player_restart">Restart</string>
+    <string name="player_close">Close player</string>
+    <string name="player_turn_off">Turn off</string>
+    <string name="player_back_15">Back 15 seconds</string>
+    <string name="player_forward_30">Forward 30 seconds</string>
+    <string name="player_stop">Stop</string>
+    <string name="player_artwork">Media artwork</string>
+    <string name="player_fallback_artwork">Fallback media artwork</string>
 </resources>
