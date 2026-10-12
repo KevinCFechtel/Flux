@@ -3,6 +3,19 @@ import XCTest
 
 @MainActor
 final class BrowserPresentationTests: XCTestCase {
+    func testHostATSAllowsUserSuppliedHTTPMediaWithoutChangingWidgetPolicy() throws {
+        let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let hostData = try Data(contentsOf: project.appendingPathComponent("FluxNews/Info.plist"))
+        let host = try XCTUnwrap(PropertyListSerialization.propertyList(from: hostData, format: nil) as? [String: Any])
+        let ats = try XCTUnwrap(host["NSAppTransportSecurity"] as? [String: Any])
+        XCTAssertEqual(ats["NSAllowsArbitraryLoads"] as? Bool, true)
+        XCTAssertNil(ats["NSAllowsArbitraryLoadsForMedia"])
+
+        let widgetData = try Data(contentsOf: project.appendingPathComponent("FluxNewsWidgets/Info.plist"))
+        let widget = try XCTUnwrap(PropertyListSerialization.propertyList(from: widgetData, format: nil) as? [String: Any])
+        XCTAssertNil(widget["NSAppTransportSecurity"])
+    }
+
     func testBrowserStoreUsesSharedAppleCoreExecutionBoundary() throws {
         let macosDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
