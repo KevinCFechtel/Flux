@@ -74,7 +74,7 @@ internal object AndroidFeedCreationPolicy {
             description.contains("duplicate", ignoreCase = true) ||
             description.contains("409")
         ) {
-            return if (isFeed) "This feed is already subscribed." else stringResource(R.string.feed_category_already_exists)
+            return if (isFeed) "This feed is already subscribed." else "This category already exists."
         }
         if (description.contains("unauthorized", ignoreCase = true) ||
             description.contains("authentication", ignoreCase = true)
