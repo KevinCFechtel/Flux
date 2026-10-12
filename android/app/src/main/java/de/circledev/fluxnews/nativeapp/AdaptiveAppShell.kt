@@ -368,7 +368,7 @@ private fun TimelineDestination(
                             onAddFeed = onAddFeed,
                             onAddCategory = onAddCategory,
                             navigationToggleIcon = R.drawable.ic_arrow_back,
-                            navigationToggleDescription = "Collapse navigation",
+                            navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
                             onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
                     }
@@ -442,7 +442,7 @@ private fun TimelineDestination(
                                 }
                             },
                             navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
-                            navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
+                            navigationToggleDescription = if (collapsedPersistentNavigation) stringResource(R.string.l10n_expand_navigation) else null,
                             onNavigationToggle = if (collapsedPersistentNavigation) {
                                 {
                                     coroutineScope.launch {

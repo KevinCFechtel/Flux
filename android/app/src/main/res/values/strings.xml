@@ -494,4 +494,7 @@
     <string name="l10n_account_headers_invalid">Custom headers must have unique valid names and cannot replace FluxNews transport headers.</string>
     <string name="l10n_account_server_response">The Miniflux server returned an unexpected response.</string>
     <string name="l10n_account_validation_failed">The Miniflux account could not be validated.</string>
+    <string name="l10n_collapse_navigation">Collapse navigation</string>
+    <string name="l10n_expand_navigation">Expand navigation</string>
+    <string name="l10n_backup_restored_sync">Configuration restored. Synchronization will start now.</string>
 </resources>

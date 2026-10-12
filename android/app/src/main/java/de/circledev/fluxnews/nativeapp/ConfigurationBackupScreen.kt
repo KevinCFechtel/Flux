@@ -96,7 +96,7 @@ internal fun ConfigurationBackupScreen(
                     val app = context.applicationContext as FluxApplication
                     app.backgroundSync.reconcileFromCore()
                     app.syncCoordinator.requestSync(SyncReason.MANUAL)
-                    status = "Configuration restored. Synchronization will start now."
+                    status = context.getString(R.string.l10n_backup_restored_sync)
                     onRestored()
                 } catch (failure: Exception) { error = backupMessage(failure, context) }
                 working = false
