@@ -1,0 +1,217 @@
+# macOS C3 — Feature-Parity Completion Roadmap
+
+> **Status: APPROVED SCOPE / IMPLEMENTATION PENDING — 12 October 2026**
+>
+> **Source baseline:** main at 9783d7e790858e79f00cab95b6b1c7b6bff513df.
+> **Goal:** Finish the remaining functional gaps in the native macOS client relative to
+> the accepted iOS/iPadOS and Android capabilities without copying mobile UI layouts.
+> This is a source-based functional inventory, **not** a claim that every runtime path
+> has already passed on-device acceptance.
+>
+> **Authority:** ARCHITECTURE_DECISIONS.md, frozen Phase C/D/E contracts,
+> MOBILE_PRODUCT_SEMANTICS.md and the current Rust Core. The release/signing
+> contract remains RELEASE_DISTRIBUTION.md, and macOS Sandbox readiness remains
+> B1 in POST_REPLACEMENT_FOLLOWUP_PLAN.md.
+
+## 1. Product decision and boundaries
+
+- **Functional parity is the default.** Bulk feed settings and both scope-level
+  "Mark All as Read" actions are explicitly in scope; they are no longer deferred
+  as optional desktop-only product decisions.
+- Preserve a **native menu-bar/SwiftUI desktop experience**: commands, keyboard
+  shortcuts, context menus, popovers and Settings windows may replace mobile
+  gestures and the mobile bottom Action Bar. Feature access and semantics must
+  still be equivalent.
+- Keep Rust Core/UniFFI authoritative for catalog, query results, unread/read
+  state, feed preferences, media downloads, retention and diagnostics; do not
+  recreate Miniflux requests or domain persistence in Swift.
+- Avoid reopening completed iOS/Android Flutter migration or Phase C audio work.
+  The unreleased macOS app starts fresh under its Sandbox; **no old-data migration**.
+- Keep functional feature PRs separate from B1 signed Sandbox acceptance and
+  from R release/distribution scripting. **B1 is required before Mac App Store
+  export, not before implementing C3 features.**
+- A similar capability is not considered missing merely because its controls
+  are placed differently on desktop. Verify parity in end-to-end user flows.
+- Do not silently expand scope to unsupported OS integrations or speculative
+  refactors. Track discoveries against this checklist.
+
+## 2. Source-verified macOS parity inventory
+
+Legend: **Missing UI** = Core/platform primitives available, user control absent;
+**Partial** = present but incomplete/different; **Exists** = do not rebuild;
+**Verify** = source inspection cannot prove runtime behavior.
+
+| ID | Capability | Current macOS evidence | Target / acceptance |
+| --- | --- | --- | --- |
+| P01 | Scope-level "Mark All as Read" | BrowserStore already calls Core setReadStateBulk for scrollover; no scope action in the popover More menu | Mark **all unread article IDs in current scope**, not just loaded/visible rows; no navigation; success/failure feedback; refresh counts |
+| P02 | "Mark All as Read & Next" | No matching macOS workflow | For Feed/Category only, mark successfully and then move to the next **visible sibling**; no wrap-around; disable at final sibling and in All/Starred/Search/Listening List |
+| P03 | Starred/Bookmarks read filter | BrowserStore.query currently forces readFilter=.all for Starred | Both All and Unread filter within Starred (starred filter remains active); consistent counts and switching |
+| P04 | Bulk feed settings | Core already exposes feedPreferencesBulk and patchFeedPreferencesBulk; Mac has per-feed FeedSettingsView only | Searchable multi-select list; select visible/all, clear; mixed values; change only explicitly edited fields for selected IDs |
+| P05 | Feed/category creation and per-feed preferences | AddFeedView, AddCategoryView and per-feed Settings are already implemented | Regression-check navigation refresh, duplicate handling and single-feed settings; do not rebuild |
+| P06 | Downloaded-data overview | macOS Settings lacks the iOS/Android overview | Show file count and storage size from Core; "Delete All Downloads" with confirmation; preserve Listening List and playback progress |
+| P07 | Cancel an in-progress audio download | MediaTransferCoordinator.cancel(enclosureID:) exists; ListeningListViews lacks a cancel control | User-visible cancel for pending/active transfers, coherent Core/request state and UI progress; no unintended deletion or automatic restart |
+| P08 | Download network policy and retention | Core has downloadNetworkPolicy / downloadRetention; macOS Settings exposes only auto-download / post-playback cleanup | Provide Any/Unmetered and retention choices supported by Core; persist/reconcile safely; test policy changes during transfers |
+| P09 | Support diagnostics | CoreDiagnosticLogger currently forwards to OSLog; no macOS viewer/export UI | Bounded, redacted native+Core support records; searchable viewer, severity filter, debug toggle, export, clear confirmation |
+| P10 | Privacy-sensitive log handling | NativeLog / CoreDiagnosticLogger use public OSLog interpolation for some diagnostics | No credentials, header values, sensitive paths or raw media URLs in public logs/exports; tests for redaction and clear |
+| P11 | HTTP Miniflux account warning | macOS account Settings displays server fields/version but lacks mobile HTTP warning | Explain explicitly that plain HTTP account credentials and feed traffic are unencrypted; do not confuse with Apple's feed-media ATS policy |
+| P12 | About and Open Source | Settings has no dedicated About section like iOS/Android | App/build version, repository, Miniflux independence, license/open-source disclosures; native links |
+| P13 | Background sync after wake/network return | Periodic 15-minute timer and resume sync exist | Deterministic stale-sync recovery on wake/reachability return, with debouncing, single-flight and disabled-setting semantics |
+| P14 | Player skip semantics | PlayerView uses -30 s / +30 s; mobile uses -15 s / +30 s | Align to 15 s back / 30 s forward, including labels, controls and system-media actions as applicable |
+| P15 | Desktop action access | Article row has context actions; popover More currently primarily filters/sort/settings/quit | Ensure Mark All, search, Starred, saved/third-party, reader/open original, share and media actions are discoverable; no mandatory mobile action-bar clone |
+| P16 | Localization and accessibility | macOS Localizable.xcstrings: 236 keys, 231 with German localization at baseline; mobile has six non-English target languages | Review German completeness; stage Spanish, Galician, Dutch, Tamil and Turkish via reviewed translations; check labels, plurals, keyboard, VoiceOver and long copy |
+| P17 | Reader, search, Listening List, chapter UI and sleep timer | Existing macOS views and coordinators cover these | Preserve behavior; test key regressions against mobile semantics rather than reimplementing |
+| P18 | Widgets, notifications, shortcuts and configuration backup | Native macOS widgets, notifications, App Intents, backup and restore exist | Smoke/regression acceptance; desktop behavior may differ from iOS |
+| P19 | Sandbox and signed release | Host Sandbox work has its own B1 acceptance; Mac App Store export remains on R track | Signed fresh-container acceptance before distribution; **not** a blocker for code-only C3 feature PRs |
+
+### Important semantic details
+
+- **All-read is not "current screen"**: use an independent Core unread query
+  for the active scope. The visible list may be sorted, filtered or limited
+  differently. Bookmarks must retain the starred filter, even when switching
+  its read filter.
+- **"Next" refers to navigation order**, including the same visibility policy
+  that hides empty feeds/categories where enabled. A failed bulk mutation must
+  not change scope; changed account/scope during the operation must not trigger
+  navigation to an unrelated item.
+- **Bulk feed edits are patches**, not copies of one feed's entire preferences.
+  Untouched fields remain unchanged, and mixed values must never be silently
+  treated as false/off. Keep per-feed settings independently reachable.
+- **Download deletion is not Listening List deletion**. Core persistence for
+  entries and playback positions must survive bulk file removal. Cancellation
+  must distinguish queued, active, deleting and already-completed transfers.
+- **Localization applies to user-facing copy**, while raw diagnostics may stay
+  English. Protect sensitive values at logging/export time rather than merely
+  hiding them from a viewer.
+
+## 3. Implementation sequence and PR boundaries
+
+Each workstream is one focused feature PR (or a small related series if tests
+warrant it). The order prioritizes concrete semantic gaps before supporting
+settings and release preparation. No PR should mix unrelated platform changes.
+
+| Order | Work package | Primary code surfaces | Deliverable / merge gate |
+| --- | --- | --- | --- |
+| C3.0 | Scope/roadmap documentation | This document; post-replacement plan | Approved feature list and shared test/acceptance contracts |
+| C3.1 | Scope actions + Starred parity | BrowserStore, PopoverContentView, PopoverNavigationViews, presentation policies | P01–P03/P15: complete-scope bulk mark, optional next and correct Starred filter |
+| C3.2 | Bulk feed management | New macOS bulk settings view, SettingsView, BrowserStore; Core bulk APIs | P04/P05: multi-selection, mixed-value editing, safe patching, navigation refresh |
+| C3.3 | Downloads and media settings | SettingsView, BrowserStore, MediaTransferCoordinator, ListeningListViews | P06–P08: summaries, delete-all, cancel and network/retention controls |
+| C3.4 | Diagnostics + privacy | New diagnostic store/view, NativeLog, CoreDiagnosticLogger, SettingsView | P09/P10: redacted persistent records, viewer/search/export/clear |
+| C3.5 | Account/about/player polish | SettingsView, account presentation, PlayerView, remote-control code | P11/P12/P14: HTTP warning, About, 15/30-second skip parity |
+| C3.6 | Background recovery | BrowserStore lifecycle, AppDelegate, network monitoring | P13: wake/network reconnect and no duplicate/background-disabled sync |
+| C3.7 | Localization and accessibility | macOS string catalog and relevant views | P15/P16: reviewed locale catalogs, keyboard/VoiceOver and small-window text check |
+| C3.8 | Functional parity acceptance | macOS tests, Apple CI, real Mac smoke checklist | P01–P18 accepted; documentation updated; B1 tracked separately |
+
+C3.1 and C3.2 can be developed independently, but merge and verify one Apple
+change at a time to keep failures attributable. C3.3 precedes signed end-to-end
+download/Sandbox checks. C3.4 should precede final support-export review.
+C3.5 and C3.6 are independent once baseline Apple CI is green. C3.7 follows
+stabilized new UI copy, although keys can be added with each feature.
+
+### C3.1 — Scope mutations and navigation
+
+- Establish Core-query policy for each supported scope and a tested "next
+  visible sibling" policy based on the current navigation projection.
+- Keep mutations off the main actor using existing
+  AppleCoreSessionExecutionCoordinator; protect against account/scope changes.
+- Maintain undo only if the existing Core/UI semantics support a correct
+  full-scope rollback; do not imply the scrollover undo contract applies.
+- Tests: 0 unread, 1 unread, many (including offscreen), Starred unread/all,
+  last sibling, hidden sibling, failed mutation, changed scope during operation,
+  counters and list refresh.
+
+### C3.2 — Multi-feed editing
+
+- Reuse feedPreferencesBulk and patchFeedPreferencesBulk; implement tri-state
+  display and a sparse field patch only after explicit user input.
+- Search/filter selection should not inadvertently discard selected feeds.
+- Tests: partial selection, mixed values, untouched properties, deleted feed,
+  failure/retry, empty catalog, multiple change types and sync/reload.
+
+### C3.3 — Download behavior
+
+- Read Core downloadedMediaSummary and requestAllDownloadDeletions via a
+  responsive/serialized execution path. Reconcile pending deletion work.
+- Wire a user-facing cancel action to the correct Core cancellation semantics,
+  not just an in-memory URLSession task cancellation.
+- Expose network/retention preference setters through Core, persist them and
+  safely update future transfers; a currently playing file must not be removed.
+- Tests: queued/active/completed/delete-requested transfer, cancel and retry,
+  network-policy switch, retained Listening List/progress, storage summary.
+
+### C3.4 — Supportability
+
+- Match the iOS/Android bounded-retention, severity and debug-toggle contract.
+  Export app/OS metadata and native+Core records only after redaction.
+- Test export contents and purge, sensitive account/header/path suppression,
+  disabled-debug collection and high-volume truncation.
+
+### C3.5/C3.6 — UX and lifecycle
+
+- Expose a clear warning for plain-HTTP Miniflux accounts without restricting
+  legitimate HTTP-only podcast/image source URLs through a misleading claim.
+- Use 15 s backward / 30 s forward consistently in the player and applicable
+  media remote commands, with short accessible labels.
+- For wake/network recovery use an idempotent trigger, respect background-sync
+  preferences and throttle repeat attempts; preserve manual Sync.
+- Tests: policy classification, player seek bounds, repeated wake/online
+  callbacks, offline/online while sync is active and disabled background sync.
+
+### C3.7 — Localization strategy
+
+- English canonical source, German initial user-reviewed locale, plus Spanish,
+  Galician, Dutch, Tamil and Turkish as the mobile target locale set.
+- Do not claim an empty or partial catalog as translated; keep English
+  fallbacks where review is incomplete. Avoid translating technical identifiers,
+  URLs and diagnostics that are not user-facing copy.
+- Verify plural/date formatting, narrow Settings/Popover layouts and VoiceOver.
+  Locale completion is tracked separately from the correctness of the C3.1–C3.6
+  feature implementations.
+
+## 4. Validation and release gates
+
+For every feature PR:
+
+1. Record scope, baseline commit, affected Core contracts and changed UI paths.
+2. Add model/presentation tests for behavior and failure/cancellation paths.
+3. Run the **macOS** regression target in .github/workflows/apple.yml and keep
+   the Rust gate for any Core/UniFFI change. Do not infer tests from static
+   inspection; record actual CI URL and conclusion.
+4. Confirm ordinary account/Reader/feed navigation, Listening List, media
+   playback and widget behavior are not regressed.
+5. Update this inventory's status and link the merged PR/acceptance evidence.
+
+For **C3.8 macOS functional acceptance**, test on a Mac:
+
+- Mark-All in All, Category, Feed and Starred, including unread-only and
+  switching filter; Mark-All-&-Next at last/non-last visible sibling.
+- Bulk updates on mixed feed settings with selection/search and restart.
+- Download start/progress/cancel/retry/erase; totals before and after deletion;
+  playback and Listening List remain intact.
+- Diagnostics privacy, search/filter/export, clear confirmation and disabled
+  Debug Logging behavior.
+- Plain HTTP warning, About links, media 15/30 jumps, small popover layouts,
+  keyboard focus/VoiceOver and German copy.
+- Sleep/wake, Wi-Fi/offline/online transitions and no duplicate Sync.
+- Widget updates, notifications, Reader, backup/export and app restart.
+
+**Separate sign-off:** B1 must verify a signed Sandboxed **fresh install**,
+App Group, Keychain, data/download persistence, widget sharing and file-panel
+access; it is not satisfied merely by an unsigned dev run. R follows with
+correct Mac App Store provisioning and Transporter export. No macOS migration
+of unsandboxed local development data is required.
+
+## 5. Completion rule and exclusions
+
+C3 is complete only when the accepted work packages are merged, CI is green,
+the real-Mac functional checklist has pass/fail evidence, and any deferred
+items are recorded as explicit owner-approved decisions. Code presence or
+green compilation alone is not proof of a working experience.
+
+Out of scope by default: identical mobile gesture/toolbar layouts, iOS
+CarPlay/Live Activities, Android Auto, a macOS migration from unreleased
+development builds, automatic publication and speculative broad refactors.
+
+**Review rule:** Before declaring that *no* features remain, reconcile the
+runtime parity checklist against current iOS/Android UI and record newly
+discovered gaps here. This document is a controlled baseline, not an
+assertion that a source-only comparison proves exhaustive parity.
