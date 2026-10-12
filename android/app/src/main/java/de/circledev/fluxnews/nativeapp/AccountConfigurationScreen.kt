@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -85,7 +86,7 @@ internal fun AccountConfigurationScreen(
         OutlinedTextField(
             value = server,
             onValueChange = { server = it; if (it.trim() != stored?.serverUrl) version = null },
-            label = { Text("Server URL") },
+            label = { Text(stringResource(R.string.account_server_url)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -93,7 +94,7 @@ internal fun AccountConfigurationScreen(
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it },
-            label = { Text("API Key") },
+            label = { Text(stringResource(R.string.account_api_key)) },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             singleLine = true,
@@ -121,23 +122,23 @@ internal fun AccountConfigurationScreen(
                 OutlinedTextField(
                     value = header.name,
                     onValueChange = { headers[index] = header.copy(name = it) },
-                    label = { Text("Header name") },
+                    label = { Text(stringResource(R.string.account_header_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = header.value,
                     onValueChange = { headers[index] = header.copy(value = it) },
-                    label = { Text("Header value") },
+                    label = { Text(stringResource(R.string.account_header_value)) },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                TextButton(onClick = { headers.removeAt(index) }) { Text("Remove Header") }
+                TextButton(onClick = { headers.removeAt(index) }) { Text(stringResource(R.string.account_remove_header)) }
             }
         }
         OutlinedButton(onClick = { headers += EditableHeader(nextHeaderId++, "", "") }) {
-            Text("Add Header")
+            Text(stringResource(R.string.account_add_header))
         }
 
         message?.let {
@@ -157,7 +158,7 @@ internal fun AccountConfigurationScreen(
                 CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
             }
-            Text("Validate and Continue")
+            Text(stringResource(R.string.account_validate_continue))
         }
 
         LaunchedEffect(isConfiguring) {
@@ -188,14 +189,14 @@ internal fun AccountConfigurationScreen(
                 if (rebuildState == AndroidAccountBootstrap.LocalStateRebuildState.Rebuilding) {
                     CircularProgressIndicator(modifier = Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(12.dp))
-                    Text("Rebuilding Local State…")
+                    Text(stringResource(R.string.account_rebuilding))
                 } else {
-                    Text("Rebuild Local State")
+                    Text(stringResource(R.string.account_rebuild_local))
                 }
             }
             when (rebuildState) {
                 AndroidAccountBootstrap.LocalStateRebuildState.Succeeded ->
-                    Text("Local state rebuilt.", color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.account_rebuilt), color = MaterialTheme.colorScheme.primary)
                 AndroidAccountBootstrap.LocalStateRebuildState.Failed ->
                     Text(
                         "Local state was cleared, but synchronization could not be completed.",
@@ -212,14 +213,14 @@ internal fun AccountConfigurationScreen(
                 onClick = { confirmRemoval = true },
                 enabled = rebuildState != AndroidAccountBootstrap.LocalStateRebuildState.Rebuilding,
             ) {
-                Text("Remove Account", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.account_remove), color = MaterialTheme.colorScheme.error)
             }
         }
         if (!allowsRemoval) {
             HorizontalDivider()
-            Text("Already have a backup?", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.account_backup_prompt), style = MaterialTheme.typography.titleMedium)
             OutlinedButton(onClick = { onRestoreRequested?.invoke() }, modifier = Modifier.fillMaxWidth()) {
-                Text("Restore Configuration Backup")
+                Text(stringResource(R.string.account_restore_backup))
             }
         }
     }
@@ -227,14 +228,14 @@ internal fun AccountConfigurationScreen(
     if (confirmRebuild) {
         AlertDialog(
             onDismissRequest = { confirmRebuild = false },
-            title = { Text("Rebuild Local State?") },
-            text = { Text("Synchronized local content and pending changes will be discarded and rebuilt from Miniflux. Your account and settings are preserved. If synchronization fails, the previous local data cannot be restored.") },
+            title = { Text(stringResource(R.string.account_rebuild_confirm)) },
+            text = { Text(stringResource(R.string.account_rebuild_explanation)) },
             confirmButton = {
                 TextButton(onClick = { confirmRebuild = false; rebuildState = AndroidAccountBootstrap.LocalStateRebuildState.Rebuilding }) {
-                    Text("Rebuild", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.account_rebuild), color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmRebuild = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRebuild = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 
@@ -247,14 +248,14 @@ internal fun AccountConfigurationScreen(
     if (confirmRemoval) {
         AlertDialog(
             onDismissRequest = { confirmRemoval = false },
-            title = { Text("Remove this account?") },
-            text = { Text("Account data and feed preferences on this installation will be removed.") },
+            title = { Text(stringResource(R.string.account_remove_confirm)) },
+            text = { Text(stringResource(R.string.account_remove_explanation)) },
             confirmButton = {
                 TextButton(onClick = { confirmRemoval = false; message = "__remove__" }) {
-                    Text("Remove Account", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.account_remove), color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmRemoval = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRemoval = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 
