@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -45,12 +46,12 @@ internal fun AndroidFeedSettingsDestination(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Feed Settings") },
+                title = { Text(stringResource(R.string.settings_feed_settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.settings_back),
                         )
                     }
                 },
@@ -200,7 +201,7 @@ internal fun AndroidFeedSettingsScreen(
                     onClick = { context.startActivity(notifications.systemSettingsIntent()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Open Android notification settings")
+                    Text(stringResource(R.string.feed_open_notification_settings))
                 }
             }
 
