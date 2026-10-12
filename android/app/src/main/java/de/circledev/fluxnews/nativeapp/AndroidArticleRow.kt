@@ -468,12 +468,13 @@ private fun ArticleAccessories(
                 )
             }
         }
+        val unreadDescription = stringResource(R.string.article_unread)
         Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
             if (!article.isRead) {
                 Box(
                     Modifier
                         .size(8.dp)
-                        .semantics { contentDescription = stringResource(R.string.article_unread) }
+                        .semantics { contentDescription = unreadDescription }
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary),
                 )
