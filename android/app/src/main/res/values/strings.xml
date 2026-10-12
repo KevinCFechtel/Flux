@@ -150,4 +150,38 @@
     <string name="player_stop">Stop</string>
     <string name="player_artwork">Media artwork</string>
     <string name="player_fallback_artwork">Fallback media artwork</string>
+    <string name="search_back_news">Back to news</string>
+    <string name="search_articles_hint">Search articles</string>
+    <string name="search_clear">Clear search</string>
+    <string name="bulk_feeds_explanation">Configure one or multiple feeds at once. For quick access to a single feed, long-press it in the feed drawer.</string>
+    <string name="bulk_feeds_search">Search feeds</string>
+    <string name="bulk_feeds_none_selected">No feeds selected</string>
+    <string name="bulk_feeds_select_all">Select all</string>
+    <string name="bulk_feeds_select_visible">Select visible</string>
+    <string name="bulk_feeds_clear">Clear</string>
+    <string name="bulk_feeds_waiting_sync">Feeds become available after the first successful sync.</string>
+    <string name="diagnostics_logging">Logging</string>
+    <string name="diagnostics_debug_logging">Debug Logging</string>
+    <string name="diagnostics_stored_records">Stored Records</string>
+    <string name="diagnostics_viewer">Log Viewer</string>
+    <string name="diagnostics_logging_explanation">Info, warning and error records are kept even when Debug Logging is off. Debug and trace records are stored only while Debug Logging is enabled.</string>
+    <string name="diagnostics_support_export">Support Export</string>
+    <string name="diagnostics_export">Export Diagnostics</string>
+    <string name="diagnostics_export_explanation">The export contains retained native and Core support records plus app, OS, device and Debug Logging metadata.</string>
+    <string name="diagnostics_clear">Clear Logs</string>
+    <string name="diagnostics_retention">Support logs are stored locally with bounded retention. Credentials and registered custom-header values are redacted before records are persisted or exported.</string>
+    <string name="diagnostics_clear_confirm">Clear Logs?</string>
+    <string name="diagnostics_clear_description">This permanently removes the retained local support log. New records will continue to be collected according to the current logging settings.</string>
+    <string name="diagnostics_search">Search category or message</string>
+    <string name="diagnostics_level">Level: %1$s</string>
+    <string name="diagnostics_no_results">No retained records match the selected level and search.</string>
+    <string name="diagnostics_tap_copy">Tap to copy</string>
+    <string name="diagnostics_filter_all">All</string>
+    <string name="diagnostics_filter_trace">Trace</string>
+    <string name="diagnostics_filter_debug">Debug</string>
+    <string name="diagnostics_filter_info">Info</string>
+    <string name="diagnostics_filter_warning">Warning</string>
+    <string name="diagnostics_filter_error">Error</string>
+    <plurals name="bulk_feeds_selected"><item quantity="one">%1$d selected</item><item quantity="other">%1$d selected</item></plurals>
+    <plurals name="diagnostics_visible_records"><item quantity="one">%1$d visible record</item><item quantity="other">%1$d visible records</item></plurals>
 </resources>
