@@ -113,3 +113,10 @@ The following production state/model layers **still construct English message te
 ### CI validation
 
 The Android workflow runs the expanded `check-localization.py --all` inventory as informational output and `--base` as an incremental block. Successful execution of these checks confirms the scanner runs, not zero English messages. A fully green Android build/lint/test result is additionally required before merging this cleanup PR.
+
+
+## Follow-up extraction — 2026-10-12 (`51afc42`)
+
+A focused third pass confirmed additional **directly displayed** literals overlooked by the previous scanner, including account-section headings and HTTP warning, article row time/accessibility labels, Reader pane and image accessibility, player sleep timer, chapter and show-notes text, Listening List empty/now-playing/download status, timeline filter labels, and pending migration dialog copy. These are extracted to **37 base Android string resources** in `51afc42` (no translated locale catalogs added). The changes are source-only; no emulator acceptance is implied.
+
+**Still open:** runtime strings in `AndroidAccountBootstrap`, `AndroidAccountPresentation`, `AndroidArticleTimeline`, `AndroidListeningList`, `AndroidMediaPlaybackCoordinator`, `AndroidSearch`, `AndroidSyncCoordinator`, and `AndroidWidgetContract`. Inspect additional dynamic content and migration persisted status flows. Context-free Android Auto helper fallback and compatibility-only labels remain separately classified. An expanded incremental scanner now detects more accessibility, conditional display and feedback patterns; it is heuristic and does not replace a runtime string-flow review. **C1 remains open** until these paths are localized, the expanded complete source review is recorded, tests/CI pass and locale behavior is validated on device/emulator.
