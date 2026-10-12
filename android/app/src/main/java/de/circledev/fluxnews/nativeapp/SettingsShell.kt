@@ -81,7 +81,7 @@ internal fun SettingsShell(
                         IconButton(onClick = { if (compactDetail) selected = null else onBack() }) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_arrow_back),
-                                contentDescription = "Back",
+                                contentDescription = stringResource(R.string.settings_back),
                             )
                         }
                     },
@@ -203,17 +203,17 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.settings_article_explanation), color = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsPickerRow(
-            title = "Open article",
+            title = stringResource(R.string.settings_open_article),
             selected = state.openArticle,
             options = AndroidArticleOpenPreference.entries.map { it to it.displayName },
         ) { option -> scope.launch { preferences.setOpenArticle(option) } }
         SettingsPickerRow(
-            title = "Presentation",
+            title = stringResource(R.string.settings_presentation),
             selected = state.presentationMode,
             options = AndroidArticlePresentationMode.entries.map { it to it.displayName },
         ) { option -> scope.launch { preferences.setPresentationMode(option) } }
         SettingsPickerRow(
-            title = "Preview lines",
+            title = stringResource(R.string.settings_preview_lines),
             selected = state.previewLines,
             options = AndroidArticlePreviewLines.entries.map { it to it.displayName },
         ) { option -> scope.launch { preferences.setPreviewLines(option) } }
@@ -226,7 +226,7 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
     }
 }
 
-@Composable private fun ArticleSwipeSettingsSection(preferences: AndroidArticlePreferences, configuration: AndroidArticleSwipeConfiguration) { val scope = rememberCoroutineScope(); HorizontalDivider(); SettingsSectionTitle("Swipe actions"); Text("Choose up to two actions on each side. The Full Swipe action is the outer action and is triggered when the row is swiped all the way.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SwipeSideSettings("Swipe right", AndroidArticleSwipeSide.Leading, configuration, preferences, scope); SwipeSideSettings("Swipe left", AndroidArticleSwipeSide.Trailing, configuration, preferences, scope) }
+@Composable private fun ArticleSwipeSettingsSection(preferences: AndroidArticlePreferences, configuration: AndroidArticleSwipeConfiguration) { val scope = rememberCoroutineScope(); HorizontalDivider(); SettingsSectionTitle(stringResource(R.string.settings_swipe_actions)); Text(stringResource(R.string.settings_swipe_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SwipeSideSettings(stringResource(R.string.settings_swipe_right), AndroidArticleSwipeSide.Leading, configuration, preferences, scope); SwipeSideSettings(stringResource(R.string.settings_swipe_left), AndroidArticleSwipeSide.Trailing, configuration, preferences, scope) }
 @Composable private fun SwipeSideSettings(title: String, side: AndroidArticleSwipeSide, configuration: AndroidArticleSwipeConfiguration, preferences: AndroidArticlePreferences, scope: CoroutineScope) { Column { Text(title, style = MaterialTheme.typography.titleSmall); SwipeSlotSettings("Full Swipe", side, AndroidArticleSwipeSlot.FullSwipe, configuration.fullSwipeAction(side), configuration, preferences, scope, true); SwipeSlotSettings("Additional Action", side, AndroidArticleSwipeSlot.Additional, configuration.additionalAction(side), configuration, preferences, scope, true, configuration.fullSwipeAction(side) != null) } }
 @Composable
 private fun SwipeSlotSettings(
@@ -258,11 +258,11 @@ private fun SwipeSlotSettings(
 private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, state: AndroidActionBarPreferenceState, modifier: Modifier) {
     val scope = rememberCoroutineScope(); val available = AndroidActionBarAction.entries.filterNot(state.actions::contains)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle("Article List Actions"); ActionBarFixedRow("Sync", "Always shown")
-        state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text("Remove") } } }
-        ActionBarFixedRow("More", "Always available"); Text("Sync stays fixed at the beginning and More stays available as the fallback. The order of selected actions sets their display priority.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle("Available Actions"); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
-        HorizontalDivider(); TextButton(onClick = { scope.launch { preferences.resetToDefault() } }) { Text("Reset to Default") }
+Text(stringResource(R.string.settings_action_bar_explanation), color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle(stringResource(R.string.settings_action_list)); ActionBarFixedRow(stringResource(R.string.settings_action_sync), stringResource(R.string.settings_always_shown))
+        state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text(stringResource(R.string.settings_remove)) } } }
+        ActionBarFixedRow(stringResource(R.string.settings_action_more), stringResource(R.string.settings_always_available)); Text(stringResource(R.string.settings_action_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle(stringResource(R.string.settings_available_actions)); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
+        HorizontalDivider(); TextButton(onClick = { scope.launch { preferences.resetToDefault() } }) { Text(stringResource(R.string.settings_reset_default)) }
     }
 }
 @Composable private fun ActionBarFixedRow(title: String, status: String) { Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f)); Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
@@ -289,7 +289,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
             }
             .map { it to it.displayName }
         SettingsPickerRow(
-            title = "Startup scope",
+            title = stringResource(R.string.settings_startup_scope),
             selected = state.startupScope,
             options = startupScopeOptions,
         ) { option ->
@@ -313,7 +313,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
         if (state.startupScope == AndroidStartupScopePreference.Category && categories.isNotEmpty()) {
             val selectedCategory = categories.firstOrNull { it.id == state.startupCategoryId } ?: categories.first()
             SettingsPickerRow(
-                title = "Startup category",
+                title = stringResource(R.string.settings_startup_category),
                 selected = selectedCategory.id,
                 options = categories.map { it.id to it.title },
             ) { categoryId -> scope.launch { preferences.setStartupCategoryId(categoryId) } }
@@ -321,7 +321,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
         if (state.startupScope == AndroidStartupScopePreference.Feed && feeds.isNotEmpty()) {
             val selectedFeed = feeds.firstOrNull { it.id == state.startupFeedId } ?: feeds.first()
             SettingsPickerRow(
-                title = "Startup feed",
+                title = stringResource(R.string.settings_startup_feed),
                 selected = selectedFeed.id,
                 options = feeds.map { it.id to it.title },
             ) { feedId -> scope.launch { preferences.setStartupFeedId(feedId) } }
@@ -338,7 +338,7 @@ val current = state
         if (current == null) CircularProgressIndicator() else {
             SettingsSectionTitle("Downloads")
             SettingsPickerRow(
-                title = "Download Network",
+                title = stringResource(R.string.settings_download_network),
                 selected = current.downloadNetworkPolicy,
                 options = listOf(
                     DownloadNetworkPolicy.ANY_NETWORK to "Any Network",
@@ -356,7 +356,7 @@ val current = state
                 }
             }
             SettingsPickerRow(
-                title = "Keep Downloads",
+                title = stringResource(R.string.settings_keep_downloads),
                 selected = current.downloadRetention,
                 options = AndroidDownloadRetentionChoice.entries.map { it to it.displayName },
                 enabled = !saving,
@@ -411,10 +411,10 @@ val current = state
 private fun DownloadedDataSettingsScreen(downloadedData: AndroidDownloadedData, modifier: Modifier) {
     var summary by remember { mutableStateOf<AndroidDownloadedData.Summary?>(null) }; var loading by remember { mutableStateOf(false) }; var deleting by remember { mutableStateOf(false) }; var confirmDelete by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
     suspend fun reload() { loading = true; downloadedData.summary().fold({ summary = it; error = null }, { error = "Downloaded data could not be loaded. Please try again." }); loading = false }; LaunchedEffect(downloadedData) { reload() }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete All Downloads?") }, text = { Text("This removes all downloaded media files. Listening List membership and playback progress are kept.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch { deleting = true; downloadedData.requestDeleteAll().fold({ reload() }, { error = "Downloads could not be deleted. Please try again." }); deleting = false } }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text(stringResource(R.string.downloads_delete_confirm_title)) }, text = { Text(stringResource(R.string.downloads_delete_confirm_body)) }, confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch { deleting = true; downloadedData.requestDeleteAll().fold({ reload() }, { error = "Downloads could not be deleted. Please try again." }); deleting = false } }) { Text(stringResource(R.string.downloads_delete)) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } })
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (loading && summary == null) CircularProgressIndicator() else summary?.let { current -> DownloadedDataValueRow("Downloaded Files", NumberFormat.getIntegerInstance().format(current.fileCount.toLong())); DownloadedDataValueRow("Storage Used", formatBytes(current.totalSizeBytes)); Text("This includes local audio files that are still waiting for physical deletion. Listening List items and playback progress are stored separately.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); HorizontalDivider(); Button(enabled = !deleting && current.fileCount > 0uL, onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text("Delete All Downloads") } }
-        if (deleting) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text("Deleting Downloads…") }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; TextButton(enabled = !loading && !deleting, onClick = { scope.launch { reload() } }) { Text("Refresh") }
+        if (loading && summary == null) CircularProgressIndicator() else summary?.let { current -> DownloadedDataValueRow(stringResource(R.string.downloads_files), NumberFormat.getIntegerInstance().format(current.fileCount.toLong())); DownloadedDataValueRow(stringResource(R.string.downloads_storage_used), formatBytes(current.totalSizeBytes)); Text(stringResource(R.string.downloads_storage_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); HorizontalDivider(); Button(enabled = !deleting && current.fileCount > 0uL, onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text(stringResource(R.string.downloads_delete_all)) } }
+        if (deleting) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text(stringResource(R.string.downloads_deleting)) }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; TextButton(enabled = !loading && !deleting, onClick = { scope.launch { reload() } }) { Text(stringResource(R.string.action_refresh)) }
     }
 }
 @Composable private fun DownloadedDataValueRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
