@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -204,15 +205,15 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     if (confirmSkip) {
         AlertDialog(
             onDismissRequest = { confirmSkip = false },
-            title = { Text("Finish migration?") },
-            text = { Text("Successfully matched playback positions and downloads have already been imported. Only unresolved entries will be skipped. Original Flutter files remain untouched. Automatic retries will stop.") },
+            title = { Text(stringResource(R.string.migration_finish_confirm)) },
+            text = { Text(stringResource(R.string.migration_finish_explanation)) },
             confirmButton = {
                 Button(onClick = { confirmSkip = false; onFinishPartial() }) {
-                    Text("Skip unresolved entries")
+                    Text(stringResource(R.string.migration_skip_unresolved))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmSkip = false }) { Text("Keep retrying") }
+                TextButton(onClick = { confirmSkip = false }) { Text(stringResource(R.string.migration_keep_retrying)) }
             },
         )
     }
@@ -287,11 +288,11 @@ internal fun AndroidLegacyMigrationNoticeDialog(
             ) {
                 if (!state.complete) {
                     TextButton(onClick = onSync, enabled = !syncing) {
-                        Text("Sync now")
+                        Text(stringResource(R.string.migration_sync_now))
                     }
                     if (state.canFinishPartial) {
                         TextButton(onClick = { confirmSkip = true }, enabled = !syncing) {
-                            Text("Finish with unresolved items")
+                            Text(stringResource(R.string.migration_finish_unresolved))
                         }
                     }
                 }
