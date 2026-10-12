@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
@@ -19,18 +20,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DownloadNetworkPolicy
 
-private enum class SettingsDestination(val title: String, val subtitle: String) {
-    Account("Account", "Miniflux server, credentials and local account data"),
-    Articles("Articles", "Article presentation and reading behavior"),
-    ActionBar("Action Bar", "Article list actions"),
-    Navigation("Navigation", "Startup scope and navigation behavior"),
-    FeedSettings("Feed Settings", "Search and configure one or multiple feeds"),
-    Media("Media", "Playback and Listening List preferences"),
-    DownloadedData("Downloaded Data", "Downloaded media storage"),
-    BackgroundSync("Background Sync", "Background refresh preference"),
-    ConfigurationBackup("Configuration Backup", "Encrypted configuration export and restore"),
-    SupportDiagnostics("Support Diagnostics", "Logging, viewer and support export"),
-    About("About", "Version, open source and legal information"),
+private enum class SettingsDestination(val titleRes: Int, val subtitleRes: Int) {
+    Account(R.string.settings_account_title, R.string.settings_account_subtitle),
+    Articles(R.string.settings_articles_title, R.string.settings_articles_subtitle),
+    ActionBar(R.string.settings_action_bar_title, R.string.settings_action_bar_subtitle),
+    Navigation(R.string.settings_navigation_title, R.string.settings_navigation_subtitle),
+    FeedSettings(R.string.settings_feed_settings_title, R.string.settings_feed_settings_subtitle),
+    Media(R.string.settings_media_title, R.string.settings_media_subtitle),
+    DownloadedData(R.string.settings_downloaded_data_title, R.string.settings_downloaded_data_subtitle),
+    BackgroundSync(R.string.settings_background_sync_title, R.string.settings_background_sync_subtitle),
+    ConfigurationBackup(R.string.settings_configuration_backup_title, R.string.settings_configuration_backup_subtitle),
+    SupportDiagnostics(R.string.settings_support_diagnostics_title, R.string.settings_support_diagnostics_subtitle),
+    About(R.string.settings_about_title, R.string.settings_about_subtitle),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,11 +70,11 @@ internal fun SettingsShell(
                 TopAppBar(
                     title = {
                         AnimatedContent(
-                            targetState = selected?.title ?: "Settings",
+                            targetState = selected ?: SettingsDestination.Account,
                             transitionSpec = { AndroidMotion.detailCrossfade() },
                             label = "settings-title",
-                        ) { title ->
-                            Text(title)
+                        ) { destination ->
+                            Text(if (selected == null) stringResource(R.string.nav_settings) else stringResource(destination.titleRes))
                         }
                     },
                     navigationIcon = {
@@ -150,13 +151,13 @@ private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDe
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            destination.title,
+                            stringResource(destination.titleRes),
                             style = MaterialTheme.typography.titleMedium,
                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         )
                         Text(
-                            destination.subtitle,
+                            stringResource(destination.subtitleRes),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -200,7 +201,7 @@ private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidA
 private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state: AndroidArticlePreferenceState, core: AndroidCoreArticleSettings, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Choose how articles are presented and how reading interactions behave.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.settings_article_explanation), color = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsPickerRow(
             title = "Open article",
             selected = state.openArticle,

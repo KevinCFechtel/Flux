@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -465,7 +466,7 @@ internal fun NewsRootContent(
         AlertDialog(
             onDismissRequest = { if (!markReadRunning) markReadRequest = null },
             title = { Text(title) },
-            text = { Text("Marks all unread articles in this scope as read.") },
+            text = { Text(stringResource(R.string.timeline_mark_all_description)) },
             confirmButton = {
                 TextButton(
                     enabled = !markReadRunning,
@@ -574,7 +575,7 @@ private fun AndroidArticleActionCapsule(
                     if (syncSuccessVisible) {
                         Icon(
                             painter = painterResource(R.drawable.ic_check),
-                            contentDescription = "Sync complete",
+                            contentDescription = stringResource(R.string.timeline_sync_complete),
                             modifier = Modifier.size(iconSize),
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -593,14 +594,14 @@ private fun AndroidArticleActionCapsule(
                                 painter = painterResource(
                                     if (manualSyncing) R.drawable.ic_close else R.drawable.ic_sync,
                                 ),
-                                contentDescription = if (manualSyncing) "Cancel sync" else "Syncing",
+                                contentDescription = stringResource(if (manualSyncing) R.string.timeline_cancel_sync else R.string.timeline_syncing),
                                 modifier = Modifier.size(progressIconSize),
                             )
                         }
                     } else {
                         Icon(
                             painter = painterResource(R.drawable.ic_sync),
-                            contentDescription = "Sync",
+                            contentDescription = stringResource(R.string.timeline_sync),
                             modifier = Modifier.size(iconSize),
                         )
                     }
@@ -628,7 +629,7 @@ private fun AndroidArticleActionCapsule(
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_more),
-                            contentDescription = "More",
+                            contentDescription = stringResource(R.string.timeline_more),
                             modifier = Modifier.size(iconSize),
                         )
                     }
@@ -638,7 +639,7 @@ private fun AndroidArticleActionCapsule(
                     ) {
                         if (resolvedActions.overflow.isEmpty()) {
                             DropdownMenuItem(
-                                text = { Text("No additional actions") },
+                                text = { Text(stringResource(R.string.timeline_no_additional_actions)) },
                                 enabled = false,
                                 onClick = {},
                             )
