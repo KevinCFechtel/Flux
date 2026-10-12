@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -208,7 +209,7 @@ internal fun AndroidListeningListDestination(
                 )
                 Spacer(Modifier.size(16.dp))
                 Text(
-                    state.errorMessage.orEmpty(),
+                    state.errorMessage.orEmpty().let(LocalContext.current::localizedLegacyUiMessage),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.size(12.dp))

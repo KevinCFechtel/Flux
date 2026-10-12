@@ -76,7 +76,7 @@ internal fun AndroidArticleTimeline(
     var pendingDownloadChoice by remember {
         mutableStateOf<AndroidArticleMediaActionState?>(null)
     }
-    val errorMessage = state.errorMessage
+    val errorMessage = state.errorMessage?.let(LocalContext.current::localizedLegacyUiMessage)
     val pendingNewDataForCurrentScope = store.hasPendingNewDataForScope(
         scope = selection.scope,
         categoryFeedIds = categoryFeedIds,
@@ -103,7 +103,7 @@ internal fun AndroidArticleTimeline(
     }
 
     fun showActionMessage(message: String) {
-        actionScope.launch { actionSnackbar.showSnackbar(message) }
+        actionScope.launch { actionSnackbar.showSnackbar(context.localizedLegacyUiMessage(message)) }
     }
 
     fun performSwipeAction(article: ArticleSummary, action: AndroidArticleSwipeAction) {
@@ -211,7 +211,7 @@ internal fun AndroidArticleTimeline(
 
     LaunchedEffect(store, actionSnackbar) {
         store.actionMessages.collect { message ->
-            actionSnackbar.showSnackbar(message)
+            actionSnackbar.showSnackbar(context.localizedLegacyUiMessage(message))
         }
     }
 

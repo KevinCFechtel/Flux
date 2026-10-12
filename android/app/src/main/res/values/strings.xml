@@ -471,4 +471,27 @@
     <string name="l10n_migration_retry_after_sync">Pending steps will be retried after synchronization.</string>
     <string name="l10n_done">Done</string>
     <string name="l10n_continue_background">Continue in background</string>
+    <string name="l10n_added_list">Added to Listening List.</string>
+    <string name="l10n_removed_list">Removed from Listening List.</string>
+    <string name="l10n_list_update_failed">Listening List could not be updated.</string>
+    <string name="l10n_unread_load_failed">Unread articles could not be loaded.</string>
+    <string name="l10n_mark_all_failed">Articles could not be marked as read.</string>
+    <string name="l10n_mark_all_done">All unread articles in this scope were marked as read.</string>
+    <string name="l10n_list_load_failed">Listening List could not be loaded.</string>
+    <string name="l10n_playback_save_failed">Playback completion could not be saved.</string>
+    <string name="l10n_playback_failed">Media playback failed.</string>
+    <string name="l10n_account_restore_recover_failed">Configuration restore could not be recovered. Restart FluxNews before making further changes.</string>
+    <string name="l10n_account_wait_rebuild">Wait for the local state rebuild to finish.</string>
+    <string name="l10n_account_enter_creds">Enter both a Miniflux server URL and API key.</string>
+    <string name="l10n_account_existing_creds_error">The existing account credentials could not be read.</string>
+    <string name="l10n_account_activate_failed">The account could not be activated. Your previous account is still active.</string>
+    <string name="l10n_account_remove_failed">The account could not be removed.</string>
+    <string name="l10n_account_start_failed">The stored account could not be started.</string>
+    <string name="l10n_account_url_invalid">Enter a valid HTTP or HTTPS Miniflux server URL.</string>
+    <string name="l10n_account_unreachable">The Miniflux server could not be reached. Check the server URL and network connection.</string>
+    <string name="l10n_account_bad_key">Miniflux rejected the API key.</string>
+    <string name="l10n_account_incompatible">This server does not provide the required Miniflux endpoint.</string>
+    <string name="l10n_account_headers_invalid">Custom headers must have unique valid names and cannot replace FluxNews transport headers.</string>
+    <string name="l10n_account_server_response">The Miniflux server returned an unexpected response.</string>
+    <string name="l10n_account_validation_failed">The Miniflux account could not be validated.</string>
 </resources>
