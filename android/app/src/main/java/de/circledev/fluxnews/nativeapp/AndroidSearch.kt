@@ -606,6 +606,11 @@ internal fun AndroidSearchDestination(
     val snackbar = remember { SnackbarHostState() }
     val actionScope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Resolve translated UI copy during composition, not through LocalContext in event handlers.
+    val badArticleUrlMessage = stringResource(R.string.search_bad_article_url)
+    val badCommentsUrlMessage = stringResource(R.string.search_bad_comments_url)
+    val shareFailedMessage = stringResource(R.string.search_share_failed)
+    val linkCopiedMessage = stringResource(R.string.search_link_copied)
     val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val searchFocusRequester = remember { FocusRequester() }
@@ -665,7 +670,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleSwipeAction.StarUnstar -> store.requestSetStarred(article.id, !article.isStarred)
             AndroidArticleSwipeAction.OpenOriginal -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(context.getString(R.string.search_bad_article_url))
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(badArticleUrlMessage)
             }
             AndroidArticleSwipeAction.OpenMiniflux -> {
                 store.requestSetRead(article.id, true, providesFeedback = false)
@@ -674,8 +679,8 @@ internal fun AndroidSearchDestination(
                     if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
                 }
             }
-            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(context.getString(R.string.search_bad_comments_url))
-            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage(context.getString(R.string.search_share_failed))
+            AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(badCommentsUrlMessage)
+            AndroidArticleSwipeAction.Share -> if (!AndroidArticlePlatformActions.share(context, article)) showMessage(shareFailedMessage)
             AndroidArticleSwipeAction.SaveToService -> store.requestSaveToService(article.id)
             AndroidArticleSwipeAction.ListeningList -> {
                 val current = state.mediaActionStates[article.id]?.isInListeningList ?: false
@@ -702,7 +707,7 @@ internal fun AndroidSearchDestination(
             AndroidArticleContextAction.Reader -> openReader(article)
             AndroidArticleContextAction.OpenMiniflux -> performSwipe(article, AndroidArticleSwipeAction.OpenMiniflux)
             AndroidArticleContextAction.Comments -> performSwipe(article, AndroidArticleSwipeAction.Comments)
-            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage(context.getString(R.string.search_link_copied)) else showMessage(context.getString(R.string.search_bad_article_url))
+            AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage(linkCopiedMessage) else showMessage(badArticleUrlMessage)
             AndroidArticleContextAction.Share -> performSwipe(article, AndroidArticleSwipeAction.Share)
             AndroidArticleContextAction.SaveToService -> performSwipe(article, AndroidArticleSwipeAction.SaveToService)
         }
@@ -868,7 +873,7 @@ internal fun AndroidSearchDestination(
             store = readerStore,
             source = AndroidReaderSource.Search,
             onOpenOriginal = { article ->
-                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(context.getString(R.string.search_bad_article_url))
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) showMessage(badArticleUrlMessage)
             },
         )
     }
