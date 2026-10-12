@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -418,7 +419,7 @@ private fun ArticleImage(
         if (failed) {
             Icon(
                 painter = painterResource(R.drawable.ic_image_unavailable),
-                contentDescription = "Image unavailable",
+                contentDescription = stringResource(R.string.article_image_unavailable),
                 modifier = Modifier.size(32.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -441,7 +442,7 @@ private fun ArticleAccessories(
         if (hasAudio) {
             Icon(
                 painter = painterResource(R.drawable.ic_headphones),
-                contentDescription = "Audio",
+                contentDescription = stringResource(R.string.article_audio),
                 modifier = Modifier.size(16.dp),
                 tint = supportingColor,
             )
@@ -449,7 +450,7 @@ private fun ArticleAccessories(
         if (article.commentsUrl.isNotBlank()) {
             Icon(
                 painter = painterResource(R.drawable.ic_comment),
-                contentDescription = "Comments",
+                contentDescription = stringResource(R.string.article_comments),
                 modifier = Modifier.size(16.dp),
                 tint = supportingColor,
             )
@@ -461,7 +462,7 @@ private fun ArticleAccessories(
             if (article.isStarred) {
                 Icon(
                     painter = painterResource(R.drawable.ic_star),
-                    contentDescription = "Starred",
+                    contentDescription = stringResource(R.string.article_starred),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -472,7 +473,7 @@ private fun ArticleAccessories(
                 Box(
                     Modifier
                         .size(8.dp)
-                        .semantics { contentDescription = "Unread" }
+                        .semantics { contentDescription = stringResource(R.string.article_unread) }
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary),
                 )
