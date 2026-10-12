@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -346,14 +347,14 @@ internal fun AndroidArticleTimeline(
         errorMessage != null && state.articles.isEmpty() -> {
             TimelineMessage(
                 message = errorMessage,
-                actionLabel = "Retry",
+                actionLabel = stringResource(R.string.list_retry),
                 onAction = { actionScope.launch { store.reset(selection) } },
                 modifier = Modifier.fillMaxSize(),
             )
         }
         state.empty -> {
             TimelineMessage(
-                message = "No articles in this view.",
+                message = stringResource(R.string.timeline_empty),
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -422,7 +423,7 @@ internal fun AndroidArticleTimeline(
                     item(key = "timeline-page-error") {
                         TimelineMessage(
                             message = errorMessage,
-                            actionLabel = "Retry",
+                            actionLabel = stringResource(R.string.list_retry),
                             onAction = { actionScope.launch { store.loadNextPage() } },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -478,7 +479,7 @@ internal fun AndroidArticleTimeline(
                         }
                     },
                 ) {
-                    Text("Undo")
+                    Text(stringResource(R.string.action_undo))
                 }
             },
         ) {
@@ -503,7 +504,7 @@ internal fun AndroidArticleTimeline(
                     bottom = bottomOverlayPadding + 20.dp,
                 ),
         ) {
-            Text("New articles available")
+            Text(stringResource(R.string.timeline_new_articles))
         }
     }
     }

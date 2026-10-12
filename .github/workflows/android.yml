@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Audit existing Android UI literals (non-blocking inventory)
+        run: python3 android/Build/check-localization.py --all
       - name: Check new Android UI text is localizable
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

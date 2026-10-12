@@ -63,7 +63,7 @@ private fun AndroidLogViewer(diagnostics: AndroidAppDiagnostics, onBack: () -> U
             }
             TextButton(onClick = {}) { Text(stringResource(R.string.action_refresh)) }
         }
-        Text("Log Viewer", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.diagnostics_viewer), style = MaterialTheme.typography.headlineMedium)
         OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.diagnostics_search)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Box { OutlinedButton(onClick = { menuOpen = true }) { Text(stringResource(R.string.diagnostics_level, stringResource(filter.titleRes))) }; DropdownMenu(menuOpen, { menuOpen = false }) { AndroidLogLevelFilter.entries.forEach { item -> DropdownMenuItem({ Text(stringResource(item.titleRes)) }, { filter = item; menuOpen = false }) } } }
         Text(pluralStringResource(R.plurals.diagnostics_visible_records, visible.size, visible.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

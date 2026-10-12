@@ -241,7 +241,7 @@ internal fun AndroidBulkFeedSettingsScreen(
 
             if (hasSelection) {
                 BulkChoiceRow(
-                    title = "Detail Rendering",
+                    title = stringResource(R.string.feed_detail_rendering),
                     selected = commonValue(selectedPreferences) { it.detailRendering },
                     options = listOf(
                         DetailRenderingMode.RENDERED to "Rendered",
@@ -256,7 +256,7 @@ internal fun AndroidBulkFeedSettingsScreen(
                 }
 
                 BulkBooleanRow(
-                    title = "Truncate Detail",
+                    title = stringResource(R.string.feed_truncate_detail),
                     selected = commonValue(selectedPreferences) { it.truncateDetail },
                     enabled = !saving,
                 ) { value ->
@@ -267,7 +267,7 @@ internal fun AndroidBulkFeedSettingsScreen(
                 }
 
                 BulkBooleanRow(
-                    title = "System Notifications",
+                    title = stringResource(R.string.feed_system_notifications),
                     selected = commonValue(selectedPreferences) { it.systemNotificationsEnabled },
                     enabled = !saving,
                 ) { value ->
@@ -287,7 +287,7 @@ internal fun AndroidBulkFeedSettingsScreen(
                 }
 
                 BulkBooleanRow(
-                    title = "Open in Miniflux",
+                    title = stringResource(R.string.feed_open_miniflux),
                     selected = commonValue(selectedPreferences) { it.openInMiniflux },
                     enabled = !saving,
                 ) { value ->
@@ -298,7 +298,7 @@ internal fun AndroidBulkFeedSettingsScreen(
                 }
 
                 BulkBooleanRow(
-                    title = "Automatically Download Audio",
+                    title = stringResource(R.string.feed_auto_download_audio),
                     selected = commonValue(selectedPreferences) { it.autoDownloadAudio },
                     enabled = !saving,
                 ) { value ->

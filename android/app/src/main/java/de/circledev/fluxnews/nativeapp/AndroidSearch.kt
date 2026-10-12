@@ -841,7 +841,7 @@ internal fun AndroidSearchDestination(
                                 Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                             } else if (state.errorMessage != null) item("search-page-error") {
                                 SearchMessage(
-                                    title = "More results unavailable",
+                                    title = stringResource(R.string.search_more_unavailable),
                                     message = state.errorMessage ?: "More results could not be loaded.",
                                     modifier = Modifier.fillMaxWidth(),
                                     actionLabel = stringResource(R.string.list_retry),
