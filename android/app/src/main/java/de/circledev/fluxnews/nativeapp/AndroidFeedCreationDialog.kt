@@ -28,7 +28,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -106,20 +105,19 @@ internal fun AndroidAddFeedDialog(
     onCreated: (AndroidCreatedNavigationItem) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     var url by remember { mutableStateOf("") }
     var categoryId by remember { mutableStateOf<Long?>(null) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var candidates by remember { mutableStateOf<List<DiscoveredSubscription>>(emptyList()) }
     var selectedCandidate by remember { mutableIntStateOf(0) }
     var working by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorResource by remember { mutableStateOf<Int?>(null) }
     val normalizedUrl = AndroidFeedCreationPolicy.validUrl(url)
     val categoryLabel = categories.firstOrNull { it.id == categoryId }?.title ?: stringResource(R.string.feed_default_category)
 
     suspend fun create(feedUrl: String) {
         working = true
-        error = null
+        errorResource = null
         runCatching {
             coreRuntime.remoteForGeneration(sessionGeneration) { core ->
                 core.createFeed(
@@ -141,14 +139,14 @@ internal fun AndroidAddFeedDialog(
                 )
             }
         }.onSuccess { onCreated(AndroidCreatedNavigationItem.Feed(it.feedId)) }
-            .onFailure { error = context.getString(AndroidFeedCreationPolicy.failureResource(it, isFeed = true)) }
+            .onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = true) }
         working = false
     }
 
     fun discover() {
         val submitted = normalizedUrl ?: return
         working = true
-        error = null
+        errorResource = null
         scope.launch {
             runCatching {
                 coreRuntime.remoteForGeneration(sessionGeneration) { core ->
@@ -164,14 +162,14 @@ internal fun AndroidAddFeedDialog(
                 }
             }.onSuccess { found ->
                 when (found.size) {
-                    0 -> error = context.getString(R.string.feed_discovery_empty)
+                    0 -> errorResource = R.string.feed_discovery_empty
                     1 -> create(found.single().url)
                     else -> {
                         candidates = found
                         selectedCandidate = 0
                     }
                 }
-            }.onFailure { error = context.getString(AndroidFeedCreationPolicy.failureResource(it, isFeed = true)) }
+            }.onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = true) }
             working = false
         }
     }
@@ -187,7 +185,7 @@ internal fun AndroidAddFeedDialog(
                 if (candidates.isEmpty()) {
                     OutlinedTextField(
                         value = url,
-                        onValueChange = { url = it; error = null },
+                        onValueChange = { url = it; errorResource = null },
                         label = { Text(stringResource(R.string.feed_url_label)) },
                         placeholder = { Text(stringResource(R.string.feed_url_hint)) },
                         singleLine = true,
@@ -241,8 +239,8 @@ internal fun AndroidAddFeedDialog(
                         }
                     }
                 }
-                if (error != null) Text(
-                    error.orEmpty(),
+                if (errorResource != null) Text(
+                    stringResource(errorResource!!),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -260,7 +258,7 @@ internal fun AndroidAddFeedDialog(
         },
         dismissButton = {
             TextButton(enabled = !working, onClick = {
-                if (candidates.isNotEmpty()) { candidates = emptyList(); error = null }
+                if (candidates.isNotEmpty()) { candidates = emptyList(); errorResource = null }
                 else onDismiss()
             }) { Text(stringResource(if (candidates.isEmpty()) R.string.action_cancel else R.string.action_back)) }
         },
@@ -276,10 +274,9 @@ internal fun AndroidAddCategoryDialog(
     onCreated: (AndroidCreatedNavigationItem) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     var title by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorResource by remember { mutableStateOf<Int?>(null) }
     val normalized = AndroidFeedCreationPolicy.categoryTitle(title)
     val duplicate = normalized != null && AndroidFeedCreationPolicy.isDuplicateCategory(normalized, categories)
 
@@ -290,7 +287,7 @@ internal fun AndroidAddCategoryDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
-                    onValueChange = { title = it; error = null },
+                    onValueChange = { title = it; errorResource = null },
                     label = { Text(stringResource(R.string.feed_category_name)) },
                     singleLine = true,
                     enabled = !working,
@@ -301,8 +298,8 @@ internal fun AndroidAddCategoryDialog(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (error != null) Text(
-                    error.orEmpty(),
+                if (errorResource != null) Text(
+                    stringResource(errorResource!!),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -315,14 +312,14 @@ internal fun AndroidAddCategoryDialog(
                 onClick = {
                     val submitted = normalized ?: return@TextButton
                     working = true
-                    error = null
+                    errorResource = null
                     scope.launch {
                         runCatching {
                             coreRuntime.remoteForGeneration(sessionGeneration) { core ->
                                 core.createCategory(submitted)
                             }
                         }.onSuccess { onCreated(AndroidCreatedNavigationItem.Category(it.categoryId)) }
-                            .onFailure { error = context.getString(AndroidFeedCreationPolicy.failureResource(it, isFeed = false)) }
+                            .onFailure { errorResource = AndroidFeedCreationPolicy.failureResource(it, isFeed = false) }
                         working = false
                     }
                 },
