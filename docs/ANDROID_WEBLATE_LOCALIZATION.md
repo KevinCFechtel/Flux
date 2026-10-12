@@ -57,3 +57,5 @@ The CI step uses full Git history and the pull-request base SHA (or the previous
 ## Latest C1 audit
 
 See [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md) for confirmed remaining Kotlin UI literals, the blocking incremental guard versus the informational full inventory, and release closeout criteria. C1 remains in progress; green CI does not imply complete localization or reviewed translations.
+
+Android Auto/MediaTransfer follow-up: user-visible Media3 browse/command labels and foreground download notification copy are now supplied through resources; see [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md). Validate host-side locale changes and original fallback behavior on Android Auto separately.
