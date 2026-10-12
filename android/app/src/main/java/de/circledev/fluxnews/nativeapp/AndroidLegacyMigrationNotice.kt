@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.Flow
@@ -214,13 +215,14 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     val widgetsTitle = stringResource(R.string.audit_migration_widgets)
     val widgetsDone = stringResource(R.string.audit_migration_widget_done)
     val skipped = stringResource(R.string.audit_migration_skipped, "%s")
+    val localizedMessageContext = LocalContext.current
     val steps = state.steps.mapIndexed { index, step ->
         when (index) {
             0 -> step.copy(title = account, description = accountDone)
             1 -> step.copy(title = settingsTitle, description = settingsDone)
-            2 -> step.copy(title = feedsTitle, description = step.description.takeUnless { it == "Feed preferences and startup view checked" } ?: feedsDone)
-            3 -> step.copy(title = playbackTitle, description = if (state.skippedPlaybackDetails.isNotBlank()) skipped.replace("%s", state.skippedPlaybackDetails) else step.description.takeUnless { it == "Audio positions checked" } ?: audioDone)
-            4 -> step.copy(title = downloadsTitle, description = if (state.skippedDownloadDetails.isNotBlank()) skipped.replace("%s", state.skippedDownloadDetails) else step.description.takeUnless { it == "Offline audio checked" } ?: offlineDone)
+            2 -> step.copy(title = feedsTitle, description = step.description.takeUnless { it == "Feed preferences and startup view checked" }?.split("; ")?.joinToString("; ") { localizedMessageContext.localizedLegacyUiMessage(it) } ?: feedsDone)
+            3 -> step.copy(title = playbackTitle, description = if (state.skippedPlaybackDetails.isNotBlank()) skipped.replace("%s", state.skippedPlaybackDetails) else step.description.takeUnless { it == "Audio positions checked" }?.let(localizedMessageContext::localizedLegacyUiMessage) ?: audioDone)
+            4 -> step.copy(title = downloadsTitle, description = if (state.skippedDownloadDetails.isNotBlank()) skipped.replace("%s", state.skippedDownloadDetails) else step.description.takeUnless { it == "Offline audio checked" }?.let(localizedMessageContext::localizedLegacyUiMessage) ?: offlineDone)
             5 -> step.copy(title = widgetsTitle, description = widgetsDone)
             else -> step
         }

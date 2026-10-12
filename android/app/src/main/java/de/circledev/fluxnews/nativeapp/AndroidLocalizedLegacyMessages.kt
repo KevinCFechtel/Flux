@@ -43,5 +43,7 @@ internal fun Context.localizedLegacyUiMessage(message: String): String = when (m
     "Custom headers must have unique valid names and cannot replace FluxNews transport headers." -> getString(R.string.l10n_account_headers_invalid)
     "The Miniflux server returned an unexpected response." -> getString(R.string.l10n_account_server_response)
     "The Miniflux account could not be validated." -> getString(R.string.l10n_account_validation_failed)
+    "Selected startup feed or category is not in the current catalog" -> getString(R.string.l10n_migration_startup_missing)
+    "Some legacy feeds are missing from the current catalog" -> getString(R.string.l10n_migration_feeds_missing)
     else -> message
 }

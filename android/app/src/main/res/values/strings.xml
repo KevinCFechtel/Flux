@@ -497,4 +497,6 @@
     <string name="l10n_collapse_navigation">Collapse navigation</string>
     <string name="l10n_expand_navigation">Expand navigation</string>
     <string name="l10n_backup_restored_sync">Configuration restored. Synchronization will start now.</string>
+    <string name="l10n_migration_startup_missing">Selected startup feed or category is not in the current catalog</string>
+    <string name="l10n_migration_feeds_missing">Some legacy feeds are missing from the current catalog</string>
 </resources>
