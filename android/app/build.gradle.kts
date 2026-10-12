@@ -110,6 +110,11 @@ android {
         }
     }
     buildFeatures { buildConfig = true; compose = true; resValues = true }
+    lint {
+        // Other Weblate locales are intentionally incomplete and fall back to English.
+        // Keep all other lint checks enabled; resource keys and placeholders are tested separately.
+        disable += "MissingTranslation"
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
 
