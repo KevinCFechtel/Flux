@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -80,9 +81,9 @@ internal fun ConfigurationBackupScreen(
 
     if (confirmRestore) AlertDialog(
         onDismissRequest = { if (!working) confirmRestore = false },
-        title = { Text("Restore Configuration?") },
-        text = { Text("This replaces the current account and configuration. Existing synchronized article state will be rebuilt from Miniflux.") },
-        dismissButton = { TextButton(enabled = !working, onClick = { confirmRestore = false }) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.backup_restore_confirm)) },
+        text = { Text(stringResource(R.string.backup_restore_explanation)) },
+        dismissButton = { TextButton(enabled = !working, onClick = { confirmRestore = false }) { Text(stringResource(R.string.action_cancel)) } },
         confirmButton = { TextButton(enabled = !working, onClick = {
             val uri = pendingImport ?: return@TextButton
             confirmRestore = false
@@ -98,16 +99,16 @@ internal fun ConfigurationBackupScreen(
                 } catch (failure: Exception) { error = backupMessage(failure) }
                 working = false
             }
-        }) { Text("Restore", color = MaterialTheme.colorScheme.error) } },
+        }) { Text(stringResource(R.string.backup_restore), color = MaterialTheme.colorScheme.error) } },
     )
 
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        onDismiss?.let { dismiss -> TextButton(onClick = dismiss) { Text("Back to account setup") } }
+        onDismiss?.let { dismiss -> TextButton(onClick = dismiss) { Text(stringResource(R.string.backup_back_account)) } }
         if (allowExport) {
-            Text("Backups are password-encrypted and include the account, Core settings, feed preferences, and Android settings. Articles, downloads, and playback state are not included.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            SettingsSectionTitle("Export")
-            OutlinedTextField(exportPassword, { exportPassword = it }, label = { Text("Backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(exportConfirmation, { exportConfirmation = it }, label = { Text("Confirm backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.backup_explanation), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingsSectionTitle(stringResource(R.string.backup_export))
+            OutlinedTextField(exportPassword, { exportPassword = it }, label = { Text(stringResource(R.string.backup_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(exportConfirmation, { exportConfirmation = it }, label = { Text(stringResource(R.string.backup_password_confirm)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(enabled = !working && exportPassword.isNotEmpty() && exportPassword == exportConfirmation, onClick = {
                 scope.launch {
                     working = true; error = null; status = null
@@ -117,13 +118,13 @@ internal fun ConfigurationBackupScreen(
                     } catch (failure: Exception) { error = backupMessage(failure); pendingExport = null }
                     working = false
                 }
-            }) { Text("Export Configuration Backup") }
+            }) { Text(stringResource(R.string.backup_export_action)) }
         }
-        SettingsSectionTitle("Restore")
-        Text("Use a backup created by FluxNews for Android. Restoring replaces this installation's configuration.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsSectionTitle(stringResource(R.string.backup_restore))
+        Text(stringResource(R.string.backup_restore_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedButton(enabled = !working, onClick = { openDocument.launch(arrayOf("application/octet-stream", "application/*", "*/*")) }) { Text(if (pendingImport == null) "Choose Backup to Restore" else "Choose Another Backup") }
-        OutlinedTextField(importPassword, { importPassword = it }, label = { Text("Backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(enabled = !working && pendingImport != null && importPassword.isNotEmpty(), onClick = { confirmRestore = true }) { Text("Restore Configuration Backup") }
+        OutlinedTextField(importPassword, { importPassword = it }, label = { Text(stringResource(R.string.backup_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+        Button(enabled = !working && pendingImport != null && importPassword.isNotEmpty(), onClick = { confirmRestore = true }) { Text(stringResource(R.string.account_restore_backup)) }
         if (working) CircularProgressIndicator(Modifier.size(24.dp))
         status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
