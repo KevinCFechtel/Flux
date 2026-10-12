@@ -68,16 +68,22 @@ internal fun NewsNavigationContent(
     val categoryCounts = projection?.categoryCounts?.associate { it.id to it.count }.orEmpty()
     val categoryRefs = projection?.catalog?.categories?.map { AndroidNavigationCategoryRef(it.id, it.title) }.orEmpty()
     val feedRefs = projection?.catalog?.feeds?.map { AndroidNavigationFeedRef(it.id, it.categoryId, it.title) }.orEmpty()
-    val visibleFeedIds = AndroidNavigationPolicy.visibleFeedIds(
+    val policyVisibleFeedIds = AndroidNavigationPolicy.visibleFeedIds(
         preferences.hideEmptyNavigationEntries,
         feedRefs,
         feedCounts,
     )
-    val visibleCategoryIds = if (preferences.hideEmptyNavigationEntries) {
+    // New feeds may have zero unread items. Keep the selected feed/category
+    // visible even when the user hides empty navigation entries.
+    val selectedFeedId = (selectedScope as? AndroidNewsScope.Feed)?.id
+    val visibleFeedIds = policyVisibleFeedIds + listOfNotNull(selectedFeedId)
+    val policyVisibleCategoryIds = if (preferences.hideEmptyNavigationEntries) {
         AndroidNavigationPolicy.visibleCategoryIds(categoryRefs, feedRefs, visibleFeedIds)
     } else {
         categoryRefs.mapTo(mutableSetOf()) { it.id }
     }
+    val visibleCategoryIds = policyVisibleCategoryIds +
+        listOfNotNull((selectedScope as? AndroidNewsScope.Category)?.id)
     var expandedCategories by remember { mutableStateOf(setOf<Long>()) }
     val darkMode = isSystemInDarkTheme()
     val selectedDrawerContainer = if (darkMode) {
