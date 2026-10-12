@@ -86,6 +86,8 @@ internal fun AdaptiveAppShell(
         mutableStateOf<uniffi.flux_uniffi.ArticleSummary?>(null)
     }
     var feedSettingsTarget by remember { mutableStateOf<AndroidNavigationFeedRef?>(null) }
+    var creationDialog by remember(sessionGeneration) { mutableStateOf<String?>(null) }
+    var pendingCreatedItem by remember(sessionGeneration) { mutableStateOf<AndroidCreatedNavigationItem?>(null) }
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -166,6 +168,21 @@ internal fun AdaptiveAppShell(
         AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
     }.orEmpty()
 
+    LaunchedEffect(pendingCreatedItem, navigation.projection) {
+        when (val item = pendingCreatedItem) {
+            is AndroidCreatedNavigationItem.Feed -> {
+                val feed = feeds.firstOrNull { it.id == item.id } ?: return@LaunchedEffect
+                timelineSelection = timelineSelection.selectingScope(AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title))
+                pendingCreatedItem = null
+            }
+            is AndroidCreatedNavigationItem.Category -> {
+                val category = categories.firstOrNull { it.id == item.id } ?: return@LaunchedEffect
+                timelineSelection = timelineSelection.selectingScope(AndroidNewsScope.Category(category.id, category.title))
+                pendingCreatedItem = null
+            }
+            null -> Unit
+        }
+    }
     LaunchedEffect(pendingNotificationFeedId, navigation.projection, feeds, sessionGeneration) {
         val feedId = pendingNotificationFeedId ?: return@LaunchedEffect
         if (navigation.projection == null) return@LaunchedEffect
@@ -218,6 +235,8 @@ internal fun AdaptiveAppShell(
                 onWidgetArticleConsumed = { articleId ->
                     if (pendingWidgetArticle?.id == articleId) pendingWidgetArticle = null
                 },
+                onAddFeed = { creationDialog = "feed" },
+                onAddCategory = { creationDialog = "category" },
                 onFeedSettings = { feed ->
                     feedSettingsTarget = feed
                     navController.navigate(ShellRoute.FeedSettings)
@@ -267,6 +286,19 @@ internal fun AdaptiveAppShell(
             )
         }
     }
+    val generation = sessionGeneration
+    if (generation != null) {
+        val created: (AndroidCreatedNavigationItem) -> Unit = { item ->
+            creationDialog = null
+            pendingCreatedItem = item
+            navigationRefreshes.trySend(Unit)
+            syncCoordinator.requestSync(uniffi.flux_uniffi.SyncReason.MANUAL)
+        }
+        when (creationDialog) {
+            "feed" -> AndroidAddFeedDialog(coreRuntime, generation, categories, { creationDialog = null }, created)
+            "category" -> AndroidAddCategoryDialog(coreRuntime, generation, categories, { creationDialog = null }, created)
+        }
+    }
 }
 
 private fun CoreEvent.requiresWidgetProjectionRefresh(): Boolean = when (this) {
@@ -301,6 +333,8 @@ private fun TimelineDestination(
     pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
     onWidgetArticleConsumed: (Long) -> Unit,
     onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
+    onAddFeed: () -> Unit,
+    onAddCategory: () -> Unit,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
     val scope = selection.scope
@@ -329,6 +363,8 @@ private fun TimelineDestination(
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
                             onFeedSettings = onFeedSettings,
+                            onAddFeed = onAddFeed,
+                            onAddCategory = onAddCategory,
                             navigationToggleIcon = R.drawable.ic_arrow_back,
                             navigationToggleDescription = "Collapse navigation",
                             onNavigationToggle = { persistentNavigationCollapsed = true },
@@ -391,6 +427,12 @@ private fun TimelineDestination(
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
                             onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
+                            onAddFeed = {
+                                coroutineScope.launch { drawerState.close(); onAddFeed() }
+                            },
+                            onAddCategory = {
+                                coroutineScope.launch { drawerState.close(); onAddCategory() }
+                            },
                             onFeedSettings = { feed ->
                                 coroutineScope.launch {
                                     drawerState.close()

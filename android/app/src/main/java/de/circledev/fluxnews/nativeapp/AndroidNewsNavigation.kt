@@ -51,6 +51,8 @@ internal fun NewsNavigationContent(
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
     onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
+    onAddFeed: () -> Unit,
+    onAddCategory: () -> Unit,
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -66,16 +68,22 @@ internal fun NewsNavigationContent(
     val categoryCounts = projection?.categoryCounts?.associate { it.id to it.count }.orEmpty()
     val categoryRefs = projection?.catalog?.categories?.map { AndroidNavigationCategoryRef(it.id, it.title) }.orEmpty()
     val feedRefs = projection?.catalog?.feeds?.map { AndroidNavigationFeedRef(it.id, it.categoryId, it.title) }.orEmpty()
-    val visibleFeedIds = AndroidNavigationPolicy.visibleFeedIds(
+    val policyVisibleFeedIds = AndroidNavigationPolicy.visibleFeedIds(
         preferences.hideEmptyNavigationEntries,
         feedRefs,
         feedCounts,
     )
-    val visibleCategoryIds = if (preferences.hideEmptyNavigationEntries) {
+    // New feeds may have zero unread items. Keep the selected feed/category
+    // visible even when the user hides empty navigation entries.
+    val selectedFeedId = (selectedScope as? AndroidNewsScope.Feed)?.id
+    val visibleFeedIds = policyVisibleFeedIds + listOfNotNull(selectedFeedId)
+    val policyVisibleCategoryIds = if (preferences.hideEmptyNavigationEntries) {
         AndroidNavigationPolicy.visibleCategoryIds(categoryRefs, feedRefs, visibleFeedIds)
     } else {
         categoryRefs.mapTo(mutableSetOf()) { it.id }
     }
+    val visibleCategoryIds = policyVisibleCategoryIds +
+        listOfNotNull((selectedScope as? AndroidNewsScope.Category)?.id)
     var expandedCategories by remember { mutableStateOf(setOf<Long>()) }
     val darkMode = isSystemInDarkTheme()
     val selectedDrawerContainer = if (darkMode) {
@@ -165,12 +173,19 @@ internal fun NewsNavigationContent(
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Text(
-            "Feeds",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Feeds",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text("+ Feed") }
+            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text("+ Category") }
+        }
 
         if (projection == null) {
             Text(
