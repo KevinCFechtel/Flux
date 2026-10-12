@@ -52,6 +52,7 @@ internal fun ConfigurationBackupScreen(
     val context = LocalContext.current
     val backupWriteError = stringResource(R.string.audit_backup_write)
     val backupExported = stringResource(R.string.audit_backup_exported)
+    val backupRestoredSync = stringResource(R.string.l10n_backup_restored_sync)
     val scope = rememberCoroutineScope()
     var exportPassword by remember { mutableStateOf("") }
     var exportConfirmation by remember { mutableStateOf("") }
@@ -96,7 +97,7 @@ internal fun ConfigurationBackupScreen(
                     val app = context.applicationContext as FluxApplication
                     app.backgroundSync.reconcileFromCore()
                     app.syncCoordinator.requestSync(SyncReason.MANUAL)
-                    status = context.getString(R.string.l10n_backup_restored_sync)
+                    status = backupRestoredSync
                     onRestored()
                 } catch (failure: Exception) { error = backupMessage(failure, context) }
                 working = false
