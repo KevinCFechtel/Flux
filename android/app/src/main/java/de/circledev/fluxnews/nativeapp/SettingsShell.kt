@@ -205,17 +205,17 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
         SettingsPickerRow(
             title = stringResource(R.string.settings_open_article),
             selected = state.openArticle,
-            options = AndroidArticleOpenPreference.entries.map { it to it.displayName },
+            options = AndroidArticleOpenPreference.entries.map { it to prefLabel(it) },
         ) { option -> scope.launch { preferences.setOpenArticle(option) } }
         SettingsPickerRow(
             title = stringResource(R.string.settings_presentation),
             selected = state.presentationMode,
-            options = AndroidArticlePresentationMode.entries.map { it to it.displayName },
+            options = AndroidArticlePresentationMode.entries.map { it to prefLabel(it) },
         ) { option -> scope.launch { preferences.setPresentationMode(option) } }
         SettingsPickerRow(
             title = stringResource(R.string.settings_preview_lines),
             selected = state.previewLines,
-            options = AndroidArticlePreviewLines.entries.map { it to it.displayName },
+            options = AndroidArticlePreviewLines.entries.map { it to prefLabel(it) },
         ) { option -> scope.launch { preferences.setPreviewLines(option) } }
         HorizontalDivider()
         SettingsSwitchRow(stringResource(R.string.settings_show_article_count), state.showArticleCount) { scope.launch { preferences.setShowArticleCount(it) } }
@@ -241,8 +241,8 @@ private fun SwipeSlotSettings(
     enabled: Boolean = true,
 ) {
     val options = buildList<Pair<AndroidArticleSwipeAction?, String>> {
-        if (allowNone) add(null to "None")
-        AndroidArticleSwipeAction.entries.forEach { add(it to it.displayName) }
+        if (allowNone) add(null to stringResource(R.string.pref_none))
+        AndroidArticleSwipeAction.entries.forEach { add(it to prefLabel(it)) }
     }
     SettingsPickerRow(
         title = label,
@@ -259,9 +259,9 @@ private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, st
     val scope = rememberCoroutineScope(); val available = AndroidActionBarAction.entries.filterNot(state.actions::contains)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 Text(stringResource(R.string.settings_action_bar_explanation), color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle(stringResource(R.string.settings_action_list)); ActionBarFixedRow(stringResource(R.string.settings_action_sync), stringResource(R.string.settings_always_shown))
-        state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text(stringResource(R.string.settings_remove)) } } }
+        state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(prefLabel(action), Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text(stringResource(R.string.settings_remove)) } } }
         ActionBarFixedRow(stringResource(R.string.settings_action_more), stringResource(R.string.settings_always_available)); Text(stringResource(R.string.settings_action_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle(stringResource(R.string.settings_available_actions)); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
+        if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle(stringResource(R.string.settings_available_actions)); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pref_add_action, prefLabel(action)), Modifier.fillMaxWidth()) } } }
         HorizontalDivider(); TextButton(onClick = { scope.launch { preferences.resetToDefault() } }) { Text(stringResource(R.string.settings_reset_default)) }
     }
 }
@@ -272,7 +272,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
     val scope = rememberCoroutineScope()
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            "Choose which news scope FluxNews opens with and whether empty feeds are shown.",
+            stringResource(R.string.pref_nav_explanation),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         SettingsSwitchRow(stringResource(R.string.settings_hide_empty), state.hideEmptyNavigationEntries) {
@@ -287,7 +287,7 @@ private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, 
                     else -> true
                 }
             }
-            .map { it to it.displayName }
+            .map { it to prefLabel(it) }
         SettingsPickerRow(
             title = stringResource(R.string.settings_startup_scope),
             selected = state.startupScope,
@@ -343,8 +343,8 @@ val current = state
                 title = stringResource(R.string.settings_download_network),
                 selected = current.downloadNetworkPolicy,
                 options = listOf(
-                    DownloadNetworkPolicy.ANY_NETWORK to "Any Network",
-                    DownloadNetworkPolicy.UNMETERED_ONLY to "Unmetered Networks Only",
+                    DownloadNetworkPolicy.ANY_NETWORK to stringResource(R.string.audit_network_any),
+                    DownloadNetworkPolicy.UNMETERED_ONLY to stringResource(R.string.audit_network_unmetered),
                 ),
                 enabled = !saving,
             ) { policy ->
@@ -360,7 +360,7 @@ val current = state
             SettingsPickerRow(
                 title = stringResource(R.string.settings_keep_downloads),
                 selected = current.downloadRetention,
-                options = AndroidDownloadRetentionChoice.entries.map { it to it.displayName },
+                options = AndroidDownloadRetentionChoice.entries.map { it to prefLabel(it) },
                 enabled = !saving,
             ) { choice ->
                 scope.launch {
@@ -507,4 +507,65 @@ internal fun SettingsSwitchRow(
         Text(title, Modifier.weight(1f))
         Switch(checked, onCheckedChange, enabled = enabled)
     }
+}
+
+@Composable
+private fun prefLabel(value: AndroidArticleOpenPreference): String = when (value) {
+    AndroidArticleOpenPreference.OriginalLink -> stringResource(R.string.pref_original_link)
+    AndroidArticleOpenPreference.Reader -> stringResource(R.string.pref_reader)
+}
+
+@Composable
+private fun prefLabel(value: AndroidArticlePresentationMode): String = when (value) {
+    AndroidArticlePresentationMode.Compact -> stringResource(R.string.pref_compact)
+    AndroidArticlePresentationMode.Visual -> stringResource(R.string.pref_visual)
+    AndroidArticlePresentationMode.VisualCompact -> stringResource(R.string.pref_visual_compact)
+}
+
+@Composable
+private fun prefLabel(value: AndroidArticlePreviewLines): String = when (value) {
+    AndroidArticlePreviewLines.Compact -> stringResource(R.string.pref_two_lines)
+    AndroidArticlePreviewLines.Standard -> stringResource(R.string.pref_three_lines)
+    AndroidArticlePreviewLines.Extended -> stringResource(R.string.pref_five_lines)
+}
+
+@Composable
+private fun prefLabel(value: AndroidArticleSwipeAction): String = when (value) {
+    AndroidArticleSwipeAction.ReadUnread -> stringResource(R.string.pref_read_unread)
+    AndroidArticleSwipeAction.StarUnstar -> stringResource(R.string.pref_star_unstar)
+    AndroidArticleSwipeAction.OpenOriginal -> stringResource(R.string.pref_open_original)
+    AndroidArticleSwipeAction.OpenMiniflux -> stringResource(R.string.pref_open_miniflux)
+    AndroidArticleSwipeAction.Comments -> stringResource(R.string.pref_open_comments)
+    AndroidArticleSwipeAction.Share -> stringResource(R.string.audit_share)
+    AndroidArticleSwipeAction.SaveToService -> stringResource(R.string.pref_save_external)
+    AndroidArticleSwipeAction.ListeningList -> stringResource(R.string.audit_action_listening)
+    AndroidArticleSwipeAction.DownloadAudio -> stringResource(R.string.pref_download_audio)
+}
+
+@Composable
+private fun prefLabel(value: AndroidActionBarAction): String = when (value) {
+    AndroidActionBarAction.FilterAndSort -> stringResource(R.string.pref_filter_sort)
+    AndroidActionBarAction.ToggleReadFilter -> stringResource(R.string.pref_all_unread)
+    AndroidActionBarAction.ToggleSortOrder -> stringResource(R.string.pref_sort_order)
+    AndroidActionBarAction.Search -> stringResource(R.string.audit_action_search)
+    AndroidActionBarAction.MarkAllRead -> stringResource(R.string.audit_timeline_mark_all)
+    AndroidActionBarAction.MarkAllReadAndNext -> stringResource(R.string.audit_timeline_mark_next)
+    AndroidActionBarAction.ListeningList -> stringResource(R.string.audit_action_listening)
+    AndroidActionBarAction.Settings -> stringResource(R.string.audit_action_settings)
+}
+
+@Composable
+private fun prefLabel(value: AndroidStartupScopePreference): String = when (value) {
+    AndroidStartupScopePreference.AllNews -> stringResource(R.string.audit_all_news)
+    AndroidStartupScopePreference.Starred -> stringResource(R.string.audit_scope_starred)
+    AndroidStartupScopePreference.Category -> stringResource(R.string.pref_startup_category)
+    AndroidStartupScopePreference.Feed -> stringResource(R.string.pref_startup_feed)
+}
+
+@Composable
+private fun prefLabel(value: AndroidDownloadRetentionChoice): String = when (value) {
+    AndroidDownloadRetentionChoice.Forever -> stringResource(R.string.pref_retention_forever)
+    AndroidDownloadRetentionChoice.Days7 -> stringResource(R.string.pref_retention_7)
+    AndroidDownloadRetentionChoice.Days30 -> stringResource(R.string.pref_retention_30)
+    AndroidDownloadRetentionChoice.Days90 -> stringResource(R.string.pref_retention_90)
 }
