@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import java.util.concurrent.ConcurrentHashMap
@@ -712,10 +713,10 @@ internal fun AndroidSearchDestination(
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(
-                    title = { Text("Search") },
+                    title = { Text(stringResource(R.string.nav_search)) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = "Back to news")
+                            Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.search_back_news))
                         }
                     },
                 )
@@ -736,7 +737,7 @@ internal fun AndroidSearchDestination(
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .focusRequester(searchFocusRequester),
                     singleLine = true,
-                    placeholder = { Text("Search articles") },
+                    placeholder = { Text(stringResource(R.string.search_articles_hint)) },
                     leadingIcon = {
                         IconButton(
                             onClick = ::submitSearch,
@@ -744,7 +745,7 @@ internal fun AndroidSearchDestination(
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_search),
-                                contentDescription = "Search",
+                                contentDescription = stringResource(R.string.nav_search),
                             )
                         }
                     },
@@ -759,7 +760,7 @@ internal fun AndroidSearchDestination(
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_close),
-                                    contentDescription = "Clear search",
+                                    contentDescription = stringResource(R.string.search_clear),
                                 )
                             }
                         }
