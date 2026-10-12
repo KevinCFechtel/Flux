@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.ReadArticleRetention
@@ -54,7 +55,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     }
 
     HorizontalDivider()
-    SettingsSectionTitle("Storage & Reader")
+    SettingsSectionTitle(stringResource(R.string.article_storage_reader))
 
     when {
         loading -> CircularProgressIndicator()
@@ -143,13 +144,13 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CircularProgressIndicator()
-            Text("Saving…", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.settings_saving), style = MaterialTheme.typography.bodySmall)
         }
     }
 
     error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-        if (state == null) TextButton(onClick = ::reload) { Text("Retry") }
+        if (state == null) TextButton(onClick = ::reload) { Text(stringResource(R.string.list_retry)) }
     }
 }
 
