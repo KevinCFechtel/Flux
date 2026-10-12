@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -132,43 +133,43 @@ internal fun NewsNavigationContent(
                 IconButton(onClick = onNavigationToggle) {
                     Icon(
                         painter = painterResource(navigationToggleIcon),
-                        contentDescription = navigationToggleDescription ?: "Toggle navigation",
+                        contentDescription = navigationToggleDescription ?: stringResource(R.string.nav_toggle),
                     )
                 }
             }
         }
         Text(
-            "News",
+            stringResource(R.string.nav_news),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
         )
         NavigationDrawerItem(
-            label = { DrawerLabel("All News", projection?.unreadTotal ?: 0uL) },
+            label = { DrawerLabel(stringResource(R.string.nav_all_news), projection?.unreadTotal ?: 0uL) },
             selected = selectedScope == AndroidNewsScope.All,
             onClick = { onScopeSelected(AndroidNewsScope.All) },
-            icon = { DrawerIcon(R.drawable.ic_news, "All News") },
+            icon = { DrawerIcon(R.drawable.ic_news, stringResource(R.string.nav_all_news)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
-            label = { DrawerLabel("Starred", projection?.starredTotal ?: 0uL) },
+            label = { DrawerLabel(stringResource(R.string.nav_starred), projection?.starredTotal ?: 0uL) },
             selected = selectedScope == AndroidNewsScope.Starred,
             onClick = { onScopeSelected(AndroidNewsScope.Starred) },
-            icon = { DrawerIcon(R.drawable.ic_star, "Starred") },
+            icon = { DrawerIcon(R.drawable.ic_star, stringResource(R.string.nav_starred)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
-            label = { Text("Listening List") },
+            label = { Text(stringResource(R.string.nav_listening_list)) },
             selected = false,
             onClick = onListeningList,
-            icon = { DrawerIcon(R.drawable.ic_headphones, "Listening List") },
+            icon = { DrawerIcon(R.drawable.ic_headphones, stringResource(R.string.nav_listening_list)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
-            label = { Text("Search") },
+            label = { Text(stringResource(R.string.nav_search)) },
             selected = false,
             onClick = onSearch,
-            icon = { DrawerIcon(R.drawable.ic_search, "Search") },
+            icon = { DrawerIcon(R.drawable.ic_search, stringResource(R.string.nav_search)) },
             colors = drawerItemColors,
         )
 
@@ -178,18 +179,18 @@ internal fun NewsNavigationContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Feeds",
+                stringResource(R.string.nav_feeds),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
-            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text("+ Feed") }
-            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text("+ Category") }
+            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
+            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
         }
 
         if (projection == null) {
             Text(
-                navigation.error ?: "Loading feeds…",
+                navigation.error ?: stringResource(R.string.nav_loading_feeds),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -252,10 +253,10 @@ internal fun NewsNavigationContent(
         Spacer(Modifier.height(12.dp))
         HorizontalDivider()
         NavigationDrawerItem(
-            label = { Text("Settings") },
+            label = { Text(stringResource(R.string.nav_settings)) },
             selected = false,
             onClick = onSettings,
-            icon = { DrawerIcon(R.drawable.ic_settings, "Settings") },
+            icon = { DrawerIcon(R.drawable.ic_settings, stringResource(R.string.nav_settings)) },
             colors = drawerItemColors,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         )
@@ -371,7 +372,7 @@ private fun FeedNavigationRow(
                 onDismissRequest = { menuExpanded = false },
             ) {
                 DropdownMenuItem(
-                    text = { Text("Feed Settings") },
+                    text = { Text(stringResource(R.string.nav_feed_settings)) },
                     onClick = {
                         menuExpanded = false
                         onSettings()
