@@ -54,6 +54,9 @@ internal fun AndroidBulkFeedSettingsScreen(
     val coreRuntime = application.coreRuntime
     val notifications = LocalAndroidSystemNotifications.current
     val scope = rememberCoroutineScope()
+    val audit_feed_loadText = stringResource(R.string.audit_feed_load)
+    val audit_feed_saveText = stringResource(R.string.audit_feed_save)
+    val audit_permission_requiredText = stringResource(R.string.audit_permission_required)
 
     var query by remember { mutableStateOf("") }
     var selectedFeedIds by remember { mutableStateOf(setOf<Long>()) }
@@ -82,7 +85,7 @@ internal fun AndroidBulkFeedSettingsScreen(
             selectedFeedIds = selectedFeedIds.intersect(feedIds.toSet())
             error = null
         }.onFailure {
-            error = "Feed settings could not be loaded."
+            error = audit_feed_loadText
         }
         loading = false
     }
@@ -99,7 +102,7 @@ internal fun AndroidBulkFeedSettingsScreen(
             }.onSuccess {
                 refreshGeneration += 1
             }.onFailure {
-                error = "Feed settings could not be saved."
+                error = audit_feed_saveText
             }
             saving = false
         }
@@ -111,7 +114,7 @@ internal fun AndroidBulkFeedSettingsScreen(
         val pending = pendingNotificationFeedIds
         pendingNotificationFeedIds = null
         if (!granted || pending.isNullOrEmpty()) {
-            error = "Notification permission is required before System Notifications can be enabled."
+            error = audit_permission_requiredText
         } else {
             applyPatch(
                 pending,

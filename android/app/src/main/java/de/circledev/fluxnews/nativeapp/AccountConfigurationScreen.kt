@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -77,12 +78,12 @@ internal fun AccountConfigurationScreen(
     ) {
         if (showTitle) {
             Text(
-                if (allowsRemoval) "Account" else "Set Up FluxNews",
+                if (allowsRemoval) stringResource(R.string.settings_account_title) else stringResource(R.string.l10n_account_setup),
                 style = MaterialTheme.typography.headlineMedium,
             )
         }
 
-        SectionTitle("Miniflux Account")
+        SectionTitle(stringResource(R.string.l10n_account_miniflux))
         OutlinedTextField(
             value = server,
             onValueChange = { server = it; if (it.trim() != stored?.serverUrl) version = null },
@@ -103,20 +104,20 @@ internal fun AccountConfigurationScreen(
 
         val displayedVersion = AndroidAccountPresentation.normalizedServerVersion(version)
         if (displayedVersion != null || AndroidAccountPresentation.usesUnencryptedHttp(server)) {
-            SectionTitle("Server Information")
+            SectionTitle(stringResource(R.string.l10n_account_server_info))
             if (displayedVersion != null) {
-                LabeledValue("Miniflux Version", displayedVersion)
+                LabeledValue(stringResource(R.string.l10n_account_miniflux_version), displayedVersion)
             }
             if (AndroidAccountPresentation.usesUnencryptedHttp(server)) {
                 Text(
-                    "⚠ This Miniflux server uses unencrypted HTTP. Account credentials and feed traffic are not protected by HTTPS.",
+                    stringResource(R.string.l10n_account_http_warning),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
 
-        SectionTitle("Custom HTTP Headers")
+        SectionTitle(stringResource(R.string.l10n_account_custom_headers))
         headers.forEachIndexed { index, header ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -142,7 +143,7 @@ internal fun AccountConfigurationScreen(
         }
 
         message?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            Text(LocalContext.current.localizedLegacyUiMessage(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }
 
         Button(
@@ -180,7 +181,7 @@ internal fun AccountConfigurationScreen(
 
         if (allowsRemoval) {
             HorizontalDivider()
-            SectionTitle("Account Data")
+            SectionTitle(stringResource(R.string.l10n_account_data))
             OutlinedButton(
                 onClick = { confirmRebuild = true },
                 enabled = rebuildState != AndroidAccountBootstrap.LocalStateRebuildState.Rebuilding && !isConfiguring,
@@ -199,13 +200,13 @@ internal fun AccountConfigurationScreen(
                     Text(stringResource(R.string.account_rebuilt), color = MaterialTheme.colorScheme.primary)
                 AndroidAccountBootstrap.LocalStateRebuildState.Failed ->
                     Text(
-                        "Local state was cleared, but synchronization could not be completed.",
+                        stringResource(R.string.l10n_account_rebuild_failed),
                         color = MaterialTheme.colorScheme.error,
                     )
                 else -> Unit
             }
             Text(
-                "Rebuild discards synchronized local data and downloads it again from Miniflux while keeping this account and your settings. Remove Account also removes account-bound data and credentials.",
+                stringResource(R.string.l10n_account_rebuild_data_explanation),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

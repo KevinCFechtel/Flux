@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -86,6 +87,7 @@ internal fun AndroidMediaPlayerSheet(
     val playback by coordinator.state.collectAsState()
     val sleepTimer by coordinator.sleepTimer.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val audit_show_notes_failText = stringResource(R.string.audit_show_notes_fail)
     val previewEnclosure = remember(previewItem, playback.enclosureId) {
         previewItem?.let { item ->
             item.activeEnclosureId
@@ -202,7 +204,7 @@ internal fun AndroidMediaPlayerSheet(
                 },
                 onFailure = {
                     if (showNotesRequestGeneration == requestGeneration) {
-                        showNotesError = "Show Notes could not be loaded."
+                        showNotesError = audit_show_notes_failText
                         showNotesLoading = false
                     }
                 },
@@ -365,7 +367,7 @@ internal fun AndroidMediaPlayerSheet(
                                                         showNotesLoading = false
                                                     },
                                                     onFailure = {
-                                                        showNotesError = "Show Notes could not be loaded."
+                                                        showNotesError = audit_show_notes_failText
                                                         showNotesLoading = false
                                                     },
                                                 )
@@ -384,7 +386,7 @@ internal fun AndroidMediaPlayerSheet(
                                                     showNotesLoading = false
                                                 },
                                                 onFailure = {
-                                                    showNotesError = "Show Notes could not be loaded."
+                                                    showNotesError = audit_show_notes_failText
                                                     showNotesLoading = false
                                                 },
                                             )
@@ -488,7 +490,7 @@ private fun AndroidMediaPlayerControls(
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Text(
-                displayedTitle?.ifBlank { "Audio" } ?: "Audio",
+                displayedTitle?.ifBlank { stringResource(R.string.article_audio) } ?: stringResource(R.string.article_audio),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -618,9 +620,9 @@ private fun AndroidMediaPlayerControls(
                         if (sleepTimer.enabled) {
                             sleepTimer.remainingSeconds?.let {
                                 androidPlayerTime(it * 1_000L)
-                            } ?: "On"
+                            } ?: stringResource(R.string.l10n_sleep_on)
                         } else {
-                            "Sleep"
+                            stringResource(R.string.l10n_sleep)
                         },
                     )
                 }
@@ -639,7 +641,7 @@ private fun AndroidMediaPlayerControls(
                     }
                     AndroidMediaSleepTimer.SupportedIntervalsMinutes.forEach { minutes ->
                         DropdownMenuItem(
-                            text = { Text(minutes.toString() + " minutes") },
+                            text = { Text(stringResource(R.string.l10n_duration_minutes, minutes)) },
                             onClick = {
                                 onSleepMenuChange(false)
                                 coordinator.sleepTimer.setInterval(minutes)
@@ -678,7 +680,7 @@ private fun AndroidMediaPlayerControls(
 
         if (!previewingInactiveItem) playback.errorMessage?.let { error ->
             Text(
-                error,
+                LocalContext.current.localizedLegacyUiMessage(error),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
@@ -742,9 +744,9 @@ private fun AndroidMediaTransportControls(
                         !previewingInactiveItem &&
                         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
                     ) {
-                        "Pause"
+                        stringResource(R.string.l10n_pause)
                     } else {
-                        "Play"
+                        stringResource(R.string.l10n_play)
                     },
                     modifier = Modifier.size(34.dp),
                 )
@@ -846,9 +848,9 @@ private fun AndroidMediaChapterSection(
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (activeIndex != null) {
-                            "Chapter " + (activeIndex + 1) + " of " + chapters.size
+                            stringResource(R.string.l10n_chapter_of, activeIndex + 1, chapters.size)
                         } else {
-                            "Chapters"
+                            stringResource(R.string.l10n_chapters)
                         },
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -944,12 +946,12 @@ private fun AndroidMediaShowNotesSection(
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Show Notes",
+                        stringResource(R.string.l10n_show_notes),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (expanded) "Tap to collapse" else "Read the article while listening",
+                        if (expanded) stringResource(R.string.l10n_tap_collapse) else stringResource(R.string.l10n_read_while_listening),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

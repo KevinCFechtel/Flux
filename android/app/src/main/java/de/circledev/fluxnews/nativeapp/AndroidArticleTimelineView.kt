@@ -76,7 +76,7 @@ internal fun AndroidArticleTimeline(
     var pendingDownloadChoice by remember {
         mutableStateOf<AndroidArticleMediaActionState?>(null)
     }
-    val errorMessage = state.errorMessage
+    val errorMessage = state.errorMessage?.let(LocalContext.current::localizedLegacyUiMessage)
     val pendingNewDataForCurrentScope = store.hasPendingNewDataForScope(
         scope = selection.scope,
         categoryFeedIds = categoryFeedIds,
@@ -85,6 +85,8 @@ internal fun AndroidArticleTimeline(
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val actionSnackbar = remember { SnackbarHostState() }
+    val minifluxUrlError = stringResource(R.string.audit_miniflux_url)
+    val shareFailedMessage = stringResource(R.string.audit_shared_fail)
     val context = LocalContext.current
     val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
@@ -101,7 +103,7 @@ internal fun AndroidArticleTimeline(
     }
 
     fun showActionMessage(message: String) {
-        actionScope.launch { actionSnackbar.showSnackbar(message) }
+        actionScope.launch { actionSnackbar.showSnackbar(context.localizedLegacyUiMessage(message)) }
     }
 
     fun performSwipeAction(article: ArticleSummary, action: AndroidArticleSwipeAction) {
@@ -137,7 +139,7 @@ internal fun AndroidArticleTimeline(
                 actionScope.launch {
                     val url = store.resolveMinifluxEntryUrl(article.id)
                     if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) {
-                        actionSnackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
+                        actionSnackbar.showSnackbar(minifluxUrlError)
                     }
                 }
             }
@@ -148,7 +150,7 @@ internal fun AndroidArticleTimeline(
             }
             AndroidArticleSwipeAction.Share -> {
                 if (!AndroidArticlePlatformActions.share(context, article)) {
-                    showActionMessage("The article could not be shared.")
+                    showActionMessage(shareFailedMessage)
                 }
             }
             AndroidArticleSwipeAction.SaveToService -> {
@@ -209,7 +211,7 @@ internal fun AndroidArticleTimeline(
 
     LaunchedEffect(store, actionSnackbar) {
         store.actionMessages.collect { message ->
-            actionSnackbar.showSnackbar(message)
+            actionSnackbar.showSnackbar(context.localizedLegacyUiMessage(message))
         }
     }
 

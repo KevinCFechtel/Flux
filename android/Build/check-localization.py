@@ -23,6 +23,16 @@ RULES = [
     ("UI title", re.compile(r'\b(?:title|subtitle|placeholder|actionLabel|message)\s*=\s*"(?=[A-Z])')),
     ("UI section", re.compile(r'\b(?:SettingsSectionTitle|SettingsSwitchRow|SettingsPickerRow|WidgetRadioRow|WidgetConfigurationSection)\s*\(\s*"(?=[A-Za-z])')),
     ("Snackbar", re.compile(r'\b(?:showMessage|showSnackbar|Toast\.makeText)\s*\(\s*"(?=[A-Za-z])')),
+    ("Fallback user text", re.compile(r'\bifBlank\s*\{\s*"(?=[A-Za-z])')),
+    ("State error", re.compile(r'\b(?:error|errorMessage|statusMessage)\s*=\s*"(?=[A-Z])')),
+    ("System or media label", re.compile(r'\b(?:setTitle|setSubtitle|setDisplayName|setContentTitle|setContentText|setContentDescription)\s*\(\s*"(?=[A-Za-z])')),
+    ("Notification channel", re.compile(r'\bNotificationChannel\s*\(.*"(?=[A-Za-z])')),
+    ("Pane accessibility", re.compile(r'\bpaneTitle\s*=\s*"(?=[A-Za-z])')),
+    ("Conditional content description", re.compile(r'\bcontentDescription\s*=\s*if\s*\([^)]*\)\s*"(?=[A-Za-z])')),
+    ("Conditional display text", re.compile(r'\b(?:text|title|message)\s*=\s*if\s*\([^)]*\)\s*"(?=[A-Za-z])')),
+    ("User-facing feedback", re.compile(r'\b(?:mutableActionMessages|actionMessages)\.emit\s*\(\s*(?:if\s*\([^)]*\)\s*)?"(?=[A-Za-z])')),
+    ("Dynamic timer label", re.compile(r'\bText\s*\(\s*\w+\.toString\(\)\s*\+\s*"(?=[A-Za-z ])')),
+
 ]
 EXCEPTION = re.compile(r'//\s*l10n-ignore:\s*\S+')
 

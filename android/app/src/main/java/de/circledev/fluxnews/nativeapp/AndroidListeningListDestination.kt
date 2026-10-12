@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -141,7 +142,7 @@ internal fun AndroidListeningListDestination(
                             )
                             state.feeds.forEach { feed ->
                                 DropdownMenuItem(
-                                    text = { Text(feed.feedTitle.ifBlank { "Unknown Feed" }) },
+                                    text = { Text(feed.feedTitle.ifBlank { stringResource(R.string.audit_unknown_feed) }) },
                                     onClick = {
                                         feedMenuOpen = false
                                         coroutineScope.launch { store.setFeedId(feed.feedId) }
@@ -208,7 +209,7 @@ internal fun AndroidListeningListDestination(
                 )
                 Spacer(Modifier.size(16.dp))
                 Text(
-                    state.errorMessage.orEmpty(),
+                    state.errorMessage.orEmpty().let(LocalContext.current::localizedLegacyUiMessage),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.size(12.dp))
@@ -233,13 +234,13 @@ internal fun AndroidListeningListDestination(
                 )
                 Spacer(Modifier.size(16.dp))
                 Text(
-                    "Listening List is Empty",
+                    stringResource(R.string.l10n_list_empty),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.size(6.dp))
                 Text(
-                    "Add audio news to your Listening List to find them here.",
+                    stringResource(R.string.l10n_list_empty_hint),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -365,7 +366,7 @@ private fun AndroidListeningListRow(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
-                    item.title.ifBlank { "Untitled News" },
+                    item.title.ifBlank { stringResource(R.string.audit_untitled_news) },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
@@ -384,7 +385,7 @@ private fun AndroidListeningListRow(
                         size = 16.dp,
                     )
                     Text(
-                        item.feedTitle.ifBlank { "Unknown Feed" },
+                        item.feedTitle.ifBlank { stringResource(R.string.audit_unknown_feed) },
                         modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -401,7 +402,7 @@ private fun AndroidListeningListRow(
                 }
                 if (isNowPlaying) {
                     Text(
-                        "Now Playing",
+                        stringResource(R.string.l10n_now_playing),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -476,7 +477,7 @@ private fun AndroidListeningListRow(
                                     modifier = Modifier.size(16.dp),
                                 )
                             },
-                            text = "Downloaded",
+                            text = stringResource(R.string.l10n_downloaded),
                         )
                         DownloadState.REQUESTED -> AndroidMediaMetric(
                             icon = {
@@ -485,7 +486,7 @@ private fun AndroidListeningListRow(
                                     strokeWidth = 2.dp,
                                 )
                             },
-                            text = "Pending",
+                            text = stringResource(R.string.l10n_pending),
                         )
                         DownloadState.FAILED -> AndroidMediaMetric(
                             icon = {
@@ -495,7 +496,7 @@ private fun AndroidListeningListRow(
                                     modifier = Modifier.size(16.dp),
                                 )
                             },
-                            text = "Retry",
+                            text = stringResource(R.string.l10n_retry),
                         )
                         else -> Unit
                     }
@@ -512,7 +513,7 @@ private fun AndroidListeningListRow(
             ) {
                 Icon(
                     if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = stringResource(if (isPlaying) R.string.l10n_pause else R.string.l10n_play),
                 )
             }
 
@@ -735,9 +736,9 @@ private fun AndroidListeningListProgress(
         }
         val durationLabel = durationMs?.let { " / " + androidMediaTime(it) }.orEmpty()
         val statusLabel = when (status) {
-            PlaybackStatus.NOT_STARTED -> "Not started"
-            PlaybackStatus.IN_PROGRESS -> "In progress"
-            PlaybackStatus.COMPLETED -> "Completed"
+            PlaybackStatus.NOT_STARTED -> stringResource(R.string.audit_playback_not_started)
+            PlaybackStatus.IN_PROGRESS -> stringResource(R.string.audit_playback_in_progress)
+            PlaybackStatus.COMPLETED -> stringResource(R.string.audit_playback_completed)
         }
         Text(
             androidMediaTime(positionMs) + durationLabel + " · " + statusLabel,

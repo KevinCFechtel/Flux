@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.Flow
@@ -200,7 +201,39 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     onClose: () -> Unit,
     onFinishPartial: () -> Unit,
 ) {
-    val steps = state.steps
+    // The persisted migration model keeps its legacy step identifiers; translate presentation here.
+    val account = stringResource(R.string.audit_migration_account)
+    val accountDone = stringResource(R.string.audit_migration_account_done)
+    val settingsTitle = stringResource(R.string.audit_mig_settings)
+    val settingsDone = stringResource(R.string.audit_mig_settings_done)
+    val feedsTitle = stringResource(R.string.audit_mig_feeds)
+    val feedsDone = stringResource(R.string.audit_migration_feeds_done)
+    val playbackTitle = stringResource(R.string.audit_migration_playback)
+    val audioDone = stringResource(R.string.audit_migration_audio_done)
+    val downloadsTitle = stringResource(R.string.audit_migration_downloads)
+    val offlineDone = stringResource(R.string.audit_migration_offline_done)
+    val widgetsTitle = stringResource(R.string.audit_migration_widgets)
+    val widgetsDone = stringResource(R.string.audit_migration_widget_done)
+    val localizedMessageContext = LocalContext.current
+    val skippedPlaybackDescription = stringResource(
+        R.string.audit_migration_skipped,
+        localizedMessageContext.localizedLegacyMigrationStatus(state.skippedPlaybackDetails),
+    )
+    val skippedDownloadDescription = stringResource(
+        R.string.audit_migration_skipped,
+        localizedMessageContext.localizedLegacyMigrationStatus(state.skippedDownloadDetails),
+    )
+    val steps = state.steps.mapIndexed { index, step ->
+        when (index) {
+            0 -> step.copy(title = account, description = accountDone)
+            1 -> step.copy(title = settingsTitle, description = settingsDone)
+            2 -> step.copy(title = feedsTitle, description = step.description.takeUnless { it == "Feed preferences and startup view checked" }?.let(localizedMessageContext::localizedLegacyMigrationStatus) ?: feedsDone)
+            3 -> step.copy(title = playbackTitle, description = if (state.skippedPlaybackDetails.isNotBlank()) skippedPlaybackDescription else step.description.takeUnless { it == "Audio positions checked" }?.let(localizedMessageContext::localizedLegacyMigrationStatus) ?: audioDone)
+            4 -> step.copy(title = downloadsTitle, description = if (state.skippedDownloadDetails.isNotBlank()) skippedDownloadDescription else step.description.takeUnless { it == "Offline audio checked" }?.let(localizedMessageContext::localizedLegacyMigrationStatus) ?: offlineDone)
+            5 -> step.copy(title = widgetsTitle, description = widgetsDone)
+            else -> step
+        }
+    }
     var confirmSkip by remember { mutableStateOf(false) }
     if (confirmSkip) {
         AlertDialog(
@@ -219,7 +252,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
     }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (state.completedWithSkippedItems) "Migration completed with skipped items" else if (state.complete) "Migration complete" else "Import from FluxNews") },
+        title = { Text(if (state.completedWithSkippedItems) stringResource(R.string.audit_mig_partial) else if (state.complete) stringResource(R.string.audit_mig_complete) else stringResource(R.string.audit_mig_import)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -227,9 +260,9 @@ internal fun AndroidLegacyMigrationNoticeDialog(
             ) {
                 Text(
                     if (state.complete) {
-                        if (state.completedWithSkippedItems) "Import completed with skipped items. Successfully imported data was preserved; unresolved media entries were intentionally skipped." else "Your previous data has been checked. Existing native data was preserved."
+                        if (state.completedWithSkippedItems) stringResource(R.string.audit_mig_partial_body) else stringResource(R.string.audit_mig_done_body)
                     } else {
-                        "Wir übernehmen die bisherigen Settings und Mediendaten. Einzelne Schritte werden nach der Synchronisierung geprüft."
+                        stringResource(R.string.audit_mig_inprogress_body)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -238,7 +271,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "${state.completedSteps} von ${steps.size} areas checked",
+                    stringResource(R.string.audit_mig_progress, state.completedSteps, steps.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -257,7 +290,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                         Column {
                             Text(step.title, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                if (step.complete) step.description else if ((step.title == "Playback progress" && state.playbackStatus.isNotBlank()) || (step.title == "Downloads" && state.downloadsStatus.isNotBlank()) || (step.title == "Feeds & startup view" && (state.feedsStatus.isNotBlank() || state.startupStatus.isNotBlank()))) step.description else "Pending – checked after the next successful sync",
+                                if (step.complete) step.description else if ((step.title == "Playback progress" && state.playbackStatus.isNotBlank()) || (step.title == "Downloads" && state.downloadsStatus.isNotBlank()) || (step.title == "Feeds & startup view" && (state.feedsStatus.isNotBlank() || state.startupStatus.isNotBlank()))) step.description else stringResource(R.string.l10n_migration_pending_next_sync),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -271,8 +304,8 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     ) {
                         if (syncing) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(4.dp))
                         Text(
-                            if (syncing) "Sync in progress…"
-                            else "Pending steps will be retried after synchronization.",
+                            if (syncing) stringResource(R.string.l10n_migration_syncing)
+                            else stringResource(R.string.l10n_migration_retry_after_sync),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -297,7 +330,7 @@ internal fun AndroidLegacyMigrationNoticeDialog(
                     }
                 }
                 Button(onClick = onClose) {
-                    Text(if (state.complete) "Done" else "Continue in background")
+                    Text(stringResource(if (state.complete) R.string.l10n_done else R.string.l10n_continue_background))
                 }
             }
         },

@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -145,6 +146,8 @@ internal fun NewsRootContent(
     )
     val actionScope = rememberCoroutineScope()
     val shellSnackbar = remember { SnackbarHostState() }
+    val invalidArticleUrl = stringResource(R.string.search_bad_article_url)
+    val unableToOpenArticle = stringResource(R.string.audit_article_open)
     var markReadRequest by remember { mutableStateOf<AndroidPendingMarkRead?>(null) }
     var markReadRunning by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -169,10 +172,10 @@ internal fun NewsRootContent(
                 AndroidNormalOpenDestination.Reader -> openReader(article)
                 is AndroidNormalOpenDestination.Web -> {
                     if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) {
-                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                        shellSnackbar.showSnackbar(invalidArticleUrl)
                     }
                 }
-                null -> shellSnackbar.showSnackbar("The article could not be opened.")
+                null -> shellSnackbar.showSnackbar(unableToOpenArticle)
             }
         }
     }
@@ -191,10 +194,10 @@ internal fun NewsRootContent(
         }
     }
 
-    LaunchedEffect(syncState, shellSnackbar) {
+    LaunchedEffect(syncState, shellSnackbar, context) {
         val failed = syncState as? AndroidSyncCoordinator.State.Failed
         if (failed?.reason == SyncReason.MANUAL) {
-            shellSnackbar.showSnackbar(failed.message)
+            shellSnackbar.showSnackbar(context.localizedLegacyUiMessage(failed.message))
         }
     }
 
@@ -444,7 +447,7 @@ internal fun NewsRootContent(
             onOpenOriginal = { article ->
                 if (!AndroidArticlePlatformActions.openUrl(context, article.url)) {
                     actionScope.launch {
-                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                        shellSnackbar.showSnackbar(invalidArticleUrl)
                     }
                 }
             },
@@ -460,8 +463,8 @@ internal fun NewsRootContent(
 
     markReadRequest?.let { request ->
         val title = when (request.workflow) {
-            AndroidMarkReadWorkflow.Read -> "Mark All as Read"
-            AndroidMarkReadWorkflow.ReadAndNext -> "Mark All as Read and Continue"
+            AndroidMarkReadWorkflow.Read -> stringResource(R.string.audit_timeline_mark_all)
+            AndroidMarkReadWorkflow.ReadAndNext -> stringResource(R.string.audit_timeline_mark_next)
         }
         AlertDialog(
             onDismissRequest = { if (!markReadRunning) markReadRequest = null },
@@ -674,9 +677,9 @@ private fun AndroidArticleActionCapsule(
                     text = {
                         Text(
                             if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                                "Show all articles"
+                                stringResource(R.string.l10n_show_all_articles)
                             } else {
-                                "Show unread only"
+                                stringResource(R.string.l10n_show_unread_only)
                             },
                         )
                     },
@@ -690,8 +693,8 @@ private fun AndroidArticleActionCapsule(
                 text = {
                     Text(
                         when (selection.sort) {
-                            AndroidArticleSortOrder.OldestFirst -> "Newest first"
-                            AndroidArticleSortOrder.NewestFirst -> "Oldest first"
+                            AndroidArticleSortOrder.OldestFirst -> stringResource(R.string.audit_sort_newest)
+                            AndroidArticleSortOrder.NewestFirst -> stringResource(R.string.audit_sort_oldest)
                         },
                     )
                 },
@@ -719,34 +722,40 @@ private fun articleListActionIcon(
     AndroidActionBarAction.Settings -> R.drawable.ic_settings
 }
 
+@Composable
+private fun actionDisplayName(action: AndroidActionBarAction): String = when (action) {
+    AndroidActionBarAction.FilterAndSort -> stringResource(R.string.audit_action_filter)
+    AndroidActionBarAction.ToggleReadFilter -> stringResource(R.string.settings_preview_lines)
+    AndroidActionBarAction.ToggleSortOrder -> stringResource(R.string.audit_sort_newest)
+    AndroidActionBarAction.Search -> stringResource(R.string.audit_action_search)
+    AndroidActionBarAction.MarkAllRead -> stringResource(R.string.audit_timeline_mark_all)
+    AndroidActionBarAction.MarkAllReadAndNext -> stringResource(R.string.audit_timeline_mark_next)
+    AndroidActionBarAction.ListeningList -> stringResource(R.string.audit_action_listening)
+    AndroidActionBarAction.Settings -> stringResource(R.string.audit_action_settings)
+}
+
+@Composable
 private fun articleListActionContentDescription(
     action: AndroidActionBarAction,
     selection: AndroidArticleTimelineSelection,
 ): String = when (action) {
     AndroidActionBarAction.ToggleReadFilter ->
-        if (selection.readFilter == AndroidArticleReadFilter.Unread) "Show all articles" else "Show unread only"
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) stringResource(R.string.audit_show_all_articles) else stringResource(R.string.audit_show_unread_only)
     AndroidActionBarAction.ToggleSortOrder ->
-        if (selection.sort == AndroidArticleSortOrder.OldestFirst) "Newest first" else "Oldest first"
-    else -> action.displayName
+        if (selection.sort == AndroidArticleSortOrder.OldestFirst) stringResource(R.string.audit_sort_newest) else stringResource(R.string.audit_sort_oldest)
+    else -> actionDisplayName(action)
 }
 
+@Composable
 private fun articleListActionMenuLabel(
     action: AndroidActionBarAction,
     selection: AndroidArticleTimelineSelection,
 ): String = when (action) {
     AndroidActionBarAction.ToggleReadFilter ->
-        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-            "Show All Articles"
-        } else {
-            "Show Unread Only"
-        }
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) stringResource(R.string.audit_show_all_articles_title) else stringResource(R.string.audit_show_unread_only_title)
     AndroidActionBarAction.ToggleSortOrder ->
-        if (selection.sort == AndroidArticleSortOrder.OldestFirst) {
-            "Newest First"
-        } else {
-            "Oldest First"
-        }
-    else -> action.displayName
+        if (selection.sort == AndroidArticleSortOrder.OldestFirst) stringResource(R.string.audit_sort_newest_title) else stringResource(R.string.audit_sort_oldest_title)
+    else -> actionDisplayName(action)
 }
 
 @Composable
@@ -859,20 +868,24 @@ private fun ScopeNavigationCapsule(
     }
 }
 
+@Composable
 private fun scopeCountLabel(
     scope: AndroidNewsScope,
     readFilter: AndroidArticleReadFilter?,
     count: ULong,
-): String =
-    if (readFilter == AndroidArticleReadFilter.Unread && scope != AndroidNewsScope.Starred) {
-        "$count unread"
+): String {
+    val countAsInt = count.coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
+    return if (readFilter == AndroidArticleReadFilter.Unread && scope != AndroidNewsScope.Starred) {
+        pluralStringResource(R.plurals.audit_unread_count, countAsInt, countAsInt)
     } else {
-        "$count " + if (count == 1uL) "article" else "articles"
+        pluralStringResource(R.plurals.audit_article_count, countAsInt, countAsInt)
     }
+}
 
+@Composable
 private fun scopeTitle(scope: AndroidNewsScope): String = when (scope) {
-    AndroidNewsScope.All -> "All News"
-    AndroidNewsScope.Starred -> "Starred"
+    AndroidNewsScope.All -> stringResource(R.string.audit_all_news)
+    AndroidNewsScope.Starred -> stringResource(R.string.audit_scope_starred)
     is AndroidNewsScope.Category -> scope.title
     is AndroidNewsScope.Feed -> scope.title
 }

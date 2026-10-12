@@ -1,6 +1,6 @@
 # Android localization: Weblate-ready resource contract
 
-Status: **resource foundation introduced; translation and full UI extraction are not complete**.
+Status: **German source-resource coverage is complete and pending device review; other Weblate locales still fall back to English.**
 
 ## Product languages
 
@@ -9,14 +9,14 @@ The established `MOBILE_PRODUCT_SEMANTICS.md` contract calls for seven native-mo
 | Language | Android resource folder | Translation status |
 | --- | --- | --- |
 | English (source) | `values/strings.xml` | Canonical English |
-| German | `values-de/strings.xml` | Review/translation pending |
+| German | `values-de/strings.xml` | 500/500 translatable source entries translated; device review pending |
 | Spanish | `values-es/strings.xml` | Review/translation pending |
 | Galician | `values-gl/strings.xml` | Review/translation pending |
 | Dutch | `values-nl/strings.xml` | Review/translation pending |
 | Tamil | `values-ta/strings.xml` | Review/translation pending |
 | Turkish | `values-tr/strings.xml` | Review/translation pending |
 
-The six translation files are intentionally empty until human-reviewed content exists. Android uses the English default for missing entries. **Empty language catalogs are scaffolding, not translated UI.** Do not turn on an in-app language picker or advertise complete translation coverage before review.
+The German catalog contains translations of all 500 translatable source resources and awaits on-device review. The other five target catalogs are intentionally empty until reviewed translations exist. Android uses canonical English defaults for missing entries. **Empty language catalogs are scaffolding, not translated UI.** Do not turn on an in-app language picker or advertise complete translation coverage for these five languages before review.
 
 ## Weblate component configuration (when service is connected)
 
@@ -58,4 +58,13 @@ The CI step uses full Git history and the pull-request base SHA (or the previous
 
 See [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md) for confirmed remaining Kotlin UI literals, the blocking incremental guard versus the informational full inventory, and release closeout criteria. C1 remains in progress; green CI does not imply complete localization or reviewed translations.
 
+### Expanded source-level audit (2026-10-12)
+
+A follow-up audit of the 71 production Kotlin files identified additional English fallback labels, snackbar text, error states and settings labels after PR #46. Findings and categories are documented in [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md). The CI scanner now checks more literal forms; it remains an incremental guard, not evidence of full extraction. C1 is not technically complete until these findings are fixed and locale runtime behavior is verified.
+
 Android Auto/MediaTransfer follow-up: user-visible Media3 browse/command labels and foreground download notification copy are now supplied through resources; see [ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md). Validate host-side locale changes and original fallback behavior on Android Auto separately.
+
+
+## Android Lint and staged Weblate locales (2026-10-12)
+
+The base resources contain all canonical English source strings, and **missing target translations intentionally fall back to them**. Android Lint's `MissingTranslation` rule reports every missing entry in the five deliberately empty target catalogs (501 errors in the October 12 CI), including the Development app-name override. The app module therefore disables **only** `MissingTranslation` while these languages are populated through Weblate. All other lint rules remain active. This does not mark blank catalogs translated: the CI source/incremental localization checks, resource structure tests and reviewer/device acceptance still apply. When all supported locales are populated, remove this one-rule exception to restore automatic missing-translation enforcement.

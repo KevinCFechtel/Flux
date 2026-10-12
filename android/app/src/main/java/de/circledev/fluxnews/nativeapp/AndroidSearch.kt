@@ -608,6 +608,8 @@ internal fun AndroidSearchDestination(
     val context = LocalContext.current
     // Resolve translated UI copy during composition, not through LocalContext in event handlers.
     val badArticleUrlMessage = stringResource(R.string.search_bad_article_url)
+    val articleOpenError = stringResource(R.string.audit_article_open)
+    val minifluxUrlError = stringResource(R.string.audit_miniflux_url)
     val badCommentsUrlMessage = stringResource(R.string.search_bad_comments_url)
     val shareFailedMessage = stringResource(R.string.search_share_failed)
     val linkCopiedMessage = stringResource(R.string.search_link_copied)
@@ -623,7 +625,7 @@ internal fun AndroidSearchDestination(
     LaunchedEffect(sessionGeneration) { store.activateSession(sessionGeneration) }
     LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
     LaunchedEffect(state.results.map { it.feedId }, feedIconVariant) { store.ensureFeedIcons(feedIconVariant) }
-    LaunchedEffect(store, snackbar) { store.actionMessages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(store, snackbar, context) { store.actionMessages.collect { snackbar.showSnackbar(context.localizedLegacyUiMessage(it)) } }
     LaunchedEffect(store, view) {
         store.feedback.collect {
             when (it) {
@@ -659,8 +661,8 @@ internal fun AndroidSearchDestination(
         actionScope.launch {
             when (val destination = openResolver.resolve(article, preferences.openArticle)) {
                 AndroidNormalOpenDestination.Reader -> readerStore.open(article, AndroidReaderSource.Search)
-                is AndroidNormalOpenDestination.Web -> if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) snackbar.showSnackbar("The article does not have a valid web URL.")
-                null -> snackbar.showSnackbar("The article could not be opened.")
+                is AndroidNormalOpenDestination.Web -> if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) snackbar.showSnackbar(badArticleUrlMessage)
+                null -> snackbar.showSnackbar(articleOpenError)
             }
         }
     }
@@ -676,7 +678,7 @@ internal fun AndroidSearchDestination(
                 store.requestSetRead(article.id, true, providesFeedback = false)
                 actionScope.launch {
                     val url = store.resolveMinifluxEntryUrl(article.id)
-                    if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
+                    if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) snackbar.showSnackbar(minifluxUrlError)
                 }
             }
             AndroidArticleSwipeAction.Comments -> if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) showMessage(badCommentsUrlMessage)
@@ -797,7 +799,7 @@ internal fun AndroidSearchDestination(
                         )
                         state.errorMessage != null && state.results.isEmpty() -> SearchMessage(
                             title = stringResource(R.string.search_unavailable),
-                            message = state.errorMessage ?: stringResource(R.string.search_failed),
+                            message = state.errorMessage?.let(context::localizedLegacyUiMessage) ?: stringResource(R.string.search_failed),
                             modifier = Modifier.fillMaxSize(),
                             actionLabel = stringResource(R.string.list_retry),
                             onAction = store::retry,
@@ -842,7 +844,7 @@ internal fun AndroidSearchDestination(
                             } else if (state.errorMessage != null) item("search-page-error") {
                                 SearchMessage(
                                     title = stringResource(R.string.search_more_unavailable),
-                                    message = state.errorMessage ?: "More results could not be loaded.",
+                                    message = state.errorMessage?.let(context::localizedLegacyUiMessage) ?: stringResource(R.string.audit_search_more_load),
                                     modifier = Modifier.fillMaxWidth(),
                                     actionLabel = stringResource(R.string.list_retry),
                                     onAction = store::retryLoadMore,

@@ -184,6 +184,41 @@ internal object AndroidArticleActionPolicy {
     }
 }
 
+@Composable
+private fun localizedDownloadActionLabel(state: DownloadState?): String = when (state) {
+    null, DownloadState.NOT_DOWNLOADED -> stringResource(R.string.audit_download)
+    DownloadState.REQUESTED -> stringResource(R.string.audit_download_cancel)
+    DownloadState.DOWNLOADED -> stringResource(R.string.audit_download_delete)
+    DownloadState.FAILED -> stringResource(R.string.audit_download_retry)
+    DownloadState.DELETE_REQUESTED -> stringResource(R.string.audit_download_deleting)
+}
+
+@Composable
+private fun localizedContextActionLabel(action: AndroidArticleContextAction, article: ArticleSummary): String = when (action) {
+    AndroidArticleContextAction.ReadUnread -> stringResource(if (article.isRead) R.string.audit_mark_unread else R.string.audit_mark_read)
+    AndroidArticleContextAction.StarUnstar -> stringResource(if (article.isStarred) R.string.audit_unstar else R.string.audit_star)
+    AndroidArticleContextAction.OpenOriginal -> stringResource(R.string.audit_open_original)
+    AndroidArticleContextAction.Reader -> stringResource(R.string.audit_open_reader)
+    AndroidArticleContextAction.OpenMiniflux -> stringResource(R.string.feed_open_miniflux)
+    AndroidArticleContextAction.Comments -> stringResource(R.string.audit_open_comments)
+    AndroidArticleContextAction.CopyLink -> stringResource(R.string.audit_copy_link)
+    AndroidArticleContextAction.Share -> stringResource(R.string.audit_share)
+    AndroidArticleContextAction.SaveToService -> stringResource(R.string.audit_save_service)
+}
+
+@Composable
+private fun localizedSwipeActionLabel(action: AndroidArticleSwipeAction, article: ArticleSummary): String = when (action) {
+    AndroidArticleSwipeAction.ReadUnread -> stringResource(if (article.isRead) R.string.audit_unread else R.string.audit_read)
+    AndroidArticleSwipeAction.StarUnstar -> stringResource(if (article.isStarred) R.string.audit_unstar else R.string.audit_star)
+    AndroidArticleSwipeAction.OpenOriginal -> stringResource(R.string.audit_original)
+    AndroidArticleSwipeAction.OpenMiniflux -> stringResource(R.string.audit_miniflux)
+    AndroidArticleSwipeAction.Comments -> stringResource(R.string.article_comments)
+    AndroidArticleSwipeAction.Share -> stringResource(R.string.audit_share)
+    AndroidArticleSwipeAction.SaveToService -> stringResource(R.string.audit_save)
+    AndroidArticleSwipeAction.ListeningList -> stringResource(R.string.audit_listening)
+    AndroidArticleSwipeAction.DownloadAudio -> stringResource(R.string.audit_download)
+}
+
 internal fun androidMediaDownloadActionLabel(state: DownloadState?): String = when (state) {
     null, DownloadState.NOT_DOWNLOADED -> "Download"
     DownloadState.REQUESTED -> "Cancel download"
@@ -213,8 +248,8 @@ internal fun AndroidArticleDownloadChooserDialog(
                         },
                         enabled = download?.state != DownloadState.DELETE_REQUESTED,
                     ) {
-                        val type = enclosure.mimeType.ifBlank { "Audio " + (index + 1) }
-                        Text(type + " · " + androidMediaDownloadActionLabel(download?.state))
+                        val type = enclosure.mimeType.ifBlank { stringResource(R.string.audit_audio_number, index + 1) }
+                        Text(type + " · " + localizedDownloadActionLabel(download?.state))
                     }
                 }
             }
@@ -570,7 +605,7 @@ internal fun AndroidArticleSwipeContainer(
                         )
                     },
                     text = {
-                        Text(AndroidArticleActionPolicy.contextLabel(action, article))
+                        Text(localizedContextActionLabel(action, article))
                     },
                     onClick = {
                         contextExpanded = false
@@ -681,7 +716,7 @@ private fun SwipeActionBackground(
                 ) {
                     Icon(
                         painter = painterResource(swipeActionIcon(action, article)),
-                        contentDescription = AndroidArticleActionPolicy.swipeLabel(action, article),
+                        contentDescription = localizedSwipeActionLabel(action, article),
                         tint = if (fullSwipeArmed) dominantColors.content else colors.content,
                         modifier = Modifier
                             .size(if (fullSwipeArmed) 30.dp else 28.dp)

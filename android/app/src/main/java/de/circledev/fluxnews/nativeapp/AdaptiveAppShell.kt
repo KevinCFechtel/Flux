@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -100,6 +101,7 @@ internal fun AdaptiveAppShell(
         mutableStateOf(retainedTimelineSelection != null)
     }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
+    val navigationLoadError = stringResource(R.string.audit_navigation_load)
 
     LaunchedEffect(sessionGeneration) {
         searchStore.activateSession(sessionGeneration)
@@ -115,7 +117,7 @@ internal fun AdaptiveAppShell(
                 projection = coreRuntime.local { core -> core.navigationProjection(NavigationCountMode.UNREAD) },
             )
         } catch (_: Exception) {
-            NewsNavigationModel(error = "Navigation data could not be loaded.")
+            NewsNavigationModel(error = navigationLoadError)
         }
     }
 
@@ -366,7 +368,7 @@ private fun TimelineDestination(
                             onAddFeed = onAddFeed,
                             onAddCategory = onAddCategory,
                             navigationToggleIcon = R.drawable.ic_arrow_back,
-                            navigationToggleDescription = "Collapse navigation",
+                            navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
                             onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
                     }
@@ -440,7 +442,7 @@ private fun TimelineDestination(
                                 }
                             },
                             navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
-                            navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
+                            navigationToggleDescription = if (collapsedPersistentNavigation) stringResource(R.string.l10n_expand_navigation) else null,
                             onNavigationToggle = if (collapsedPersistentNavigation) {
                                 {
                                     coroutineScope.launch {
@@ -493,7 +495,7 @@ private fun SecondaryDestination(title: String, message: String, onBack: () -> U
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.audit_back),
                         )
                     }
                 },
