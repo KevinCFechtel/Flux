@@ -23,6 +23,7 @@ import de.circledev.fluxnews.nativeapp.AndroidWidgetConfiguration
 import de.circledev.fluxnews.nativeapp.AndroidWidgetConfigurationStore
 import de.circledev.fluxnews.nativeapp.AndroidWidgetProjectionReader
 import de.circledev.fluxnews.nativeapp.AndroidWidgetReadFilter
+import de.circledev.fluxnews.nativeapp.AndroidWidgetScopeType
 import de.circledev.fluxnews.nativeapp.MainActivity
 import de.circledev.fluxnews.nativeapp.R
 import java.io.File
@@ -134,7 +135,13 @@ class FluxNewsWidgetProvider : AppWidgetProvider() {
             configuration: AndroidWidgetConfiguration,
             header: de.circledev.fluxnews.nativeapp.AndroidWidgetHeader?,
         ) {
-            views.setTextViewText(R.id.widget_title, header?.title ?: context.getString(R.string.widget_all_news))
+            val localizedScopeTitle = when (configuration.scopeType) {
+                AndroidWidgetScopeType.All -> context.getString(R.string.widget_all_news)
+                AndroidWidgetScopeType.Bookmarks -> context.getString(R.string.widget_bookmarks)
+                AndroidWidgetScopeType.Category -> header?.title ?: context.getString(R.string.widget_category)
+                AndroidWidgetScopeType.Feed -> header?.title ?: context.getString(R.string.widget_feed)
+            }
+            views.setTextViewText(R.id.widget_title, localizedScopeTitle)
             views.setTextViewText(R.id.widget_count, (header?.count ?: 0L).toString())
             views.setTextViewText(
                 R.id.widget_count_label,
