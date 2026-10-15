@@ -38,6 +38,7 @@ private struct ListeningListRow: View {
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
+    let onCancel: (Int64, Int64) -> Void
     let onRemove: (Int64) -> Void
     @State private var confirmingRemoval = false
     @State private var pendingDeletion: ListeningListEnclosure?
