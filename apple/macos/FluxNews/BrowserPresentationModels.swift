@@ -245,3 +245,19 @@ enum ScopeReadActionPolicy {
         }
     }
 }
+
+enum BulkFeedSettingsPolicy {
+    static func commonValue<Value: Equatable>(_ values: [Value]) -> Value? {
+        guard let first = values.first,
+              values.dropFirst().allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+
+    static func selectVisible(_ visibleIDs: [Int64], retaining selectedIDs: Set<Int64>) -> Set<Int64> {
+        selectedIDs.union(visibleIDs)
+    }
+
+    static func reconcile(_ selectedIDs: Set<Int64>, availableIDs: [Int64]) -> Set<Int64> {
+        selectedIDs.intersection(availableIDs)
+    }
+}

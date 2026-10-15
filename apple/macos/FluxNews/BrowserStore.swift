@@ -1882,6 +1882,74 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+
+    func loadBulkFeedPreferences(
+        feedIDs: [Int64],
+        completion: @escaping (Result<[FeedPreferences], Error>) -> Void
+    ) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1)))
+            return
+        }
+        guard !feedIDs.isEmpty else {
+            completion(.success([]))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.feedPreferencesBulk(feedIds: feedIDs) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            completion(result)
+        }
+    }
+
+    func patchBulkFeedPreferences(
+        feedIDs: [Int64],
+        patch: FeedPreferencesPatch,
+        completion: @escaping (Result<[FeedPreferences], Error>) -> Void
+    ) {
+        guard let core, !feedIDs.isEmpty else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1)))
+            return
+        }
+        let available = Set(catalog.feeds.map(\.id))
+        guard Set(feedIDs).isSubset(of: available) else {
+            completion(.failure(NSError(
+                domain: "FluxNews", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "The selected feeds have changed. Refresh and try again.")]
+            )))
+            return
+        }
+        let ids = Array(Set(feedIDs)).sorted()
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            do {
+                if patch.systemNotificationsEnabled == true {
+                    try await SystemNotificationManager.shared.ensureAuthorization()
+                }
+                guard self?.core === core else { return }
+                guard let result = await coordinator.responsiveResult(
+                    for: core,
+                    {
+                        try core.patchFeedPreferencesBulk(feedIds: ids, patch: patch)
+                        return try core.feedPreferencesBulk(feedIds: ids)
+                    }
+                ) else { return }
+                guard let self, self.core === core else { return }
+                if case .success = result, patch.systemNotificationsEnabled != nil {
+                    self.reloadSystemNotificationSettings()
+                }
+                completion(result)
+            } catch {
+                guard let self, self.core === core else { return }
+                completion(.failure(error))
+            }
+        }
+    }
+
     private func updateFeedPreferences(
         feedID: Int64,
         change: @escaping @Sendable (Flux) throws -> Void,
