@@ -13,6 +13,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case systemNotifications
     case general
     case configurationBackup
+    case about
 
     var id: Self { self }
 
@@ -28,6 +29,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .systemNotifications: "System Notifications"
         case .general: "General"
         case .configurationBackup: "Configuration Backup"
+        case .about: "About"
         }
     }
 
@@ -43,6 +45,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .systemNotifications: "bell"
         case .general: "gearshape"
         case .configurationBackup: "externaldrive.badge.timemachine"
+        case .about: "info.circle"
         }
     }
 }
@@ -194,6 +197,8 @@ struct SettingsView: View {
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
         case .configurationBackup:
             DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
+        case .about:
+            MacOSAboutSettingsView()
         }
     }
     private var retention: Binding<ReadArticleRetention> {
@@ -467,7 +472,17 @@ private struct AccountSettingsView: View {
               }
               .frame(maxWidth: .infinity, alignment: .leading)
 
-
+            if AccountTransportWarning.usesUnencryptedHTTP(server) {
+                Label {
+                    Text("This Miniflux server uses unencrypted HTTP. Account credentials and feed traffic are not protected by HTTPS.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isStaticText)
+            }
 
             GroupBox("Custom HTTP Headers") {
                 customHeadersEditor
@@ -1236,6 +1251,70 @@ private struct SystemNotificationsSettingsView: View {
             Spacer()
         }
         .onAppear { store.reloadSystemNotificationSettings() }
+    }
+}
+
+enum MacOSAboutInformation {
+    static let fluxNewsRepositoryURL = URL(string: "https://github.com/KevinCFechtel/FluxNews")!
+    static let fluxRepositoryURL = URL(string: "https://github.com/KevinCFechtel/Flux")!
+    static let licenseURL = URL(string: "https://github.com/KevinCFechtel/Flux/blob/main/LICENSE")!
+    static let minifluxProjectURL = URL(string: "https://miniflux.app")!
+
+    static func version(from infoDictionary: [String: Any]) -> String {
+        nonEmptyString(infoDictionary["CFBundleShortVersionString"]) ?? String(localized: "Unknown")
+    }
+
+    static func build(from infoDictionary: [String: Any]) -> String {
+        nonEmptyString(infoDictionary["CFBundleVersion"]) ?? String(localized: "Unknown")
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct MacOSAboutSettingsView: View {
+    private let infoDictionary: [String: Any]
+
+    init(bundle: Bundle = .main) {
+        infoDictionary = bundle.infoDictionary ?? [:]
+    }
+
+    var body: some View {
+        Form {
+            Section("Flux News") {
+                LabeledContent("Version", value: MacOSAboutInformation.version(from: infoDictionary))
+                LabeledContent("Build", value: MacOSAboutInformation.build(from: infoDictionary))
+                Text("© 2023 Kevin Fechtel")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Open Source") {
+                Link(destination: MacOSAboutInformation.fluxNewsRepositoryURL) {
+                    Label("FluxNews Repository", systemImage: "chevron.left.forwardslash.chevron.right")
+                }
+                Link(destination: MacOSAboutInformation.fluxRepositoryURL) {
+                    Label("Flux Development Repository", systemImage: "shippingbox")
+                }
+                Link(destination: MacOSAboutInformation.licenseURL) {
+                    Label("BSD 3-Clause License", systemImage: "doc.text")
+                }
+                Text("Flux News is open source. The Flux repository contains the native development history and shared Rust Core.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Miniflux") {
+                Text("Flux News is a newsreader and podcast client for the Miniflux backend.")
+                Link(destination: MacOSAboutInformation.minifluxProjectURL) {
+                    Label("Miniflux Project", systemImage: "safari")
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

@@ -23,6 +23,23 @@ final class AccountPresentationTests: XCTestCase {
         )
     }
 
+    func testUnencryptedHTTPWarningOnlyForValidHTTPServerURLs() {
+        XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("http://news.example:8080/miniflux"))
+        XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("  HTTP://news.example/  "))
+        XCTAssertFalse(AccountTransportWarning.usesUnencryptedHTTP("https://news.example"))
+        XCTAssertFalse(AccountTransportWarning.usesUnencryptedHTTP("http://"))
+        XCTAssertFalse(AccountTransportWarning.usesUnencryptedHTTP("not a URL"))
+        XCTAssertFalse(AccountTransportWarning.usesUnencryptedHTTP(""))
+    }
+
+    func testAboutUsesRealBundleVersionAndBuildWithSafeFallback() {
+        XCTAssertEqual(MacOSAboutInformation.version(from: ["CFBundleShortVersionString": " 3.0.0 "]), "3.0.0")
+        XCTAssertEqual(MacOSAboutInformation.build(from: ["CFBundleVersion": "20261015"]), "20261015")
+        XCTAssertEqual(MacOSAboutInformation.version(from: [:]), String(localized: "Unknown"))
+        XCTAssertEqual(MacOSAboutInformation.build(from: ["CFBundleVersion": "  "]), String(localized: "Unknown"))
+        XCTAssertEqual(MacOSAboutInformation.licenseURL.absoluteString, "https://github.com/KevinCFechtel/Flux/blob/main/LICENSE")
+    }
+
     func testMinifluxEntryURLUsesCoreResolvedRootAndSubpathURLs() {
         XCTAssertEqual(
             MinifluxEntryURL.resolve(articleID: 583862) { _ in

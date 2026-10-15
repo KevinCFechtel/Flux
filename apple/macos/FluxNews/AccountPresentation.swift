@@ -1,5 +1,15 @@
 import Foundation
 
+enum AccountTransportWarning {
+    static func usesUnencryptedHTTP(_ server: String) -> Bool {
+        let input = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URLComponents(string: input),
+              url.scheme?.lowercased() == "http",
+              let host = url.host, !host.isEmpty else { return false }
+        return true
+    }
+}
+
 enum AccountValidationFailure {
     case invalidURL
     case network

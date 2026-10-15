@@ -155,12 +155,12 @@ struct PlayerView: View {
 
     private var controls: some View {
         HStack(spacing: 18) {
-            controlButton("gobackward.30", label: "Back 30 seconds") { seek(by: -30_000) }
+            controlButton("gobackward.15", label: "Back 15 seconds") { seek(by: -Int64(AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds * 1_000)) }
             controlButton(state.status == .playing ? "pause.fill" : "play.fill", label: state.status == .playing ? "Pause" : "Play") { togglePlayback() }
                 .disabled(state.isLoading || state.loadedEnclosure == nil)
             controlButton("stop.fill", label: "Stop") { coordinator?.stop() }
                 .disabled(state.loadedEnclosure == nil)
-            controlButton("goforward.30", label: "Forward 30 seconds") { seek(by: 30_000) }
+            controlButton("goforward.30", label: "Forward 30 seconds") { seek(by: Int64(AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds * 1_000)) }
             controlButton("arrow.counterclockwise", label: "Restart") { restart() }
         }
         .frame(maxWidth: .infinity)
