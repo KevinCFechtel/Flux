@@ -380,7 +380,7 @@ final class MediaPlaybackCoordinator {
         do {
             try core.checkpointPlayback(enclosureId: activeEnclosureID, positionMs: engine.currentPositionMs, durationMs: engine.durationMs ?? preparedDurationMs)
         } catch {
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media checkpoint failed: \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media checkpoint failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -390,7 +390,7 @@ final class MediaPlaybackCoordinator {
             try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs)
         } catch {
             presentationState.status = .paused
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .private)")
             return
         }
         completionSent = true
@@ -408,7 +408,7 @@ final class MediaPlaybackCoordinator {
         presentationState.durationMs = duration
         guard let activeEnclosureID else { return }
         do { try core.observeMediaDuration(enclosureId: activeEnclosureID, durationMs: duration) }
-        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .public)") }
+        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .private)") }
     }
 
     private func startCheckpointTimer() {
