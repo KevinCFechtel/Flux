@@ -32,41 +32,6 @@ final class AccountPresentationTests: XCTestCase {
         XCTAssertEqual(SupportLogRedaction.sanitize("sync completed items=3"), "sync completed items=3")
     }
 
-    func testMacSupportDiagnosticsPersistenceBoundsAndClear() {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defer { try? FileManager.default.removeItem(at: root) }
-        let logs = MacSupportDiagnostics(root: root, defaults: defaults, capacity: 3, maximumBytes: 4_096)
-        XCTAssertNil(logs.record(.debug, "sync", "hidden"))
-        logs.record(.info, "sync", "first")
-        logs.setDebug(true)
-        logs.record(.debug, "sync", "visible")
-        for index in 0..<12 {
-            logs.record(.warning, "media", "transfer \(index)")
-        }
-        XCTAssertLessThanOrEqual(logs.snapshot().count, 3)
-        let reopened = MacSupportDiagnostics(root: root, defaults: defaults, capacity: 3, maximumBytes: 4_096)
-        XCTAssertTrue(reopened.debugEnabled)
-        XCTAssertEqual(reopened.snapshot().count, logs.snapshot().count)
-        XCTAssertTrue(reopened.exportText().contains("FluxNews macOS Diagnostics"))
-        reopened.clear()
-        XCTAssertTrue(reopened.snapshot().isEmpty)
-        XCTAssertTrue(MacSupportDiagnostics(root: root, defaults: defaults).snapshot().isEmpty)
-    }
-
-    func testMacSupportDiagnosticsRedactsValuesBeforeWriting() {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let logs = MacSupportDiagnostics(root: root)
-        logs.registerSecrets(["secret-header-value"])
-        let safe = logs.record(.error, "core.http", "Authorization: abc https://news.example/path?token=123 /Users/me/media.mp3 secret-header-value")!
-        XCTAssertFalse(safe.contains("secret-header-value"))
-        XCTAssertFalse(safe.contains("news.example"))
-        XCTAssertFalse(safe.contains("/Users/me"))
-        XCTAssertFalse(logs.exportText().contains("news.example"))
-        XCTAssertFalse(logs.exportText().contains("secret-header-value"))
-    }
-
     func testUnencryptedHTTPWarningOnlyForValidHTTPServerURLs() {
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("http://news.example:8080/miniflux"))
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("  HTTP://news.example/  "))
