@@ -14,7 +14,21 @@ The macOS app has **not been released**. The developer has explicitly accepted l
 
 No old data, Keychain, download or account migration. The existing Developer ID/notarization script remains separate from the future Mac App Store export script. No claim of successful App Store provisioning or review is made.
 
-## Required device and signed-app acceptance (still open)
+## Decision — signed acceptance deferred (12 October 2026)
+
+The owner explicitly **deferred signed, real-device macOS Sandbox acceptance** in
+order to finish native feature parity first. PR #38 implemented the host
+Sandbox entitlements, local media storage and structural checks, but these do
+**not** prove that a provisioned/signed app can start, access Keychain and the
+App Group, sync, play, download or export/import backups. This is a scheduling
+decision, **not** a passed acceptance or a waiver.
+
+C3 functional implementation and other independent platform work may proceed.
+Before any Mac App Store production export, submission or release-readiness
+claim, complete and record the signed-app checklist below. No migration from
+the unreleased, unsandboxed macOS development app is required.
+
+## Required device and signed-app acceptance (deferred; still open)
 
 1. Sign the app with an actual development/distribution profile supporting its host+widget App Group. Inspect **signed** entitlements, not only XML sources.
 2. Start with a fresh sandbox container and fresh account credentials. Confirm that Core database and caches persist across relaunch.

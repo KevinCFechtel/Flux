@@ -10,7 +10,7 @@ This directory is intentionally small.
 - `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` — final native replacement-completion contract: retained Flutter migration/parity release gates, Settings/widget completion work, and explicit retired/replaced legacy behaviors.
 - `PHASE_E_NATIVE_ANDROID.md` — authoritative Phase-E contract for the native Android replacement, including Kotlin/Compose/UniFFI foundation, production migration, adaptive UI, background work, widgets, media, Android Auto, testing, and E1–E9 sequencing.
 - `RELEASE_DISTRIBUTION.md` — authoritative next-step plan for unified cross-platform release scripting and store-specific distribution for Android, iOS and macOS.
-- `POST_REPLACEMENT_FOLLOWUP_PLAN.md` — explicit post-E9 stabilization, Android feature-parity and store-readiness follow-up plan, including the approved macOS clean-sandbox start without migration.
+- `POST_REPLACEMENT_FOLLOWUP_PLAN.md` — post-E9 stabilization and store-readiness plan; macOS is deliberately a clean-sandbox start with no migration. Signed Sandbox acceptance is deferred, **not completed**; see `MACOS_SANDBOX_ACCEPTANCE.md`.
 - `MACOS_C3_FEATURE_PARITY_ROADMAP.md` — approved macOS feature-parity inventory and C3.0–C3.8 implementation sequence, covering bulk feed settings, scoped Mark All actions, download management, diagnostics, settings, background operation and locale acceptance.
 - `PHASE_D_D1_STATUS.md` — historical snapshot of the completed/frozen D1 foundation and early D2.1 progress; it is not a current status authority.
 
