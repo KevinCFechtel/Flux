@@ -415,7 +415,10 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(PlayerPresentation.formatDuration(65_000), "1:05")
         XCTAssertEqual(PlayerPresentation.formatDuration(3_725_000), "1:02:05")
         XCTAssertEqual(PlayerPresentation.timelineAccessibilityValue(positionMs: 90_000, durationMs: 60_000), "Playback position 1:00 of 1:00")
-        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: -30_000, durationMs: 120_000), 0)
+        XCTAssertEqual(AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds, 15)
+        XCTAssertEqual(AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds, 30)
+        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 20_000, deltaMs: -15_000, durationMs: 120_000), 5_000)
+        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: -15_000, durationMs: 120_000), 0)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 110_000, deltaMs: 30_000, durationMs: 120_000), 120_000)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: 30_000, durationMs: nil), 40_000)
     }

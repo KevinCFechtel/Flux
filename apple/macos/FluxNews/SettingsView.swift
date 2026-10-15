@@ -8,10 +8,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case navigation
     case feedSettings
     case media
+    case downloadedData
     case backgroundSync
     case systemNotifications
     case general
     case configurationBackup
+    case about
 
     var id: Self { self }
 
@@ -22,10 +24,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .navigation: "Navigation"
         case .feedSettings: "Feed Settings"
         case .media: "Media"
+        case .downloadedData: "Downloaded Data"
         case .backgroundSync: "Background Sync"
         case .systemNotifications: "System Notifications"
         case .general: "General"
         case .configurationBackup: "Configuration Backup"
+        case .about: "About"
         }
     }
 
@@ -36,10 +40,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .navigation: "sidebar.leading"
         case .feedSettings: "slider.horizontal.3"
         case .media: "headphones"
+        case .downloadedData: "internaldrive"
         case .backgroundSync: "arrow.triangle.2.circlepath"
         case .systemNotifications: "bell"
         case .general: "gearshape"
         case .configurationBackup: "externaldrive.badge.timemachine"
+        case .about: "info.circle"
         }
     }
 }
@@ -177,6 +183,8 @@ struct SettingsView: View {
             BulkFeedSettingsView(store: store)
         case .media:
             MediaSettingsView(store: store, autoDownloadListeningList: autoDownloadListeningList, deleteAfterPlayback: deleteAfterPlayback, removeCompletedListeningList: removeCompletedListeningList)
+        case .downloadedData:
+            MacOSDownloadedDataSettingsView(store: store)
         case .backgroundSync:
             MacOSBackgroundSyncSettingsView(
                 store: store,
@@ -189,6 +197,8 @@ struct SettingsView: View {
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
         case .configurationBackup:
             DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
+        case .about:
+            MacOSAboutSettingsView()
         }
     }
     private var retention: Binding<ReadArticleRetention> {
@@ -462,7 +472,17 @@ private struct AccountSettingsView: View {
               }
               .frame(maxWidth: .infinity, alignment: .leading)
 
-
+            if AccountTransportWarning.usesUnencryptedHTTP(server) {
+                Label {
+                    Text("This Miniflux server uses unencrypted HTTP. Account credentials and feed traffic are not protected by HTTPS.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isStaticText)
+            }
 
             GroupBox("Custom HTTP Headers") {
                 customHeadersEditor
@@ -710,6 +730,111 @@ private struct MacOSBackgroundSyncSettingsView: View {
     }
 }
 
+private enum MacOSDownloadRetentionChoice: String, CaseIterable, Identifiable {
+    case forever, days7, days30, days90
+    var id: Self { self }
+    var title: LocalizedStringResource {
+        switch self {
+        case .forever: "Forever"
+        case .days7: "7 days"
+        case .days30: "30 days"
+        case .days90: "90 days"
+        }
+    }
+    var coreValue: DownloadRetention {
+        switch self {
+        case .forever: .forever
+        case .days7: .days(days: 7)
+        case .days30: .days(days: 30)
+        case .days90: .days(days: 90)
+        }
+    }
+    static func from(_ value: DownloadRetention) -> Self {
+        switch value {
+        case .forever: .forever
+        case let .days(days):
+            switch days {
+            case 7: .days7
+            case 30: .days30
+            case 90: .days90
+            default: .forever
+            }
+        }
+    }
+}
+
+private struct MacOSDownloadedDataSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    @State private var summary: DownloadedMediaSummary?
+    @State private var loading = false
+    @State private var deleting = false
+    @State private var confirmationPresented = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section("Downloaded Data") {
+                if let summary {
+                    LabeledContent("Downloaded Files", value: summary.fileCount.formatted())
+                    LabeledContent("Used Storage", value: ByteCountFormatter.string(fromByteCount: Int64(clamping: summary.totalSizeBytes), countStyle: .file))
+                } else if loading {
+                    ProgressView("Loading Downloads…")
+                } else {
+                    Text("No download information available.").foregroundStyle(.secondary)
+                }
+                Button("Refresh") { load() }.disabled(loading || deleting)
+            }
+            Section {
+                Button("Delete All Downloads", role: .destructive) { confirmationPresented = true }
+                    .disabled(loading || deleting || summary?.fileCount == 0 || summary == nil)
+                if deleting { ProgressView("Requesting deletion…") }
+                Text("Only downloaded media files are removed. Listening List items and playback progress are preserved.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let errorMessage {
+                Section { Text(errorMessage).foregroundStyle(.red) }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear(perform: load)
+        .alert("Delete All Downloads?", isPresented: $confirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { deleteAll() }
+        } message: {
+            Text("All locally downloaded audio files will be removed. Listening List entries and playback progress remain intact.")
+        }
+    }
+
+    private func load() {
+        guard !loading else { return }
+        loading = true
+        errorMessage = nil
+        store.loadDownloadedMediaSummary { result in
+            loading = false
+            switch result {
+            case let .success(value): summary = value
+            case let .failure(error): errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
+    private func deleteAll() {
+        deleting = true
+        errorMessage = nil
+        store.requestAllDownloadDeletions { result in
+            deleting = false
+            switch result {
+            case .success:
+                store.showActionConfirmation(String(localized: "Download deletion requested"))
+                load()
+            case let .failure(error):
+                errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+}
+
 private struct MediaSettingsView: View {
     @ObservedObject var store: BrowserStore
     let autoDownloadListeningList: Binding<Bool>
@@ -718,6 +843,27 @@ private struct MediaSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Downloads") {
+                Picker("Download Network", selection: Binding(
+                    get: { store.coreSettings?.downloadNetworkPolicy ?? .anyNetwork },
+                    set: store.setDownloadNetworkPolicy
+                )) {
+                    Text("Any Network").tag(DownloadNetworkPolicy.anyNetwork)
+                    Text("Unmetered Networks Only").tag(DownloadNetworkPolicy.unmeteredOnly)
+                }
+                Picker("Keep Downloads", selection: Binding(
+                    get: { MacOSDownloadRetentionChoice.from(store.coreSettings?.downloadRetention ?? .forever) },
+                    set: { store.setDownloadRetention($0.coreValue) }
+                )) {
+                    ForEach(MacOSDownloadRetentionChoice.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+                Text("Automatic and manual downloads use the same network policy. Retention only removes media that is no longer protected by playback or other Core media state.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(store.coreSettings == nil)
             Section("Listening List") {
                 Toggle("Automatically download Listening List audio", isOn: autoDownloadListeningList)
                 Text("Downloads audio automatically when an item is added to Listening List.")
@@ -1105,6 +1251,49 @@ private struct SystemNotificationsSettingsView: View {
             Spacer()
         }
         .onAppear { store.reloadSystemNotificationSettings() }
+    }
+}
+
+private struct MacOSAboutSettingsView: View {
+    private let infoDictionary: [String: Any]
+
+    init(bundle: Bundle = .main) {
+        infoDictionary = bundle.infoDictionary ?? [:]
+    }
+
+    var body: some View {
+        Form {
+            Section("Flux News") {
+                LabeledContent("Version", value: MacOSAboutInformation.version(from: infoDictionary))
+                LabeledContent("Build", value: MacOSAboutInformation.build(from: infoDictionary))
+                Text("© 2023 Kevin Fechtel")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Open Source") {
+                Link(destination: MacOSAboutInformation.fluxNewsRepositoryURL) {
+                    Label("FluxNews Repository", systemImage: "chevron.left.forwardslash.chevron.right")
+                }
+                Link(destination: MacOSAboutInformation.fluxRepositoryURL) {
+                    Label("Flux Development Repository", systemImage: "shippingbox")
+                }
+                Link(destination: MacOSAboutInformation.licenseURL) {
+                    Label("BSD 3-Clause License", systemImage: "doc.text")
+                }
+                Text("Flux News is open source. The Flux repository contains the native development history and shared Rust Core.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Miniflux") {
+                Text("Flux News is a newsreader and podcast client for the Miniflux backend.")
+                Link(destination: MacOSAboutInformation.minifluxProjectURL) {
+                    Label("Miniflux Project", systemImage: "safari")
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

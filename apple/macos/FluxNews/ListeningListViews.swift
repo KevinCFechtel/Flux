@@ -7,6 +7,7 @@ struct ListeningListView: View {
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
+    let onCancel: (Int64, Int64) -> Void
     let onRemove: (Int64) -> Void
 
     var body: some View {
@@ -20,7 +21,7 @@ struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
+                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onCancel: onCancel, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -37,6 +38,7 @@ private struct ListeningListRow: View {
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
+    let onCancel: (Int64, Int64) -> Void
     let onRemove: (Int64) -> Void
     @State private var confirmingRemoval = false
     @State private var pendingDeletion: ListeningListEnclosure?
@@ -121,7 +123,7 @@ private struct ListeningListRow: View {
             }
             let count = ListeningListPresentation.downloadedCount(item)
             HStack(spacing: 4) {
-                DownloadControl(item: item, transferState: transferState, onDownload: onDownload, onDelete: { pendingDeletion = $0 })
+                DownloadControl(item: item, transferState: transferState, onDownload: onDownload, onDelete: { pendingDeletion = $0 }, onCancel: onCancel)
                 if count.total > 1 {
                     Text("\(count.downloaded)/\(count.total)")
                         .font(.caption2.monospacedDigit())
@@ -149,6 +151,7 @@ private struct DownloadControl: View {
     @ObservedObject var transferState: MediaTransferPresentationState
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (ListeningListEnclosure) -> Void
+    let onCancel: (Int64, Int64) -> Void
     @State private var hoveredDownloadedID: Int64?
 
     var body: some View {
@@ -181,16 +184,24 @@ private struct DownloadControl: View {
         let action = ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id))
         switch action {
         case .downloading:
-            ProgressView(value: transferState.runtime(for: audio.enclosure.id)?.fraction)
-                .progressViewStyle(.circular)
-                .controlSize(.small)
-                .help("Downloading")
-                .accessibilityLabel("Downloading")
-        case .pending, .pendingDeletion:
-            ProgressView()
-                .controlSize(.small)
-                .help(action == .pending ? "Download pending" : "Delete Download pending")
-                .accessibilityLabel(action == .pending ? "Download pending" : "Delete Download pending")
+            HStack(spacing: 4) {
+                ProgressView(value: transferState.runtime(for: audio.enclosure.id)?.fraction)
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                Button { onCancel(item.articleId, audio.enclosure.id) } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Cancel Download")
+                .accessibilityLabel("Cancel Download")
+            }
+        case .pending:
+            Button { onCancel(item.articleId, audio.enclosure.id) } label: {
+                Label("Cancel Download", systemImage: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+        case .pendingDeletion:
+            ProgressView().controlSize(.small).help("Delete Download pending")
         default:
             Button { activate(audio) } label: {
                 Image(systemName: symbol(for: audio))
@@ -207,12 +218,15 @@ private struct DownloadControl: View {
     }
 
     private func activate(_ audio: ListeningListEnclosure) {
+        let action = ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id))
+        if action == .downloading || action == .pending { onCancel(item.articleId, audio.enclosure.id); return }
         if ArticleAudioActions.canDeleteDownload(audio.download) { onDelete(audio) }
         else if ArticleAudioActions.canRequestDownload(audio.download) { onDownload(item.articleId, audio.enclosure.id) }
     }
 
     private func isActionable(_ audio: ListeningListEnclosure) -> Bool {
-        ArticleAudioActions.canRequestDownload(audio.download) || ArticleAudioActions.canDeleteDownload(audio.download)
+        let action = ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id))
+        return action == .downloading || action == .pending || ArticleAudioActions.canRequestDownload(audio.download) || ArticleAudioActions.canDeleteDownload(audio.download)
     }
 
     private func symbol(for audio: ListeningListEnclosure) -> String {
@@ -220,6 +234,7 @@ private struct DownloadControl: View {
         if action == .delete && hoveredDownloadedID == audio.enclosure.id { return "trash" }
         switch action {
         case .delete: return "checkmark.circle.fill"
+        case .downloading, .pending: return "xmark.circle"
         case .retry: return "arrow.clockwise.circle"
         default: return "arrow.down.circle"
         }
@@ -229,8 +244,8 @@ private struct DownloadControl: View {
         let label = ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)
         switch ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id)) {
         case .delete: return String(localized: "Delete Download: \(label)")
-        case .pending: return String(localized: "Download pending: \(label)")
-        case .downloading: return String(localized: "Downloading: \(label)")
+        case .pending: return String(localized: "Cancel Download: \(label)")
+        case .downloading: return String(localized: "Cancel Download: \(label)")
         case .pendingDeletion: return String(localized: "Delete Download pending: \(label)")
         case .retry: return String(localized: "Retry Download: \(label)")
         case .download: return String(localized: "Download: \(label)")

@@ -1,5 +1,36 @@
 import Foundation
 
+enum AccountTransportWarning {
+    static func usesUnencryptedHTTP(_ server: String) -> Bool {
+        let input = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URLComponents(string: input),
+              url.scheme?.lowercased() == "http",
+              let host = url.host, !host.isEmpty else { return false }
+        return true
+    }
+}
+
+enum MacOSAboutInformation {
+    static let fluxNewsRepositoryURL = URL(string: "https://github.com/KevinCFechtel/FluxNews")!
+    static let fluxRepositoryURL = URL(string: "https://github.com/KevinCFechtel/Flux")!
+    static let licenseURL = URL(string: "https://github.com/KevinCFechtel/Flux/blob/main/LICENSE")!
+    static let minifluxProjectURL = URL(string: "https://miniflux.app")!
+
+    static func version(from infoDictionary: [String: Any]) -> String {
+        nonEmptyString(infoDictionary["CFBundleShortVersionString"]) ?? String(localized: "Unknown")
+    }
+
+    static func build(from infoDictionary: [String: Any]) -> String {
+        nonEmptyString(infoDictionary["CFBundleVersion"]) ?? String(localized: "Unknown")
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 enum AccountValidationFailure {
     case invalidURL
     case network
