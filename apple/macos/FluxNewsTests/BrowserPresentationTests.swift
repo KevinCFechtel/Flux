@@ -245,12 +245,12 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertFalse(ScopeReadActionPolicy.supportsMarkAll(.search))
         XCTAssertFalse(ScopeReadActionPolicy.supportsMarkAll(.listeningList))
 
-        let feeds: [NavigationPresentationFeed] = [
+        let feeds: [FluxNews.NavigationPresentationFeed] = [
             .init(id: 1, categoryID: 10), .init(id: 2, categoryID: 10),
             .init(id: 3, categoryID: 20)
         ]
         let counts: [Int64: UInt64] = [1: 1, 2: 0, 3: 2]
-        func next(_ scope: BrowserScope, hidden: Bool = true) -> BrowserScope? {
+        func next(_ scope: FluxNews.BrowserScope, hidden: Bool = true) -> FluxNews.BrowserScope? {
             ScopeReadActionPolicy.nextVisibleScope(
                 after: scope, categoryIDs: [10, 20], feeds: feeds,
                 hidingEmpty: hidden, counts: counts
