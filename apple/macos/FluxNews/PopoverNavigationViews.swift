@@ -156,6 +156,10 @@ struct MoreMenu: View {
     let listeningListSort: ListeningListSort
     let listeningListFeedID: Int64?
     let listeningListFeeds: [ListeningListFeed]
+    let canMarkAllRead: Bool
+    let canMarkAllReadAndNext: Bool
+    let markAllRead: () -> Void
+    let markAllReadAndNext: () -> Void
     let setUnreadOnly: (Bool) -> Void
     let setNewestFirst: (Bool) -> Void
     let setListeningListSort: (ListeningListSort) -> Void
@@ -179,6 +183,13 @@ struct MoreMenu: View {
                     Button { setNewestFirst(true) } label: { Label("Newest First", systemImage: newestFirst ? "checkmark" : "arrow.down") }
                     Button { setNewestFirst(false) } label: { Label("Oldest First", systemImage: newestFirst ? "arrow.up" : "checkmark") }
                 } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
+            }
+            if !isListeningList {
+                Divider()
+                Button(action: markAllRead) { Label("Mark All as Read", systemImage: "checkmark.circle") }
+                    .disabled(!canMarkAllRead)
+                Button(action: markAllReadAndNext) { Label("Mark All as Read & Next", systemImage: "arrow.right.circle") }
+                    .disabled(!canMarkAllReadAndNext)
             }
             Divider()
             Button { showSettings() } label: { Label("Settings...", systemImage: "gearshape") }

@@ -53,6 +53,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var articleThumbnails: [String: NSImage] = [:]
     @Published private(set) var unavailableArticleThumbnails = Set<String>()
     @Published var isLoading = false
+    @Published private(set) var isMarkingScopeRead = false
     @Published var errorMessage: String?
     @Published var actionConfirmation: String?
     @Published var scope: BrowserScope = .all
@@ -103,6 +104,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var articleAudioActionState: ArticleAudioActionState?
     @Published private(set) var articleAudioActionStates: [Int64: ArticleAudioActionState] = [:]
 
+    private var scopeReadActionGeneration: UInt64 = 0
     private var core: Flux?
     private let coreSessionExecutionCoordinator = AppleCoreSessionExecutionCoordinator()
     private var eventSubscription: EventSubscription?
@@ -422,13 +424,70 @@ final class BrowserStore: ObservableObject {
         }
         return ArticleQuery(
             scope: coreScope,
-            readFilter: requestedScope == .starred ? .all : (unreadOnly ? .unread : .all),
+            readFilter: unreadOnly ? .unread : .all,
             starredFilter: requestedScope == .starred ? .starred : .all,
             sort: newestFirst ? .newestFirst : .oldestFirst,
             limit: 0,
             cursor: nil
         )
     }
+    var canMarkCurrentScopeRead: Bool {
+        core != nil && !isMarkingScopeRead && ScopeReadActionPolicy.supportsMarkAll(scope)
+    }
+
+    var nextScopeAfterMarkRead: BrowserScope? {
+        ScopeReadActionPolicy.nextVisibleScope(
+            after: scope,
+            categoryIDs: catalog.categories.map(\.id),
+            feeds: catalog.feeds.map { NavigationPresentationFeed(id: $0.id, categoryID: $0.categoryId) },
+            hidingEmpty: hideEmptyNavigationEntries,
+            counts: feedSidebarCounts
+        )
+    }
+
+    func markCurrentScopeRead(andNavigateNext: Bool = false) {
+        guard canMarkCurrentScopeRead, let core, let currentQuery = query() else { return }
+        let originalScope = scope
+        let nextScope = andNavigateNext ? nextScopeAfterMarkRead : nil
+        if andNavigateNext && nextScope == nil { return }
+        let unreadQuery = ScopeReadActionPolicy.unreadQuery(from: currentQuery)
+        scopeReadActionGeneration &+= 1
+        let generation = scopeReadActionGeneration
+        isMarkingScopeRead = true
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(for: core, {
+                let ids = try core.queryArticles(query: unreadQuery).map(\.id)
+                if !ids.isEmpty {
+                    _ = try core.setReadStateBulk(articleIds: ids, read: true)
+                }
+                return ids.count
+            }) else {
+                if let self, self.core === core, self.scopeReadActionGeneration == generation {
+                    self.isMarkingScopeRead = false
+                }
+                return
+            }
+            guard let self, self.core === core, self.scopeReadActionGeneration == generation else { return }
+            self.isMarkingScopeRead = false
+            switch result {
+            case let .success(count):
+                self.showActionConfirmation(String(localized: "Marked \(count) articles as read"))
+                self.reloadCounts()
+                if self.scope == originalScope {
+                    if let nextScope {
+                        self.select(nextScope)
+                    } else {
+                        self.reloadVisibleArticles()
+                    }
+                }
+                self.refreshWidgetSnapshot()
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     func reloadVisibleArticles(resetPosition: Bool = false, acknowledgingPendingNewData: Bool = false) {
         guard !isListeningList, scope != .search, let core, let articleQuery = query() else { return }
         let coordinator = coreSessionExecutionCoordinator
@@ -1590,6 +1649,8 @@ final class BrowserStore: ObservableObject {
     }
 
     private func invalidateLocalPresentation() {
+        scopeReadActionGeneration &+= 1
+        isMarkingScopeRead = false
         articles = []
         catalog = NavigationCatalog(categories: [], feeds: [])
         unreadTotal = 0
