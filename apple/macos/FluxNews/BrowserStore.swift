@@ -136,6 +136,7 @@ final class BrowserStore: ObservableObject {
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
     private var articleAudioRequestGeneration: UInt64 = 0
     var onMediaTransferRequested: (() -> Void)?
+    var onCancelMediaTransferRequested: ((Int64) -> Void)?
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -867,6 +868,16 @@ final class BrowserStore: ObservableObject {
         syncIfStale(reason: .resume)
     }
     private func runPeriodicSync() { sync(reason: .periodic) }
+    func setDownloadNetworkPolicy(_ policy: DownloadNetworkPolicy) {
+        updateCoreSettings({ try $0.setDownloadNetworkPolicy(policy: policy) }, afterSuccess: { [weak self] in
+            self?.requestMediaTransferReconciliation()
+        })
+    }
+    func setDownloadRetention(_ retention: DownloadRetention) {
+        updateCoreSettings({ try $0.setDownloadRetention(retention: retention) }, afterSuccess: { [weak self] in
+            self?.requestMediaTransferReconciliation()
+        })
+    }
     func setRetention(_ retention: ReadArticleRetention) { updateCoreSettings { try $0.setRetention(retention: retention) } }
     func setDeliveryMode(_ mode: DeliveryMode) { updateCoreSettings { try $0.setDeliveryMode(mode: mode) } }
     func setBackgroundSyncEnabled(_ enabled: Bool) {
@@ -1205,6 +1216,58 @@ final class BrowserStore: ObservableObject {
                 self.refreshListeningListIfVisible()
                 guard self.articleAudioRequestGeneration == generation else { return }
                 self.loadArticleAudioActions(for: articleID)
+            }
+        )
+    }
+
+    func loadDownloadedMediaSummary(completion: @escaping (Result<DownloadedMediaSummary, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.downloadedMediaSummary() }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            completion(result)
+        }
+    }
+
+    func requestAllDownloadDeletions(completion: @escaping (Result<UInt64, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.requestAllDownloadDeletions() }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            if case .success = result {
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                self.refreshArticleAudioActions()
+            }
+            completion(result)
+        }
+    }
+
+    func cancelDownload(articleID: Int64, enclosureID: Int64) {
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
+        runResponsiveMutation(
+            { try $0.cancelDownload(enclosureId: enclosureID) },
+            onSuccess: { [weak self] in
+                guard let self else { return }
+                self.onCancelMediaTransferRequested?(enclosureID)
+                self.onMediaTransferRequested?()
+                self.refreshListeningListIfVisible()
+                if refreshArticleActions { self.refreshArticleAudioActions() }
+                self.showActionConfirmation(String(localized: "Download cancelled"))
             }
         )
     }

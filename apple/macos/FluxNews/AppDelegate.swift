@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             transferCoordinator?.shutdown()
             transferCoordinator?.onWorkChanged = nil
             store.onMediaTransferRequested = { [weak self] in self?.transferCoordinator?.reconcile() }
+            store.onCancelMediaTransferRequested = { [weak self] id in self?.transferCoordinator?.cancel(enclosureID: id) }
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
             }, presentationState: self.transferPresentationState)
