@@ -98,7 +98,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
                     self.onLoadingChanged?(false)
                     let error = item.error
                     let url = (item.asset as? AVURLAsset)?.url.absoluteString ?? "unknown"
-                    Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("AVPlayerItem failed url=\(url, privacy: .public) error=\(String(describing: error), privacy: .public) underlying=\(String(describing: error as NSError?), privacy: .public)")
+                    Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("AVPlayerItem failed; media URL and errors are not logged publicly")
                     self.onError?(error?.localizedDescription ?? "Media playback failed.")
                 }
             }

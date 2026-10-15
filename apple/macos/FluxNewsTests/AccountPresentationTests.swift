@@ -23,6 +23,15 @@ final class AccountPresentationTests: XCTestCase {
         )
     }
 
+    func testSupportRedactionRemovesSensitiveFieldsAndPaths() {
+        let input = "Authorization: Bearer abc123 https://server.test/path?token=123 /Users/me/Media/file.mp3 secret-value"
+        let safe = SupportLogRedaction.sanitize(input, secrets: ["secret-value"])
+        for value in ["abc123", "server.test", "/Users/me", "secret-value"] {
+            XCTAssertFalse(safe.contains(value))
+        }
+        XCTAssertEqual(SupportLogRedaction.sanitize("sync completed items=3"), "sync completed items=3")
+    }
+
     func testUnencryptedHTTPWarningOnlyForValidHTTPServerURLs() {
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("http://news.example:8080/miniflux"))
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("  HTTP://news.example/  "))

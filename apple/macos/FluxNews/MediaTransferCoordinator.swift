@@ -254,7 +254,7 @@ final class MediaTransferCoordinator {
                 finish(enclosureID: work.enclosureId, token: token)
                 presentationState.remove(enclosureID: work.enclosureId)
                 try core.downloadFinished(enclosureId: work.enclosureId, localFile: reference, fileSizeBytes: size)
-                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public) reference=\(reference, privacy: .public) path=\(destination.path, privacy: .public) readable=\(FileManager.default.isReadableFile(atPath: destination.path), privacy: .public)")
+                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public) reference=<private> path=<private> readable=\(FileManager.default.isReadableFile(atPath: destination.path), privacy: .public)")
                 onWorkChanged?()
             } catch {
                 // Core owns stale-callback handling; a callback rejection is not a transfer failure.

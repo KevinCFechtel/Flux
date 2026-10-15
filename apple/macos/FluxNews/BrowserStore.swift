@@ -193,6 +193,7 @@ final class BrowserStore: ObservableObject {
             await coreSessionExecutionCoordinator.quiesce()
         }
 
+        MacSupportDiagnostics.shared.registerSecrets([server, apiKey] + customHeaders.flatMap { [$0.name, $0.value] })
         let headers = customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
         let creation = await AppleCoreExecution.shared.responsiveResult {
             try Flux.initializeWithDiagnostics(
@@ -246,6 +247,7 @@ final class BrowserStore: ObservableObject {
             coreSettings = settings
             eventSubscription = subscription
             NativeLog.app.notice("core configured")
+            NativeLog.support("app", "core configured")
             if previousCore != nil {
                 invalidateLocalPresentation()
             } else {
@@ -836,6 +838,7 @@ final class BrowserStore: ObservableObject {
                 switch outcome {
                 case let .completed(metadata):
                     NativeLog.sync.debug("sync completed; reconciling native media work")
+            NativeLog.support("sync", "sync completed", level: .debug)
                     self.requestMediaTransferReconciliation()
                     await SystemNotificationManager.shared.deliver(metadata.systemNotificationCandidates, core: core, coordinator: coordinator)
                 case .cancelled:
