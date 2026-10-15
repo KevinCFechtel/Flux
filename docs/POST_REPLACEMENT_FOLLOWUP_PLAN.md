@@ -1,6 +1,6 @@
 # Post-Replacement Stabilization and Store-Readiness Plan
 
-> **Status: PLANNED / NOT YET IMPLEMENTED**
+> **Status: IN PROGRESS — latest macOS B1/C3 decisions updated 15 October 2026**
 >
 > **Baseline:** `main` at `9bd6ea9b6b72ea435555e0df74e812d7755c4042` (11 October 2026).
 > This is an implementation plan, not a claim that the defects have been reproduced,
@@ -172,10 +172,21 @@ independently of UniFFI compilation, while native tests remain intact.
 
 ### B1 — Enable the macOS App Sandbox before App Store export
 
-**Evidence:** `apple/macos/FluxNews/FluxNews.entitlements` contains the App
-Group entitlement, but not `com.apple.security.app-sandbox`. The existing
-`apple/macos/Build/release.sh` signs/notarizes via Developer ID. The widget
-already uses its own sandbox entitlement.
+**Code implemented; signed acceptance deferred:** PR #38 added the host
+Sandbox entitlements and sandbox-local media paths. The owner explicitly
+postponed signed/device acceptance on 12 October 2026 while native C3 work
+continues. This does **not** satisfy B1 or authorize Mac App Store release.
+The remaining signed-device acceptance checklist is authoritative in
+[MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md). Feature-level
+work (including C3) is independent of this signing gate.
+
+The implementation-oriented steps below are historical requirements; only
+items not yet proven by the signed-app checklist remain release-open.
+
+**Current source baseline:** `apple/macos/FluxNews/FluxNews.entitlements`
+contains the host App Sandbox, outbound network and App Group capabilities.
+The existing `apple/macos/Build/release.sh` Developer ID path is separate
+from future Mac App Store signing and does not verify store eligibility.
 
 **Implementation:**
 

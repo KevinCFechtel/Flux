@@ -226,9 +226,16 @@ replace a reliable Transporter-based release process.
 
 ## 7. macOS — App Store Connect / Transporter
 
+**Implementation/acceptance distinction (15 October 2026):** PR #38
+implemented the host Sandbox entitlements and sandbox-local media storage,
+but the owner deferred signed-app/device acceptance to finish C3 native
+feature parity. This does not waive the B1 release gate: before a Mac App
+Store production export or submission, follow
+[MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md).
+
 The primary macOS distribution should likewise be the Mac App Store.
 
-**Mac release prerequisite and approved decision:** The macOS app has **never been released**. Its host app currently lacks the App Sandbox entitlement; the existing Developer ID/notarization path is not a Mac App Store export. Enable and validate the host sandbox, outbound network access, actual file-dialog capabilities and App Group provisioning **before** Mac App Store archive/export scripting. The developer explicitly accepts losing all existing unsandboxed local development data on their machine. Initialize a fresh sandbox storage/credential environment: **no database/download/Keychain migration, `container-migration.plist`, legacy-location fallback or compatibility layer is required**. See B1 in [POST_REPLACEMENT_FOLLOWUP_PLAN.md](POST_REPLACEMENT_FOLLOWUP_PLAN.md).
+**Mac release prerequisite and approved decision:** The macOS app has **never been released**. Its host App Sandbox entitlement has been implemented but signed-app acceptance is still outstanding. The existing Developer ID/notarization path is not a Mac App Store export. Validate host Sandbox, outbound network access, actual file-dialog capabilities and App Group provisioning **before** Mac App Store archive/export scripting. The developer explicitly accepts losing all existing unsandboxed local development data on their machine. Initialize a fresh sandbox storage/credential environment: **no database/download/Keychain migration, `container-migration.plist`, legacy-location fallback or compatibility layer is required**. See B1 in [POST_REPLACEMENT_FOLLOWUP_PLAN.md](POST_REPLACEMENT_FOLLOWUP_PLAN.md).
 
 The existing `apple/macos/Build/build-app.sh` is currently a build/validation
 script, not a complete App Store distribution path.
