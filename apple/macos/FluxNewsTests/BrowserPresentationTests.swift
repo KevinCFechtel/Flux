@@ -221,6 +221,88 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ListeningListPresentation.downloadedCount(listeningItem(enclosures: [downloaded], activeID: 1)).downloaded, 1)
     }
 
+
+    func testC31UnreadScopeQueryPreservesStarredFilter() {
+        let store = BrowserStore()
+        store.scope = .starred
+        store.unreadOnly = true
+        let unread = store.query()
+        XCTAssertEqual(unread?.readFilter, .unread)
+        XCTAssertEqual(unread?.starredFilter, .starred)
+
+        store.unreadOnly = false
+        let all = store.query()
+        XCTAssertEqual(all?.readFilter, .all)
+        XCTAssertEqual(all?.starredFilter, .starred)
+        XCTAssertEqual(ScopeReadActionPolicy.unreadQuery(from: try! XCTUnwrap(all)).readFilter, .unread)
+    }
+
+    func testC31MarkAllAndNextVisibilityAndLastSibling() {
+        XCTAssertTrue(ScopeReadActionPolicy.supportsMarkAll(.all))
+        XCTAssertTrue(ScopeReadActionPolicy.supportsMarkAll(.starred))
+        XCTAssertTrue(ScopeReadActionPolicy.supportsMarkAll(.feed(1)))
+        XCTAssertTrue(ScopeReadActionPolicy.supportsMarkAll(.category(10)))
+        XCTAssertFalse(ScopeReadActionPolicy.supportsMarkAll(.search))
+        XCTAssertFalse(ScopeReadActionPolicy.supportsMarkAll(.listeningList))
+
+        let feeds: [FluxNews.NavigationPresentationFeed] = [
+            .init(id: 1, categoryID: 10), .init(id: 2, categoryID: 10),
+            .init(id: 3, categoryID: 20)
+        ]
+        let counts: [Int64: UInt64] = [1: 1, 2: 0, 3: 2]
+        func next(_ scope: FluxNews.BrowserScope, hidden: Bool = true) -> FluxNews.BrowserScope? {
+            ScopeReadActionPolicy.nextVisibleScope(
+                after: scope, categoryIDs: [10, 20], feeds: feeds,
+                hidingEmpty: hidden, counts: counts
+            )
+        }
+        XCTAssertEqual(next(.feed(1)), .feed(3))
+        XCTAssertEqual(next(.feed(1), hidden: false), .feed(2))
+        XCTAssertNil(next(.feed(3)))
+        XCTAssertNil(next(.feed(2)))
+        XCTAssertEqual(next(.category(10)), .category(20))
+        XCTAssertNil(next(.category(20)))
+        XCTAssertNil(next(.starred))
+        XCTAssertNil(next(.all))
+        XCTAssertNil(next(.search))
+        XCTAssertNil(next(.listeningList))
+    }
+
+
+    func testC32BulkFeedSelectionPreservesHiddenFeedsAndRemovesDeletedFeeds() {
+        let selected = BulkFeedSettingsPolicy.selectVisible([2, 3], retaining: Set<Int64>([1]))
+        XCTAssertEqual(selected, Set<Int64>([1, 2, 3]))
+        XCTAssertEqual(
+            BulkFeedSettingsPolicy.reconcile(selected, availableIDs: [1, 3, 4]),
+            Set<Int64>([1, 3])
+        )
+        XCTAssertTrue(BulkFeedSettingsPolicy.reconcile([1, 2], availableIDs: []).isEmpty)
+    }
+
+    func testC32MixedValuesNeverBecomeAnImplicitPreferencePatch() {
+        XCTAssertNil(BulkFeedSettingsPolicy.commonValue([true, false]))
+        XCTAssertNil(BulkFeedSettingsPolicy.commonValue([DetailRenderingMode.rendered, .textOnly]))
+        XCTAssertNil(BulkFeedSettingsPolicy.commonValue([Bool]()))
+        XCTAssertEqual(BulkFeedSettingsPolicy.commonValue([true, true, true]), true)
+        XCTAssertEqual(
+            BulkFeedSettingsPolicy.commonValue([DetailRenderingMode.textOnly, .textOnly]),
+            .textOnly
+        )
+
+        let patch = FeedPreferencesPatch(
+            systemNotificationsEnabled: nil,
+            detailRendering: nil,
+            truncateDetail: true,
+            openInMiniflux: nil,
+            autoDownloadAudio: nil
+        )
+        XCTAssertEqual(patch.truncateDetail, true)
+        XCTAssertNil(patch.detailRendering)
+        XCTAssertNil(patch.systemNotificationsEnabled)
+        XCTAssertNil(patch.openInMiniflux)
+        XCTAssertNil(patch.autoDownloadAudio)
+    }
+
     private func listeningItem(enclosures: [ListeningListEnclosure], activeID: Int64?) -> ListeningListItem {
         ListeningListItem(articleId: 7, feedId: 11, title: "Episode", feedTitle: "Feed", publishedAt: "2026-01-01T00:00:00Z", addedAt: "2026-01-02T00:00:00Z", remotePresent: true, audioEnclosures: enclosures, activeEnclosureId: activeID)
     }

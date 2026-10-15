@@ -6,6 +6,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case account
     case articles
     case navigation
+    case feedSettings
     case media
     case backgroundSync
     case systemNotifications
@@ -19,6 +20,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .account: "Account"
         case .articles: "Articles"
         case .navigation: "Navigation"
+        case .feedSettings: "Feed Settings"
         case .media: "Media"
         case .backgroundSync: "Background Sync"
         case .systemNotifications: "System Notifications"
@@ -32,6 +34,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .account: "person.crop.circle"
         case .articles: "doc.text"
         case .navigation: "sidebar.leading"
+        case .feedSettings: "slider.horizontal.3"
         case .media: "headphones"
         case .backgroundSync: "arrow.triangle.2.circlepath"
         case .systemNotifications: "bell"
@@ -170,6 +173,8 @@ struct SettingsView: View {
             )
         case .navigation:
             MacOSNavigationSettingsView(store: store)
+        case .feedSettings:
+            BulkFeedSettingsView(store: store)
         case .media:
             MediaSettingsView(store: store, autoDownloadListeningList: autoDownloadListeningList, deleteAfterPlayback: deleteAfterPlayback, removeCompletedListeningList: removeCompletedListeningList)
         case .backgroundSync:
@@ -849,6 +854,224 @@ struct FeedSettingsView: View {
     private func updateAutoDownloadAudio(_ enabled: Bool) {
         applyPreferenceUpdate { completion in
             store.setFeedAutoDownloadAudio(feedID: target.id, enabled: enabled, completion: completion)
+        }
+    }
+}
+
+
+private struct BulkFeedSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    @State private var searchText = ""
+    @State private var selectedIDs = Set<Int64>()
+    @State private var preferences: [Int64: FeedPreferences] = [:]
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var error: String?
+    @State private var loadGeneration = 0
+
+    private var visibleFeeds: [Feed] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return store.catalog.feeds }
+        return store.catalog.feeds.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var selectedPreferences: [FeedPreferences]? {
+        guard !selectedIDs.isEmpty else { return nil }
+        let values = selectedIDs.sorted().compactMap { preferences[$0] }
+        return values.count == selectedIDs.count ? values : nil
+    }
+
+    private func shared<Value: Equatable>(_ keyPath: KeyPath<FeedPreferences, Value>) -> Value? {
+        guard let selectedPreferences else { return nil }
+        return BulkFeedSettingsPolicy.commonValue(selectedPreferences.map { $0[keyPath: keyPath] })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Feed Settings").font(.title2.bold())
+            Text("Select several feeds to change their shared settings. Mixed means the selected feeds have different values; only the property you change is updated.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+
+            TextField("Search feeds", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search feeds")
+
+            HStack {
+                Text("\(selectedIDs.count) feeds selected")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(searchText.isEmpty ? "Select All" : "Select Visible") {
+                    selectedIDs = BulkFeedSettingsPolicy.selectVisible(
+                        visibleFeeds.map(\.id), retaining: selectedIDs
+                    )
+                }
+                .disabled(visibleFeeds.isEmpty || isSaving || isLoading)
+                Button("Clear Selection") { selectedIDs.removeAll() }
+                    .disabled(selectedIDs.isEmpty || isSaving || isLoading)
+                Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(isSaving || isLoading)
+                    .help("Reload Feed Settings")
+            }
+            .buttonStyle(.borderless)
+
+            GroupBox {
+                if isLoading && preferences.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 100)
+                } else if store.catalog.feeds.isEmpty {
+                    ContentUnavailableView(
+                        "No feeds available",
+                        systemImage: "tray",
+                        description: Text("Sync your Miniflux account to load feeds.")
+                    )
+                } else if visibleFeeds.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 7) {
+                            ForEach(visibleFeeds, id: \.id) { feed in
+                                Toggle(isOn: Binding(
+                                    get: { selectedIDs.contains(feed.id) },
+                                    set: { enabled in
+                                        if enabled { selectedIDs.insert(feed.id) }
+                                        else { selectedIDs.remove(feed.id) }
+                                    }
+                                )) {
+                                    Text(feed.title).lineLimit(2)
+                                }
+                                .disabled(isLoading || isSaving)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .frame(height: 215)
+                }
+            }
+
+            Divider()
+
+            if let selectedPreferences, !selectedPreferences.isEmpty {
+                Text("Settings for \(selectedIDs.count) selected feeds")
+                    .font(.headline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Detail Rendering", selection: Binding<DetailRenderingMode?>(
+                        get: { shared(\.detailRendering) },
+                        set: { if let value = $0 { apply(FeedPreferencesPatch(
+                            systemNotificationsEnabled: nil, detailRendering: value,
+                            truncateDetail: nil, openInMiniflux: nil, autoDownloadAudio: nil
+                        )) } }
+                    )) {
+                        Text("Mixed / Unchanged").tag(nil as DetailRenderingMode?)
+                        Text("Rendered").tag(Optional(DetailRenderingMode.rendered))
+                        Text("Text Only").tag(Optional(DetailRenderingMode.textOnly))
+                    }
+
+                    booleanPicker("Truncate Detail", keyPath: \.truncateDetail) { value in
+                        FeedPreferencesPatch(
+                            systemNotificationsEnabled: nil, detailRendering: nil,
+                            truncateDetail: value, openInMiniflux: nil, autoDownloadAudio: nil
+                        )
+                    }
+                    booleanPicker("System Notifications", keyPath: \.systemNotificationsEnabled) { value in
+                        FeedPreferencesPatch(
+                            systemNotificationsEnabled: value, detailRendering: nil,
+                            truncateDetail: nil, openInMiniflux: nil, autoDownloadAudio: nil
+                        )
+                    }
+                    booleanPicker("Open in Miniflux", keyPath: \.openInMiniflux) { value in
+                        FeedPreferencesPatch(
+                            systemNotificationsEnabled: nil, detailRendering: nil,
+                            truncateDetail: nil, openInMiniflux: value, autoDownloadAudio: nil
+                        )
+                    }
+                    booleanPicker("Automatically download audio from this feed", keyPath: \.autoDownloadAudio) { value in
+                        FeedPreferencesPatch(
+                            systemNotificationsEnabled: nil, detailRendering: nil,
+                            truncateDetail: nil, openInMiniflux: nil, autoDownloadAudio: value
+                        )
+                    }
+                }
+                .disabled(isLoading || isSaving)
+                .formStyle(.grouped)
+            } else {
+                Text("Select feeds above to edit their shared settings.")
+                    .foregroundStyle(.secondary)
+            }
+
+            if isSaving { ProgressView("Saving feed settings…") }
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+            }
+        }
+        .onAppear(perform: reload)
+        .onChange(of: store.catalog.feeds.map(\.id)) { _, ids in
+            selectedIDs = BulkFeedSettingsPolicy.reconcile(selectedIDs, availableIDs: ids)
+            reload()
+        }
+        .onChange(of: store.configuredServer) { _, _ in
+            preferences = [:]
+            selectedIDs = []
+            isSaving = false
+            reload()
+        }
+    }
+
+    private func booleanPicker(
+        _ title: LocalizedStringKey,
+        keyPath: KeyPath<FeedPreferences, Bool>,
+        makePatch: @escaping (Bool) -> FeedPreferencesPatch
+    ) -> some View {
+        Picker(title, selection: Binding<Bool?>(
+            get: { shared(keyPath) },
+            set: { if let value = $0 { apply(makePatch(value)) } }
+        )) {
+            Text("Mixed / Unchanged").tag(nil as Bool?)
+            Text("On").tag(Optional(true))
+            Text("Off").tag(Optional(false))
+        }
+    }
+
+    private func reload() {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let ids = store.catalog.feeds.map(\.id)
+        isLoading = true
+        error = nil
+        store.loadBulkFeedPreferences(feedIDs: ids) { result in
+            guard generation == loadGeneration else { return }
+            isLoading = false
+            switch result {
+            case let .success(values):
+                preferences = Dictionary(uniqueKeysWithValues: values.map { ($0.feedId, $0) })
+                selectedIDs = BulkFeedSettingsPolicy.reconcile(selectedIDs, availableIDs: ids)
+            case let .failure(failure):
+                error = NativeErrorPresentation.message(for: failure)
+            }
+        }
+    }
+
+    private func apply(_ patch: FeedPreferencesPatch) {
+        guard !isLoading, !isSaving, selectedPreferences != nil else { return }
+        let validIDs = Set(store.catalog.feeds.map(\.id))
+        guard selectedIDs.isSubset(of: validIDs) else {
+            error = String(localized: "The selected feeds have changed. Refresh and try again.")
+            return
+        }
+        let ids = selectedIDs.sorted()
+        isSaving = true
+        error = nil
+        store.patchBulkFeedPreferences(feedIDs: ids, patch: patch) { result in
+            isSaving = false
+            switch result {
+            case let .success(values):
+                for value in values { preferences[value.feedId] = value }
+                store.showActionConfirmation(String(localized: "Feed settings updated"))
+            case let .failure(failure):
+                error = NativeErrorPresentation.message(for: failure)
+            }
         }
     }
 }

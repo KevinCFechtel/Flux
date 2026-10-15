@@ -200,3 +200,64 @@ enum AddFeedDiscoveryOutcome: Equatable {
         }
     }
 }
+
+enum ScopeReadActionPolicy {
+    static func supportsMarkAll(_ scope: BrowserScope) -> Bool {
+        switch scope {
+        case .all, .starred, .category, .feed: true
+        case .search, .listeningList: false
+        }
+    }
+
+    static func unreadQuery(from query: ArticleQuery) -> ArticleQuery {
+        ArticleQuery(
+            scope: query.scope,
+            readFilter: .unread,
+            starredFilter: query.starredFilter,
+            sort: query.sort,
+            limit: 0,
+            cursor: nil
+        )
+    }
+
+    static func nextVisibleScope(
+        after scope: BrowserScope,
+        categoryIDs: [Int64],
+        feeds: [NavigationPresentationFeed],
+        hidingEmpty: Bool,
+        counts: [Int64: UInt64]
+    ) -> BrowserScope? {
+        let visibleFeeds = NavigationVisibility.visibleFeeds(feeds, hidingEmpty: hidingEmpty, counts: counts)
+        switch scope {
+        case let .feed(id):
+            guard let index = visibleFeeds.firstIndex(where: { $0.id == id }),
+                  index + 1 < visibleFeeds.count else { return nil }
+            return .feed(visibleFeeds[index + 1].id)
+        case let .category(id):
+            let visibleCategoryIDs = hidingEmpty
+                ? NavigationVisibility.visibleCategoryIDs(categoryIDs, feeds: visibleFeeds)
+                : categoryIDs
+            guard let index = visibleCategoryIDs.firstIndex(of: id),
+                  index + 1 < visibleCategoryIDs.count else { return nil }
+            return .category(visibleCategoryIDs[index + 1])
+        case .all, .starred, .search, .listeningList:
+            return nil
+        }
+    }
+}
+
+enum BulkFeedSettingsPolicy {
+    static func commonValue<Value: Equatable>(_ values: [Value]) -> Value? {
+        guard let first = values.first,
+              values.dropFirst().allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+
+    static func selectVisible(_ visibleIDs: [Int64], retaining selectedIDs: Set<Int64>) -> Set<Int64> {
+        selectedIDs.union(visibleIDs)
+    }
+
+    static func reconcile(_ selectedIDs: Set<Int64>, availableIDs: [Int64]) -> Set<Int64> {
+        selectedIDs.intersection(availableIDs)
+    }
+}
