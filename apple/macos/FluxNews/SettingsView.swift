@@ -1254,27 +1254,6 @@ private struct SystemNotificationsSettingsView: View {
     }
 }
 
-enum MacOSAboutInformation {
-    static let fluxNewsRepositoryURL = URL(string: "https://github.com/KevinCFechtel/FluxNews")!
-    static let fluxRepositoryURL = URL(string: "https://github.com/KevinCFechtel/Flux")!
-    static let licenseURL = URL(string: "https://github.com/KevinCFechtel/Flux/blob/main/LICENSE")!
-    static let minifluxProjectURL = URL(string: "https://miniflux.app")!
-
-    static func version(from infoDictionary: [String: Any]) -> String {
-        nonEmptyString(infoDictionary["CFBundleShortVersionString"]) ?? String(localized: "Unknown")
-    }
-
-    static func build(from infoDictionary: [String: Any]) -> String {
-        nonEmptyString(infoDictionary["CFBundleVersion"]) ?? String(localized: "Unknown")
-    }
-
-    private static func nonEmptyString(_ value: Any?) -> String? {
-        guard let value = value as? String else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
 private struct MacOSAboutSettingsView: View {
     private let infoDictionary: [String: Any]
 
