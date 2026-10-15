@@ -5,6 +5,9 @@
 > **Baseline:** `main` at `9bd6ea9b6b72ea435555e0df74e812d7755c4042` (11 October 2026).
 > This is an implementation plan, not a claim that the defects have been reproduced,
 > builds have succeeded, or app-store submission has been accepted.
+> **C3 scope revised on 12 October 2026:** feature parity is now explicitly
+> approved; see MACOS_C3_FEATURE_PARITY_ROADMAP.md for current macOS work packages.
+> Other workstreams retain their own implementation/acceptance status.
 >
 > **Relationship to existing contracts:** `ARCHITECTURE_DECISIONS.md` and the
 > frozen Phase B/C/D/E and `MOBILE_PRODUCT_SEMANTICS.md` contracts retain their
@@ -55,7 +58,7 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 | B2 | P0 before F-Droid workflow | Android/F-Droid | Build-system and scanner feasibility proven | A4 recommended |
 | C1 | P1 | Android | Seven-language UI localization and locale checks | A3/A4 |
 | C2 | P1 | Android | Create feed/category from native UI | A4 |
-| C3 | P1 | macOS | Selected missing support and download controls implemented | B1 |
+| C3 | P1 | macOS | Approved cross-platform feature-parity checklist delivered and tested | Feature code independent of B1; signed release acceptance requires B1 |
 | C4 | P2 | Shared/clients | Focused tech-debt and lifecycle improvements, backed by evidence | Earlier relevant gates |
 | R | Release track | All platforms | Unified store scripts and publication workflows | B1 for macOS; B2 for F-Droid |
 
@@ -261,17 +264,28 @@ contract and existing native Android navigation patterns.
 navigation after success and survive sync/restart; failure and duplicate
 cases are handled.
 
-### C3 — Prioritized macOS support gaps
+### C3 — macOS feature-parity completion (approved scope)
 
-First implement support diagnostics (viewer/export), downloaded-data overview,
-and cancelling an in-progress download; assess whether download retention and
-HTTP-server warning should align with mobile settings. Treat bulk feed
-preferences and `Mark All Read & Next` as separate product decisions, not
-automatic mobile parity obligations. Also improve periodic sync after wake /
-network restoration and avoid public OS logging of local media file paths.
+**Decision (12 October 2026):** Functional parity with iOS/Android is the
+default; macOS retains native menu-bar/window controls rather than copying
+mobile UI layouts. **Bulk feed preferences, scope-wide Mark All as Read and
+Mark All as Read & Next are explicitly in scope**, not optional follow-ups.
 
-**Done when:** accepted macOS features have targeted tests, Core state remains
-authoritative and the menu-bar UX stays appropriate for desktop.
+The controlled source-based inventory, order of work, per-PR quality gates and
+real-Mac acceptance checklist are in
+[MACOS_C3_FEATURE_PARITY_ROADMAP.md](MACOS_C3_FEATURE_PARITY_ROADMAP.md).
+Work packages cover: scope bulk-read and Starred filter; multi-feed editing;
+download totals, cancellation, policy and retention; diagnostics/redaction;
+HTTP account warning, About and player 15/30-second controls; background-sync
+recovery; locale/accessibility and functional acceptance.
+
+**Dependency clarification:** C3 feature code can be developed/tested before
+B1. **B1 signed fresh-sandbox acceptance remains mandatory before Mac App
+Store distribution**, not before beginning C3. Do not add a macOS migration.
+
+**Done when:** accepted C3 features are tested and merged, current macOS
+Apple CI is green, real-Mac functional acceptance is recorded, Core remains
+authoritative, and any explicit deferrals are documented.
 
 ### C4 — Focused follow-up technical debt (not release blockers by default)
 
