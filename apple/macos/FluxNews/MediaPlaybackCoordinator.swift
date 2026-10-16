@@ -98,7 +98,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
                     self.onLoadingChanged?(false)
                     let error = item.error
                     let url = (item.asset as? AVURLAsset)?.url.absoluteString ?? "unknown"
-                    Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("AVPlayerItem failed url=\(url, privacy: .public) error=\(String(describing: error), privacy: .public) underlying=\(String(describing: error as NSError?), privacy: .public)")
+                    Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("AVPlayerItem failed; media URL and errors are not logged publicly")
                     self.onError?(error?.localizedDescription ?? "Media playback failed.")
                 }
             }
@@ -380,7 +380,7 @@ final class MediaPlaybackCoordinator {
         do {
             try core.checkpointPlayback(enclosureId: activeEnclosureID, positionMs: engine.currentPositionMs, durationMs: engine.durationMs ?? preparedDurationMs)
         } catch {
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media checkpoint failed: \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media checkpoint failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -390,7 +390,7 @@ final class MediaPlaybackCoordinator {
             try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs)
         } catch {
             presentationState.status = .paused
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .private)")
             return
         }
         completionSent = true
@@ -408,7 +408,7 @@ final class MediaPlaybackCoordinator {
         presentationState.durationMs = duration
         guard let activeEnclosureID else { return }
         do { try core.observeMediaDuration(enclosureId: activeEnclosureID, durationMs: duration) }
-        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .public)") }
+        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .private)") }
     }
 
     private func startCheckpointTimer() {

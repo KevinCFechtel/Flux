@@ -172,7 +172,7 @@ final class MediaTransferCoordinator {
             }
             executeDeletions(try core.downloadsRequiringDeletion())
         } catch {
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media transfer reconciliation failed: \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media transfer reconciliation failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -254,11 +254,11 @@ final class MediaTransferCoordinator {
                 finish(enclosureID: work.enclosureId, token: token)
                 presentationState.remove(enclosureID: work.enclosureId)
                 try core.downloadFinished(enclosureId: work.enclosureId, localFile: reference, fileSizeBytes: size)
-                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public) reference=\(reference, privacy: .public) path=\(destination.path, privacy: .public) readable=\(FileManager.default.isReadableFile(atPath: destination.path), privacy: .public)")
+                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public) reference=<private> path=<private> readable=\(FileManager.default.isReadableFile(atPath: destination.path), privacy: .public)")
                 onWorkChanged?()
             } catch {
                 // Core owns stale-callback handling; a callback rejection is not a transfer failure.
-                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion callback rejected enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion callback rejected enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .private)")
             }
             finish(enclosureID: work.enclosureId, token: token)
         }
@@ -283,7 +283,7 @@ final class MediaTransferCoordinator {
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media deletion completed enclosure=\(work.enclosureId, privacy: .public)")
                 onWorkChanged?()
             } catch {
-                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media deletion failed enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media deletion failed enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .private)")
             }
         }
     }
@@ -297,7 +297,7 @@ final class MediaTransferCoordinator {
             try core.downloadFailed(enclosureId: enclosureID, failureKind: kind)
             onWorkChanged?()
         } catch {
-            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media failure callback failed enclosure=\(enclosureID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media failure callback failed enclosure=\(enclosureID, privacy: .public): \(error.localizedDescription, privacy: .private)")
         }
     }
 

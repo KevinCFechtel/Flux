@@ -1,5 +1,27 @@
 import Foundation
 
+enum SupportLogRedaction {
+    static func sanitize(_ text: String, secrets: [String] = []) -> String {
+        var result = text
+        for secret in secrets where secret.count >= 4 {
+            result = result.replacingOccurrences(of: secret, with: "<redacted>")
+        }
+        for pattern in [
+            // Mask the complete credential: a generic "Authorization: \S+" rule
+            // leaves the token exposed for schemes such as "Bearer abc123".
+            #"(?i)\b(?:proxy-)?authorization\s*[:=]\s*[^\r\n]+"#,
+            #"(?i)\b(?:api[_ -]?key|password|access[_ -]?token|token|cookie)\s*[:=]\s*[^\s,;]+"#,
+            #"(?i)\bBearer\s+[^\s,;]+"#,
+            #"(?i)\bhttps?://[^\s<>"']+"#,
+            #"(?i)\bfile://[^\s<>"']+"#,
+            #"(?:/Users/|/private/|/var/|/tmp/|/Volumes/)[^\s,;)"']+"#
+        ] {
+            result = result.replacingOccurrences(of: pattern, with: "<redacted sensitive value>", options: .regularExpression)
+        }
+        return result
+    }
+}
+
 enum AccountTransportWarning {
     static func usesUnencryptedHTTP(_ server: String) -> Bool {
         let input = server.trimmingCharacters(in: .whitespacesAndNewlines)

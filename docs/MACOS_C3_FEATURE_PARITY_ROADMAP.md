@@ -58,7 +58,7 @@ Legend: **Missing UI** = Core/platform primitives available, user control absent
 | P13 | Background sync after wake/network return | Periodic 15-minute timer and resume sync exist | Deterministic stale-sync recovery on wake/reachability return, with debouncing, single-flight and disabled-setting semantics |
 | P14 | Player skip semantics | PlayerView uses -30 s / +30 s; mobile uses -15 s / +30 s | Align to 15 s back / 30 s forward, including labels, controls and system-media actions as applicable |
 | P15 | Desktop action access | Article row has context actions; popover More currently primarily filters/sort/settings/quit | Ensure Mark All, search, Starred, saved/third-party, reader/open original, share and media actions are discoverable; no mandatory mobile action-bar clone |
-| P16 | Localization and accessibility | macOS Localizable.xcstrings: 236 keys, 231 with German localization at baseline; mobile has six non-English target languages | Review German completeness; stage Spanish, Galician, Dutch, Tamil and Turkish via reviewed translations; check labels, plurals, keyboard, VoiceOver and long copy |
+| P16 | Localization and accessibility | macOS Localizable.xcstrings: 236 keys, 231 with German localization at baseline; mobile has six non-English target languages | Complete/review existing German; prepare Spanish, Galician, Dutch, Tamil and Turkish as Weblate translation targets **without translating them in C3.7**; check resource extraction, fallbacks, labels, plurals, keyboard and VoiceOver |
 | P17 | Reader, search, Listening List, chapter UI and sleep timer | Existing macOS views and coordinators cover these | Preserve behavior; test key regressions against mobile semantics rather than reimplementing |
 | P18 | Widgets, notifications, shortcuts and configuration backup | Native macOS widgets, notifications, App Intents, backup and restore exist | Smoke/regression acceptance; desktop behavior may differ from iOS |
 | P19 | Sandbox and signed release | Host Sandbox work has its own B1 acceptance; Mac App Store export remains on R track | Signed fresh-container acceptance before distribution; **not** a blocker for code-only C3 feature PRs |
@@ -98,7 +98,7 @@ settings and release preparation. No PR should mix unrelated platform changes.
 | C3.4 | Diagnostics + privacy | New diagnostic store/view, NativeLog, CoreDiagnosticLogger, SettingsView | P09/P10: redacted persistent records, viewer/search/export/clear |
 | C3.5 | Account/about/player polish | SettingsView, account presentation, PlayerView, remote-control code | P11/P12/P14: HTTP warning, About, 15/30-second skip parity |
 | C3.6 | Background recovery | BrowserStore lifecycle, AppDelegate, network monitoring | P13: wake/network reconnect and no duplicate/background-disabled sync |
-| C3.7 | Localization and accessibility | macOS string catalog and relevant views | P15/P16: reviewed locale catalogs, keyboard/VoiceOver and small-window text check |
+| C3.7 | Weblate-ready localization and accessibility | macOS string catalog, Weblate handoff and relevant views | P15/P16: German completion, extraction/validation and five untranslated Weblate-ready target locales; keyboard/VoiceOver and small-window checks |
 | C3.8 | Functional parity acceptance | macOS tests, Apple CI, real Mac smoke checklist | P01–P18 accepted; documentation updated; B1 tracked separately |
 
 C3.1 and C3.2 can be developed independently, but merge and verify one Apple
@@ -156,16 +156,33 @@ stabilized new UI copy, although keys can be added with each feature.
 - Tests: policy classification, player seek bounds, repeated wake/online
   callbacks, offline/online while sync is active and disabled background sync.
 
-### C3.7 — Localization strategy
+### C3.7 — Weblate preparation, not translation of new languages
 
-- English canonical source, German initial user-reviewed locale, plus Spanish,
-  Galician, Dutch, Tamil and Turkish as the mobile target locale set.
-- Do not claim an empty or partial catalog as translated; keep English
-  fallbacks where review is incomplete. Avoid translating technical identifiers,
-  URLs and diagnostics that are not user-facing copy.
-- Verify plural/date formatting, narrow Settings/Popover layouts and VoiceOver.
-  Locale completion is tracked separately from the correctness of the C3.1–C3.6
-  feature implementations.
+**Explicit owner decision (15 October 2026):** Do **not** translate the five
+additional languages as part of C3.7. Weblate will supply these translations
+later; C3.7 must only prepare a clean, importable and maintainable source.
+
+- Keep **English** as canonical development/source language. Complete and
+  review the existing **German** localization, including new macOS UI copy.
+- Prepare **Spanish (es), Galician (gl), Dutch (nl), Tamil (ta) and Turkish (tr)**
+  as target locales for later translation in Weblate. Do not write manual,
+  automatic, pseudo- or English-copied "translations" for these five languages.
+  Untranslated entries must remain visibly untranslated to Weblate, with
+  normal English fallback behavior in the app.
+- Extract all user-visible macOS strings into the `Localizable.xcstrings`
+  catalog (including the C3.1–C3.6 surfaces). Use stable source keys,
+  translator context where needed, suitable plural/format placeholders,
+  and a catalog format and locale configuration compatible with Weblate.
+- Document the Weblate import/export/update workflow and CI validation for
+  missing/nonlocalized user-visible strings and resource consistency. Make
+  target locales discoverable to Weblate without marking unfinished locales as
+  complete or selecting them as fully translated application languages.
+- Review German text, narrow Settings/Popover layouts, dates/plurals, keyboard
+  labels and VoiceOver. Accessibility should be correct before translation;
+  long-copy/RTL checks for future Weblate output can follow as translations land.
+- **C3.7 done means translation-ready, not translated into seven languages.**
+  Completion/review of es/gl/nl/ta/tr is a separate later Weblate milestone and
+  must not block the macOS functional-parity merge or C3.8 acceptance.
 
 ## 4. Validation and release gates
 

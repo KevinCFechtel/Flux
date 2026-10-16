@@ -14,6 +14,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case configurationBackup
     case about
+    case supportDiagnostics
 
     var id: Self { self }
 
@@ -30,6 +31,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: "General"
         case .configurationBackup: "Configuration Backup"
         case .about: "About"
+        case .supportDiagnostics: "Support Diagnostics"
         }
     }
 
@@ -46,6 +48,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .configurationBackup: "externaldrive.badge.timemachine"
         case .about: "info.circle"
+        case .supportDiagnostics: "waveform.path.ecg"
         }
     }
 }
@@ -199,6 +202,8 @@ struct SettingsView: View {
             DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
         case .about:
             MacOSAboutSettingsView()
+        case .supportDiagnostics:
+            MacOSSupportDiagnosticsView()
         }
     }
     private var retention: Binding<ReadArticleRetention> {
@@ -1251,6 +1256,85 @@ private struct SystemNotificationsSettingsView: View {
             Spacer()
         }
         .onAppear { store.reloadSystemNotificationSettings() }
+    }
+}
+
+private struct MacOSSupportDiagnosticsView: View {
+    private let diagnostics = MacSupportDiagnostics.shared
+    @State private var records: [MacSupportRecord] = []
+    @State private var debug = false
+    @State private var search = ""
+    @State private var level = "all"
+    @State private var confirmClear = false
+    @State private var exportError: String?
+    private var filtered: [MacSupportRecord] {
+        records.filter {
+            (level == "all" || $0.level.rawValue == level)
+            && (search.isEmpty || $0.category.localizedCaseInsensitiveContains(search)
+                || $0.message.localizedCaseInsensitiveContains(search))
+        }.sorted { $0.timestamp > $1.timestamp }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Debug Logging", isOn: Binding(get: { debug }, set: { diagnostics.setDebug($0); reload() }))
+            Text("Info, warning and error records are always retained. Debug and trace records require Debug Logging.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("Search log records", text: $search).textFieldStyle(.roundedBorder)
+                Picker("Level", selection: $level) {
+                    Text("All").tag("all")
+                    ForEach(MacSupportLevel.allCases) { item in
+                        Text(item.rawValue.capitalized).tag(item.rawValue)
+                    }
+                }.frame(width: 150)
+                Button("Refresh", action: reload)
+            }
+            Text("\(filtered.count) visible of \(records.count) stored records")
+                .font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(filtered) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(item.timestamp.formatted()) [\(item.level.rawValue.uppercased())] [\(item.category)]")
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(item.message).font(.caption).textSelection(.enabled)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        Divider()
+                    }
+                }
+            }.frame(minHeight: 160)
+            HStack {
+                Button("Export Diagnostics…", action: export)
+                Button("Clear Logs", role: .destructive) { confirmClear = true }
+                Spacer()
+            }
+            Text("Credentials, URLs and local media paths are redacted before support records are stored or exported.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let exportError { Text(exportError).font(.caption).foregroundStyle(.red) }
+        }
+        .onAppear(perform: reload)
+        .alert("Clear Logs?", isPresented: $confirmClear) {
+            Button("Clear Logs", role: .destructive) { diagnostics.clear(); reload() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All locally stored support records will be deleted.")
+        }
+    }
+    private func reload() {
+        records = diagnostics.snapshot()
+        debug = diagnostics.debugEnabled
+    }
+    private func export() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "FluxNews-Diagnostics.txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try diagnostics.exportText().write(to: url, atomically: true, encoding: .utf8)
+            exportError = nil
+        } catch {
+            exportError = String(localized: "The diagnostics export could not be prepared.")
+        }
     }
 }
 

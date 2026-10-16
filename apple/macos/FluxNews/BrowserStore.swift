@@ -167,7 +167,7 @@ final class BrowserStore: ObservableObject {
                 )
             }
         } catch {
-            NativeLog.keychain.error("credential lookup failed: \(error.localizedDescription, privacy: .public)")
+            NativeLog.keychain.error("credential lookup failed: \(error.localizedDescription, privacy: .private)")
             errorMessage = NativeErrorPresentation.message(for: error)
             settingsVisible = true
         }
@@ -193,6 +193,7 @@ final class BrowserStore: ObservableObject {
             await coreSessionExecutionCoordinator.quiesce()
         }
 
+        MacSupportDiagnostics.shared.registerSecrets([server, apiKey] + customHeaders.flatMap { [$0.name, $0.value] })
         let headers = customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
         let creation = await AppleCoreExecution.shared.responsiveResult {
             try Flux.initializeWithDiagnostics(
@@ -214,7 +215,7 @@ final class BrowserStore: ObservableObject {
             configuredCore = value
         case let .failure(error):
             if let previousCore { coreSessionExecutionCoordinator.resume(previousCore) }
-            NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
+            NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .private)")
             errorMessage = NativeErrorPresentation.message(for: error)
             return false
         }
@@ -246,6 +247,7 @@ final class BrowserStore: ObservableObject {
             coreSettings = settings
             eventSubscription = subscription
             NativeLog.app.notice("core configured")
+            NativeLog.support("app", "core configured")
             if previousCore != nil {
                 invalidateLocalPresentation()
             } else {
@@ -271,7 +273,7 @@ final class BrowserStore: ObservableObject {
         case let .failure(error):
             coreSessionExecutionCoordinator.deactivate()
             if let previousCore { coreSessionExecutionCoordinator.activate(previousCore) }
-            NativeLog.app.error("core setup failed: \(error.localizedDescription, privacy: .public)")
+            NativeLog.app.error("core setup failed: \(error.localizedDescription, privacy: .private)")
             errorMessage = NativeErrorPresentation.message(for: error)
             return false
         }
@@ -514,7 +516,7 @@ final class BrowserStore: ObservableObject {
                     self.snapshotResetRevision &+= 1
                 }
             case let .failure(error):
-                NativeLog.app.error("article reload failed: \(String(describing: error), privacy: .public)")
+                NativeLog.app.error("article reload failed: \(String(describing: error), privacy: .private)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
@@ -534,7 +536,7 @@ final class BrowserStore: ObservableObject {
                 self.selectionTotal = total
                 self.errorMessage = nil
             case let .failure(error):
-                NativeLog.app.error("selection count reload failed: \(String(describing: error), privacy: .public)")
+                NativeLog.app.error("selection count reload failed: \(String(describing: error), privacy: .private)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
@@ -564,7 +566,7 @@ final class BrowserStore: ObservableObject {
                 self.publishPendingNewData()
                 self.errorMessage = nil
             case let .failure(error):
-                NativeLog.app.error("navigation projection reload failed: \(String(describing: error), privacy: .public)")
+                NativeLog.app.error("navigation projection reload failed: \(String(describing: error), privacy: .private)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
@@ -836,6 +838,7 @@ final class BrowserStore: ObservableObject {
                 switch outcome {
                 case let .completed(metadata):
                     NativeLog.sync.debug("sync completed; reconciling native media work")
+            NativeLog.support("sync", "sync completed", level: .debug)
                     self.requestMediaTransferReconciliation()
                     await SystemNotificationManager.shared.deliver(metadata.systemNotificationCandidates, core: core, coordinator: coordinator)
                 case .cancelled:
@@ -843,7 +846,7 @@ final class BrowserStore: ObservableObject {
                 }
             case let .failure(error):
                 if cancellation.isCancelled() || error is CancellationError { return }
-                NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .public)")
+                NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .private)")
                 self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
@@ -1744,7 +1747,7 @@ final class BrowserStore: ObservableObject {
             do {
                 store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
             } catch {
-                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh could not resolve App Group container error=\(error.localizedDescription, privacy: .public)")
+                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh could not resolve App Group container error=\(error.localizedDescription, privacy: .private)")
                 return
             }
             guard let result = await coordinator.responsiveResult(
@@ -1753,10 +1756,10 @@ final class BrowserStore: ObservableObject {
             ) else { return }
             switch result {
             case .success:
-                WidgetSnapshotDiagnostics.logger.notice("Widget snapshot refresh succeeded path=\(store.snapshotPath, privacy: .public)")
+                WidgetSnapshotDiagnostics.logger.notice("Widget snapshot refresh succeeded path=\(store.snapshotPath, privacy: .private)")
                 WidgetTimelineReloader.reloadAll()
             case let .failure(error):
-                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh failed error=\(error.localizedDescription, privacy: .public)")
+                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh failed error=\(error.localizedDescription, privacy: .private)")
             }
         }
     }
@@ -1764,10 +1767,10 @@ final class BrowserStore: ObservableObject {
         do {
             let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
             try store.invalidate()
-            WidgetSnapshotDiagnostics.logger.notice("Widget snapshot invalidated path=\(store.snapshotPath, privacy: .public)")
+            WidgetSnapshotDiagnostics.logger.notice("Widget snapshot invalidated path=\(store.snapshotPath, privacy: .private)")
             WidgetTimelineReloader.reloadAll()
         } catch {
-            WidgetSnapshotDiagnostics.logger.error("Widget snapshot invalidation failed error=\(error.localizedDescription, privacy: .public)")
+            WidgetSnapshotDiagnostics.logger.error("Widget snapshot invalidation failed error=\(error.localizedDescription, privacy: .private)")
         }
     }
     private func nativeBackupSettings(customHeaders: [CustomHTTPHeader] = []) -> MacOSBackupSettingsV1 {
