@@ -98,23 +98,24 @@ struct ArticleItem: View {
                     .buttonStyle(.plain)
                 }
             }
-
-            // Keep the preview full width. Hover actions float above its
-            // lower trailing corner without changing the row's dimensions.
-            Group {
-                if !article.preview.isEmpty {
-                    Text(article.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(store.articlePreviewLines.rawValue)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Color.clear.frame(height: 1)
+            .overlay(alignment: .bottomTrailing) {
+                if article.preview.isEmpty {
+                    visualCompactHoverActions
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                visualCompactHoverActions
+
+            // The preview retains its full width and the overlay never
+            // changes the row height or compresses text.
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .bottomTrailing) {
+                        visualCompactHoverActions
+                    }
             }
 
             audioActions
