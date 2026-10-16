@@ -40,3 +40,15 @@ the unreleased, unsandboxed macOS development app is required.
 8. Keep a record of sandbox-denial logs and resolve actual missing capabilities without granting broad filesystem access.
 
 CI compilation and source-plist tests alone **do not prove** end-to-end sandbox behavior.
+
+## B1 signed macOS development build acceptance
+
+On a Mac with Apple Development signing and App Groups provisioned for both targets:
+
+```bash
+CONFIGURATION=Debug DEVELOPMENT_SIGNING=1 ./apple/macos/Build/build-app.sh
+./apple/macos/Build/verify-sandbox.sh ./dist/FluxNews.app development
+./apple/macos/Build/install-local.sh
+```
+
+The verifier checks actual signatures, host/widget IDs and versions, Sandbox and App Group entitlements, signing team and embedded development provisioning. The installer validates both source and staged copy **before** replacing the application; no app container or Keychain data is deleted. A truly fresh-container test requires a clean macOS user or separately approved manual cleanup. Run all runtime checklist steps before marking B1 accepted. Unsigned CI checks do not establish signed Sandbox acceptance. Developer ID and Mac App Store distribution remain separate.

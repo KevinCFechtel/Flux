@@ -8,6 +8,10 @@ DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData-macos}"
 DESTINATION="${DESTINATION:-platform=macOS}"
 
 python3 "${REPOSITORY_DIR}/apple/macos/Build/check-localization.py"
+for script in build-app.sh install-local.sh verify-sandbox.sh; do
+  bash -n "${SCRIPT_DIR}/${script}"
+done
+"${SCRIPT_DIR}/verify-sandbox.sh" --help >/dev/null
 
 "${REPOSITORY_DIR}/apple/Build/build-uniffi.sh"
 

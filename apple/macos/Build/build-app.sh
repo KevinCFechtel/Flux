@@ -13,6 +13,7 @@ HOST_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
 WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 APP_GROUP_IDENTIFIER="group.dev.kevincfechtel.fluxNews"
 DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-1}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 
 for command_name in codesign ditto plutil /usr/libexec/PlistBuddy xcodebuild; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Required command missing: ${command_name}" >&2; exit 1; }
@@ -49,6 +50,11 @@ xcodebuild_args=(
 if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
   xcodebuild_args+=(
     -allowProvisioningUpdates
+    CODE_SIGNING_ALLOWED=YES
+    CODE_SIGNING_REQUIRED=YES
+    CODE_SIGN_STYLE=Automatic
+    CODE_SIGN_IDENTITY="Apple Development"
+    DEVELOPMENT_TEAM=8X9VDP43J9
   )
 else
   xcodebuild_args+=(
@@ -79,83 +85,10 @@ else
   codesign --force --sign "${SIGNING_IDENTITY}" --entitlements "${APP_ENTITLEMENTS}" "${APP_DIR}"
 fi
 
-HOST_INFO_PLIST="${APP_DIR}/Contents/Info.plist"
-WIDGET_INFO_PLIST="${WIDGET_EXTENSION}/Contents/Info.plist"
-plutil -lint "${HOST_INFO_PLIST}" >/dev/null
-plutil -lint "${WIDGET_INFO_PLIST}" >/dev/null
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${HOST_INFO_PLIST}")" == "${HOST_BUNDLE_IDENTIFIER}" ]] || {
-  echo "Unexpected host bundle identifier." >&2
-  exit 1
-}
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${WIDGET_INFO_PLIST}")" == "${WIDGET_BUNDLE_IDENTIFIER}" ]] || {
-  echo "Unexpected widget bundle identifier." >&2
-  exit 1
-}
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "${WIDGET_INFO_PLIST}")" == "com.apple.widgetkit-extension" ]] || {
-  echo "WidgetKit extension point is missing." >&2
-  exit 1
-}
-
-ENTITLEMENTS_FILE="$(mktemp "${TMPDIR:-/tmp}/flux-entitlements.XXXXXX")"
-trap 'rm -f -- "${ENTITLEMENTS_FILE}"' EXIT
-
-verify_app_group_entitlement() {
-  local component="$1"
-
-  codesign -d --entitlements :- "${component}" > "${ENTITLEMENTS_FILE}"
-
-  [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${ENTITLEMENTS_FILE}")" == "${APP_GROUP_IDENTIFIER}" ]] || {
-    echo "Expected App Group entitlement is missing: ${component}" >&2
-    exit 1
-  }
-}
-
-verify_app_group_entitlement "${APP_DIR}"
-for capability in com.apple.security.app-sandbox com.apple.security.network.client com.apple.security.files.user-selected.read-write; do
-  [[ "$(/usr/libexec/PlistBuddy -c "Print :${capability}" "${ENTITLEMENTS_FILE}")" == "true" ]] || {
-    echo "Required host Sandbox entitlement is missing: ${capability}" >&2
-    exit 1
-  }
-done
-verify_app_group_entitlement "${WIDGET_EXTENSION}"
-
-codesign -d --entitlements :- "${WIDGET_EXTENSION}" > "${ENTITLEMENTS_FILE}"
-
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLEMENTS_FILE}")" == "true" ]] || {
-  echo "Widget App Sandbox entitlement is missing." >&2
-  exit 1
-}
-
-codesign --verify --strict --verbose=4 "${WIDGET_EXTENSION}"
-codesign --verify --strict --verbose=4 "${APP_DIR}"
-codesign --verify --deep --strict --verbose=4 "${APP_DIR}"
-
 if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
-  verify_development_component() {
-    local component="$1"
-    local details
-    details="$(codesign -dvvv "${component}" 2>&1)"
-    grep -F -- "Authority=Apple Development" <<<"${details}" >/dev/null || { echo "Apple Development authority missing: ${component}" >&2; exit 1; }
-    host_details="$(codesign -dvvv "${APP_DIR}" 2>&1)"
-    widget_details="$(codesign -dvvv "${WIDGET_EXTENSION}" 2>&1)"
-
-    grep -F -- "Authority=Apple Development" <<<"${host_details}" >/dev/null
-    grep -F -- "Authority=Apple Development" <<<"${widget_details}" >/dev/null
-
-    host_team="$(
-      sed -n 's/^TeamIdentifier=//p' <<<"${host_details}"
-    )"
-
-    widget_team="$(
-      sed -n 's/^TeamIdentifier=//p' <<<"${widget_details}"
-    )"
-
-    [[ -n "${host_team}" ]]
-    [[ "${host_team}" == "${widget_team}" ]]
-  }
-
-  verify_development_component "${WIDGET_EXTENSION}"
-  verify_development_component "${APP_DIR}"
+  "${SCRIPT_DIR}/verify-sandbox.sh" "${APP_DIR}" development
+else
+  "${SCRIPT_DIR}/verify-sandbox.sh" "${APP_DIR}" adhoc
 fi
 
 echo "FluxNews ${CONFIGURATION} app: ${APP_DIR}"
