@@ -98,22 +98,24 @@ struct ArticleItem: View {
                     .buttonStyle(.plain)
                 }
             }
-
-            HStack(alignment: .top, spacing: 10) {
-                if !article.preview.isEmpty {
-                    Text(article.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(store.articlePreviewLines.rawValue)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Spacer(minLength: 0)
+            .overlay(alignment: .bottomTrailing) {
+                if article.preview.isEmpty {
+                    visualCompactHoverActions
                 }
+            }
 
-                quickActions
-                    .opacity(hovered ? 1 : 0)
-                    .allowsHitTesting(hovered)
+            // The preview retains its full width and the overlay never
+            // changes the row height or compresses text.
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .bottomTrailing) {
+                        visualCompactHoverActions
+                    }
             }
 
             audioActions
@@ -277,6 +279,46 @@ struct ArticleItem: View {
             .help("More")
             .accessibilityLabel("More")
         }
+    }
+
+    // A translucent surface hides the text behind the icons while hovered;
+    // the preview never reserves horizontal space for the action controls.
+    private var visualCompactHoverActions: some View {
+        HStack(spacing: 10) {
+            if !store.isSearchActive {
+                iconButton(
+                    article.isRead ? "circle.fill" : "checkmark.circle",
+                    label: readActionLabel
+                ) {
+                    store.setRead(article, !article.isRead)
+                }
+            }
+            iconButton(
+                article.isStarred ? "star.fill" : "star",
+                label: starActionLabel
+            ) {
+                store.setStarred(article, !article.isStarred)
+            }
+            Menu { actionMenu } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .help("More")
+            .accessibilityLabel("More")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(.primary.opacity(0.08))
+                .allowsHitTesting(false)
+        }
+        .opacity(hovered ? 1 : 0)
+        .allowsHitTesting(hovered)
+        .accessibilityHidden(!hovered)
     }
 
     private var interactionBackground: Color {
