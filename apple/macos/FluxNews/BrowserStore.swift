@@ -115,7 +115,9 @@ final class BrowserStore: ObservableObject {
         if let eventSubscription { try? eventSubscription.unsubscribe() }
         eventSubscription = nil
     }
-    private var lastAutomaticSyncAttempt: Date?
+    private var lastSyncAttempt: Date?
+    private var networkAvailability: Bool?
+    private var networkRecoveryState = NetworkRecoveryState()
     private var periodicSyncTimer: Timer?
     private var hasMeaningfullyInteracted = false
     private var sharingPicker: NSSharingServicePicker?
@@ -245,6 +247,7 @@ final class BrowserStore: ObservableObject {
             onCoreConfigured?(configuredCore)
             configuredServer = server
             coreSettings = settings
+            lastSyncAttempt = nil
             eventSubscription = subscription
             NativeLog.app.notice("core configured")
             NativeLog.support("app", "core configured")
@@ -813,12 +816,24 @@ final class BrowserStore: ObservableObject {
     func applyNewData() { reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: true) }
     func requestMediaTransferReconciliation() { onMediaTransferRequested?() }
     func sync(reason: SyncReason = .manual) {
-        guard let core, !isLoading else {
-            if reason == .periodic { NativeLog.sync.debug("periodic sync skipped because sync is already in flight") }
-            return
+        // Background, periodic and resume triggers must honor the persisted
+        // preference even when called directly by a lifecycle observer.
+        if reason == .periodic || reason == .resume || reason == .background {
+            guard BackgroundRecoveryPolicy.shouldAttempt(
+                configured: core != nil,
+                backgroundEnabled: coreSettings?.backgroundSyncEnabled == true,
+                networkAvailable: networkAvailability,
+                syncInFlight: isLoading,
+                lastAttempt: lastSyncAttempt,
+                now: .now
+            ) else {
+                NativeLog.sync.debug("automatic sync suppressed (offline, disabled, active or throttled)")
+                return
+            }
         }
+        guard let core, !isLoading else { return }
         isLoading = true
-        if reason != .manual { lastAutomaticSyncAttempt = .now }
+        lastSyncAttempt = .now
         if reason == .periodic { NativeLog.sync.notice("periodic sync triggered") }
         let coordinator = coreSessionExecutionCoordinator
         let cancellation = SyncCancellation()
@@ -853,7 +868,23 @@ final class BrowserStore: ObservableObject {
     }
 
     func syncIfStale(reason: SyncReason = .periodic) {
-        if lastAutomaticSyncAttempt.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: reason) }
+        sync(reason: reason)
+    }
+
+    /// Called on the main actor by NWPathMonitor. The first callback only
+    /// establishes connectivity state; a subsequent offline -> online change
+    /// requests a throttled recovery sync.
+    func networkAvailabilityChanged(isAvailable: Bool) {
+        networkAvailability = isAvailable
+        if networkRecoveryState.observe(isAvailable: isAvailable) {
+            syncIfStale(reason: .resume)
+        }
+    }
+
+    /// An explicit wake notification complements foreground resume; both
+    /// converge on the same guarded single-flight path.
+    func systemDidWake() {
+        syncIfStale(reason: .resume)
     }
     func activatePeriodicSyncScheduling() {
         guard core != nil, coreSettings?.backgroundSyncEnabled == true, periodicSyncTimer == nil else { return }
@@ -870,7 +901,7 @@ final class BrowserStore: ObservableObject {
         if coreSettings?.backgroundSyncEnabled == true { activatePeriodicSyncScheduling() }
         syncIfStale(reason: .resume)
     }
-    private func runPeriodicSync() { sync(reason: .periodic) }
+    private func runPeriodicSync() { syncIfStale(reason: .periodic) }
     func setDownloadNetworkPolicy(_ policy: DownloadNetworkPolicy) {
         updateCoreSettings({ try $0.setDownloadNetworkPolicy(policy: policy) }, afterSuccess: { [weak self] in
             self?.requestMediaTransferReconciliation()
@@ -1677,6 +1708,7 @@ final class BrowserStore: ObservableObject {
                     self.minifluxVersion = nil
                     self.coreSettings = nil
                     self.isLoading = false
+                    self.lastSyncAttempt = nil
                     self.deactivatePeriodicSyncScheduling()
                     self.invalidateWidgetSnapshot()
                     self.invalidateLocalPresentation()

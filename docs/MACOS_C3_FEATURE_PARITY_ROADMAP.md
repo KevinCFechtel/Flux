@@ -156,6 +156,22 @@ stabilized new UI copy, although keys can be added with each feature.
 - Tests: policy classification, player seek bounds, repeated wake/online
   callbacks, offline/online while sync is active and disabled background sync.
 
+### C3.6 — Background recovery implementation
+
+- macOS uses an `NWPathMonitor` to observe network availability. The initial
+  online callback does **not** trigger a duplicate startup sync; a real
+  offline-to-online transition requests recovery.
+- `NSWorkspace.didWakeNotification`, application resume, popover close and
+  the periodic timer converge on the same `BackgroundRecoveryPolicy` gate.
+  Only a configured account with Background Sync enabled and an available
+  network may perform unattended sync; a running sync is never duplicated.
+- Cooldown: no second automatic attempt within 60 seconds of any sync attempt.
+  User-triggered/manual Sync and the separate Sync on Start preference remain
+  available when Background Sync is disabled.
+- Functional smoke: sleep/wake, offline/online (including launch while
+  offline), duplicate callbacks, in-flight sync, disabled Background Sync,
+  and manual Sync while background sync is off.
+
 ### C3.7 — Weblate preparation, not translation of new languages
 
 **Explicit owner decision (15 October 2026):** Do **not** translate the five

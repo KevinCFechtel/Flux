@@ -3,6 +3,37 @@ import Foundation
 import ImageIO
 import UserNotifications
 
+/// Pure policy for unattended macOS synchronization. User-requested Sync and
+/// Sync on Start intentionally bypass this policy.
+enum BackgroundRecoveryPolicy {
+    static let minimumAttemptInterval: TimeInterval = 60
+
+    static func shouldAttempt(
+        configured: Bool,
+        backgroundEnabled: Bool,
+        networkAvailable: Bool?,
+        syncInFlight: Bool,
+        lastAttempt: Date?,
+        now: Date
+    ) -> Bool {
+        guard configured, backgroundEnabled, networkAvailable != false, !syncInFlight else { return false }
+        guard let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= minimumAttemptInterval
+    }
+}
+
+/// The first NWPathMonitor callback describes the initial state, not a
+/// reconnect. Only an observed unavailable -> available transition recovers.
+struct NetworkRecoveryState {
+    private(set) var lastAvailability: Bool?
+
+    mutating func observe(isAvailable: Bool) -> Bool {
+        let shouldRecover = lastAvailability == false && isAvailable
+        lastAvailability = isAvailable
+        return shouldRecover
+    }
+}
+
 enum StatusItemPresentation {
     static func title(unreadTotal: UInt64, hasPendingNewData: Bool) -> String { let unread = unreadTotal == 0 ? "" : unreadTotal > 999 ? "999+" : "\(unreadTotal)"; return switch (hasPendingNewData, unread.isEmpty) { case (false, _): unread; case (true, true): "•"; case (true, false): "• \(unread)" } }
     static func accessibilityValue(unreadTotal: UInt64, hasPendingNewData: Bool) -> String { let unread = unreadTotal == 1 ? String(localized: "1 unread article") : String(format: String(localized: "%lld unread articles"), unreadTotal); return hasPendingNewData ? String(format: String(localized: "%@, new data available"), unread) : unread }
