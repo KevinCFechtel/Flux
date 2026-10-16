@@ -1,12 +1,13 @@
 # macOS C3 — Feature-Parity Completion Roadmap
 
-> **Status: APPROVED SCOPE / IMPLEMENTATION PENDING — 12 October 2026**
+> **Status (16 October 2026): C3.1–C3.7 IMPLEMENTED AND MERGED; C3.8 REAL-MAC ACCEPTANCE OPEN.**
 >
-> **Source baseline:** main at 9783d7e790858e79f00cab95b6b1c7b6bff513df.
-> **Goal:** Finish the remaining functional gaps in the native macOS client relative to
-> the accepted iOS/iPadOS and Android capabilities without copying mobile UI layouts.
-> This is a source-based functional inventory, **not** a claim that every runtime path
-> has already passed on-device acceptance.
+> **Current code baseline:** `main` at `2edc6537aebac35260d35f4dcbcab8dcfc7a0ae9`. The original source
+> inventory was prepared on `9783d7e790858e79f00cab95b6b1c7b6bff513df`
+> (12 October 2026) and is retained below as the historical gap baseline.
+> **Goal:** Validate the implemented native macOS feature parity with the accepted
+> iOS/iPadOS and Android capabilities without copying mobile UI layouts.
+> Source review and green CI do **not** substitute for real-Mac functional acceptance.
 >
 > **Authority:** ARCHITECTURE_DECISIONS.md, frozen Phase C/D/E contracts,
 > MOBILE_PRODUCT_SEMANTICS.md and the current Rust Core. The release/signing
@@ -35,7 +36,12 @@
 - Do not silently expand scope to unsupported OS integrations or speculative
   refactors. Track discoveries against this checklist.
 
-## 2. Source-verified macOS parity inventory
+## 2. Historical source-verified macOS parity inventory
+
+The evidence column below describes the **pre-C3 implementation baseline**
+(12 October), not missing functionality on current `main`. C3.1–C3.7 were
+subsequently implemented in PRs #49–#52; their real-Mac behavior is still to
+be checked in C3.8. Retain this inventory for the original acceptance contract.
 
 Legend: **Missing UI** = Core/platform primitives available, user control absent;
 **Partial** = present but incomplete/different; **Exists** = do not rebuild;
@@ -83,11 +89,12 @@ Legend: **Missing UI** = Core/platform primitives available, user control absent
   English. Protect sensitive values at logging/export time rather than merely
   hiding them from a viewer.
 
-## 3. Implementation sequence and PR boundaries
+## 3. Implemented work packages and remaining PR boundaries
 
-Each workstream is one focused feature PR (or a small related series if tests
-warrant it). The order prioritizes concrete semantic gaps before supporting
-settings and release preparation. No PR should mix unrelated platform changes.
+C3.1–C3.7 have been delivered via focused, merged PRs. The table below retains
+the agreed implementation sequence and acceptance coverage, **not** a list of
+features awaiting implementation. C3.8 is the separate real-Mac test/sign-off
+phase. B1 signed Sandbox runtime acceptance remains independent of C3.8.
 
 | Order | Work package | Primary code surfaces | Deliverable / merge gate |
 | --- | --- | --- | --- |
@@ -106,6 +113,24 @@ change at a time to keep failures attributable. C3.3 precedes signed end-to-end
 download/Sandbox checks. C3.4 should precede final support-export review.
 C3.5 and C3.6 are independent once baseline Apple CI is green. C3.7 follows
 stabilized new UI copy, although keys can be added with each feature.
+
+### Merge and CI evidence (16 October 2026)
+
+| Implemented package | Merged PR | Merge commit | Verification |
+| --- | --- | --- | --- |
+| C3.1 + C3.2 | [#49](https://github.com/KevinCFechtel/Flux/pull/49) | `d2f80e5` | Feature PR merged |
+| C3.3 + C3.5 | [#50](https://github.com/KevinCFechtel/Flux/pull/50) | `e04ef4e` | Feature PR merged |
+| C3.4 | [#51](https://github.com/KevinCFechtel/Flux/pull/51) | `2037be2` | Feature PR merged |
+| C3.6 + C3.7 | [#52](https://github.com/KevinCFechtel/Flux/pull/52) | `4ec3c1e` | Feature PR merged |
+| B1 verifier/install follow-up (separate) | [#53](https://github.com/KevinCFechtel/Flux/pull/53) | `7b02ecd` | [Apple CI #164](https://github.com/KevinCFechtel/Flux/actions/runs/38924332033) green; signed Mac acceptance open |
+| Visual Compact hover overlay | [#54](https://github.com/KevinCFechtel/Flux/pull/54) | `2edc653` | [Apple CI #165](https://github.com/KevinCFechtel/Flux/actions/runs/38925707293) green; visual acceptance open |
+
+[Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
+passed on the combined `main` commit `2edc6537` (macOS and iOS).
+This is automated regression evidence, **not** a signed Mac runtime sign-off.
+
+The following package-specific requirements are preserved as regression and
+device-acceptance criteria; they are not instructions to reimplement merged code.
 
 ### C3.1 — Scope mutations and navigation
 
@@ -226,6 +251,12 @@ For **C3.8 macOS functional acceptance**, test on a Mac:
   keyboard focus/VoiceOver and German copy.
 - Sleep/wake, Wi-Fi/offline/online transitions and no duplicate Sync.
 - Widget updates, notifications, Reader, backup/export and app restart.
+- Visual Compact hover overlay (Gelesen/Stern/Mehr): right-bottom anchoring on
+  article preview, fallback without preview, long/short titles, clicking and
+  focus/VoiceOver; verify unchanged row height and other display styles.
+
+The C3.8 smoke checks may use the same **Apple Development-signed, sandboxed**
+installation as B1; record pass/fail evidence for **C3.8 and B1 separately**.
 
 **Separate sign-off:** B1 must verify a signed Sandboxed **fresh install**,
 App Group, Keychain, data/download persistence, widget sharing and file-panel

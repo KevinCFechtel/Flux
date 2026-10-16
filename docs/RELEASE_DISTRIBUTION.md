@@ -226,12 +226,15 @@ replace a reliable Transporter-based release process.
 
 ## 7. macOS — App Store Connect / Transporter
 
-**Implementation/acceptance distinction (15 October 2026):** PR #38
-implemented the host Sandbox entitlements and sandbox-local media storage,
-but the owner deferred signed-app/device acceptance to finish C3 native
-feature parity. This does not waive the B1 release gate: before a Mac App
-Store production export or submission, follow
-[MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md).
+**Implementation/acceptance distinction (16 October 2026):** PR #38
+implemented host Sandbox entitlements and sandbox-local media storage, and
+PR #53 added signed-development-build verification and safe local installation.
+C3.1–C3.7 are now implemented and merged; C3.8 and the **separate B1 signed
+fresh-container runtime acceptance are still open**. [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
+passed on the combined `main`, but does not close B1. Finish
+[MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md) **before implementing**
+the Mac App Store archive/export deliverable. That later Store export is part
+of R, not part of the B1 runtime sign-off.
 
 The primary macOS distribution should likewise be the Mac App Store.
 
@@ -246,7 +249,7 @@ The final macOS App Store path should:
 
 - use the production Xcode configuration;
 - build/archive the host app and Widget extension;
-- establish and validate the previously missing host App Sandbox entitlement, required outbound network/user-selected-file permissions, and host/widget App Group provisioning;
+- validate the already-implemented Sandbox, outbound network/user-selected-file permissions and host/widget App Group provisioning **in the final Mac App Store-signed artifact**;
 - use the correct Mac App Store distribution signing/provisioning;
 - apply explicit app/extension build and marketing versions;
 - validate bundle identifiers and embedded extension metadata;

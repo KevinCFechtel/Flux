@@ -1,13 +1,14 @@
 # Post-Replacement Stabilization and Store-Readiness Plan
 
-> **Status: IN PROGRESS — latest macOS B1/C3 decisions updated 15 October 2026**
+> **Status: IN PROGRESS — implementation/acceptance reconciled 16 October 2026**
 >
-> **Baseline:** `main` at `9bd6ea9b6b72ea435555e0df74e812d7755c4042` (11 October 2026).
-> This is an implementation plan, not a claim that the defects have been reproduced,
-> builds have succeeded, or app-store submission has been accepted.
-> **C3 scope revised on 12 October 2026:** feature parity is now explicitly
-> approved; see MACOS_C3_FEATURE_PARITY_ROADMAP.md for current macOS work packages.
-> Other workstreams retain their own implementation/acceptance status.
+> **Verified code baseline:** `main` at `2edc6537aebac35260d35f4dcbcab8dcfc7a0ae9`
+> (16 October 2026; [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
+> passed). Original plan baseline was `9bd6ea9` (11 October).
+> C3.1–C3.7 are **merged**; C3.8 functional and B1 signed Sandbox acceptance
+> are **open**, independently. A1–A4 and Android C1/C2 have implemented work
+> described below, with different remaining gates. Source/CI evidence is not
+> a device-acceptance or App Store submission claim.
 >
 > **Relationship to existing contracts:** `ARCHITECTURE_DECISIONS.md` and the
 > frozen Phase B/C/D/E and `MOBILE_PRODUCT_SEMANTICS.md` contracts retain their
@@ -48,19 +49,19 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 
 ## 2. Planned work order and gates
 
-| ID | Priority | Target | Required outcome | Depends on |
-| --- | --- | --- | --- | --- |
-| A1 | P0 | iOS + macOS | HTTP-only media/image behavior verified and intentionally handled | — |
-| A2 | P0 | Rust + Apple | Event subscriptions released safely on lifecycle changes | — |
-| A3 | P0 | Android | Download network-policy changes update pending WorkManager constraints | — |
-| A4 | P0 | CI | Native-host Rust fmt/test/clippy checks gate Core changes | — |
-| B1 | P0 before Mac App Store release | macOS | Sandboxed app works with fresh developer data | A1/A2 validation as applicable |
-| B2 | P0 before F-Droid workflow | Android/F-Droid | Build-system and scanner feasibility proven | A4 recommended |
-| C1 | P1 | Android | Seven-language UI localization and locale checks | A3/A4 |
-| C2 | P1 | Android | Create feed/category from native UI | A4 |
-| C3 | P1 | macOS | Approved cross-platform feature-parity checklist delivered and tested | Feature code independent of B1; signed release acceptance requires B1 |
-| C4 | P2 | Shared/clients | Focused tech-debt and lifecycle improvements, backed by evidence | Earlier relevant gates |
-| R | Release track | All platforms | Unified store scripts and publication workflows | B1 for macOS; B2 for F-Droid |
+| ID | Priority | Target | Status on `main` (16 Oct) | Required remaining gate | Depends on |
+| --- | --- | --- | --- | --- | --- |
+| A1 | P0 | iOS + macOS | ATS host policies and structural tests implemented | Actual HTTP/HTTPS media, redirect and playback tests per platform | — |
+| A2 | P0 | Rust + Apple | Rust `EventSubscription` Drop fallback implemented | Apple listener lifecycle/retention and regression evidence | — |
+| A3 | P0 | Android | WorkManager policy-tagged `updateWork()` and unit tests implemented | Runtime network-policy transitions | — |
+| A4 | P0 | CI | `.github/workflows/rust.yml` implemented | Make `cargo fmt --check` blocking after baseline formatting cleanup; confirm required-check policy separately | — |
+| B1 | P0 before Mac App Store release | macOS | Entitlements, storage and signed verifier/installer implemented (#38, #53) | Signed fresh-container runtime acceptance | A1/A2 validation as applicable |
+| B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
+| C1 | P1 | Android | Resource extraction and 500 German translations implemented | Residual runtime-string audit, locale/device review, Weblate for five target languages | A3/A4 as relevant |
+| C2 | P1 | Android | Native add-feed/add-category flows and policy tests implemented | End-to-end device/sync/restart/duplicate acceptance | A4 |
+| C3 | P1 | macOS | C3.1–C3.7 merged (#49–#52), combined Apple CI green | C3.8 real-Mac parity tests; B1 separately | Feature code independent of B1 |
+| C4 | P2 | Shared/clients | Selective maintenance | Evidence-driven tasks only | Earlier relevant gates |
+| R | Release track | All platforms | Unified release layer planned | Shared CLI, Play/iOS paths; macOS after B1, F-Droid publishing after B2 | B1 for macOS; B2 for F-Droid publishing |
 
 P0 denotes work to resolve before the **relevant release**, not an assertion that
 all platforms must block each other's releases. Where independent, use
@@ -70,11 +71,16 @@ separate focused PRs and run only the affected platform gates plus Rust gates.
 
 ### A1 — Apple App Transport Security and HTTP-only resources
 
-**Evidence:** iOS/macOS application Info.plists currently contain no ATS policy
-exceptions. The apps use different HTTP clients depending on their operation:
-URLSession image and download paths and AVFoundation playback.
+**Implemented:** Both Apple host Info.plists set
+`NSAppTransportSecurity/NSAllowsArbitraryLoads = true` and have structural
+tests. This is deliberately broad because arbitrary feed media uses both
+URLSession and AVFoundation; see [APPLE_HTTP_MEDIA_ATS.md](APPLE_HTTP_MEDIA_ATS.md)
+for the security trade-off and App Store rationale. Widget ATS is unchanged.
+**Outstanding:** Real iOS and Mac HTTP-only image/artwork, streaming, download
+and redirect verification (including the separate HTTP account warning).
+The points below preserve the original verification contract.
 
-**Implementation:**
+**Original implementation/validation scope:**
 
 1. Establish controlled HTTP-only test endpoints for an article image, podcast
    enclosure download and podcast playback/streaming. Check both iOS and macOS.
@@ -98,12 +104,14 @@ ATS exception is introduced without an explicit reason.
 
 ### A2 — Rust UniFFI EventSubscription and Apple lifecycle
 
-**Evidence:** Rust `EventSubscription` currently exposes `unsubscribe()`
-without a `Drop` implementation. Android explicitly unsubscribes and closes
-its handle; Apple clients have paths that only set subscriptions to `nil`.
-Some Apple event listeners hold a strong reference to the Flux Core.
+**Implemented in part:** `core/crates/flux-uniffi/src/lib.rs` now has an
+idempotence-compatible `Drop for EventSubscription` fallback in addition to
+explicit `unsubscribe()`. This removes the original missing-Drop finding.
+**Outstanding:** Verify all Apple ownership/unsubscribe paths, listener
+lifecycle, possible strong references, repeated account/session replacement
+and memory retention before closing A2. Source presence is not leak-test evidence.
 
-**Implementation:**
+**Original implementation/validation scope:**
 
 1. Map all macOS/iOS `subscribeEvents` and `eventSubscription` ownership paths,
    including newsreader, media runtime, widgets, account changes and resets.
@@ -125,12 +133,14 @@ and no retained retired Core session.
 
 ### A3 — Android WorkManager constraints when download policy changes
 
-**Evidence:** `AndroidMediaTransferCoordinator.reconcile()` enqueues unique
-transfer requests using `ExistingWorkPolicy.KEEP`. Switching from
-`UNMETERED_ONLY` to `ANY_NETWORK` does not replace already-enqueued requests
-with the old network constraint.
+**Implemented:** `AndroidMediaTransferCoordinator.reconcile()` detects
+changed policy tags for existing requests and uses WorkManager `updateWork()`
+instead of relying on `ExistingWorkPolicy.KEEP` alone. Tests in
+`AndroidMediaTransferPolicyTagsTest.kt` cover policy changes and unchanged
+constraints. **Outstanding:** Reproduce policy changes on queued/running
+downloads and real Wi-Fi/mobile networks; do not mark A3 runtime accepted yet.
 
-**Implementation:**
+**Original implementation/validation scope:**
 
 1. Add a reproducible test: queue download on unmetered-only; while pending,
    change to any network; verify the download becomes eligible on mobile data.
@@ -147,11 +157,14 @@ running/completed transfers retain correct semantics on both network types.
 
 ### A4 — Dedicated Rust regression gate in CI
 
-**Evidence:** `apple.yml` and `android.yml` compile the Rust bindings as
-part of native builds; their current test scripts do not run workspace
-`cargo test`, `cargo fmt` or `cargo clippy` as independent CI gates.
+**Implemented:** `.github/workflows/rust.yml` runs the separate Rust workspace
+tests and Clippy on Core/workflow changes, plus a formatting audit on Rust
+1.98.0. **Important remaining gap:** `cargo fmt --check` currently uses
+`continue-on-error: true` for pre-existing formatting debt, so formatting
+is **not yet a blocking gate**. Required-check branch settings and strict
+warning handling must be assessed separately. Do not call A4 fully complete.
 
-**Implementation:**
+**Original implementation/validation scope:**
 
 1. Add one shared, native-host Rust job/workflow triggered by changes to
    `core/**` and its own workflow, and required for relevant PR checks.
@@ -172,13 +185,14 @@ independently of UniFFI compilation, while native tests remain intact.
 
 ### B1 — Enable the macOS App Sandbox before App Store export
 
-**Code implemented; signed acceptance deferred:** PR #38 added the host
-Sandbox entitlements and sandbox-local media paths. The owner explicitly
-postponed signed/device acceptance on 12 October 2026 while native C3 work
-continues. This does **not** satisfy B1 or authorize Mac App Store release.
-The remaining signed-device acceptance checklist is authoritative in
-[MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md). Feature-level
-work (including C3) is independent of this signing gate.
+**Code implemented; signed acceptance still open:** PR #38 added the host
+Sandbox entitlements and sandbox-local media paths. PR #53 added
+`verify-sandbox.sh`, signed development build validation and protected
+`install-local.sh` staging; [Apple CI #164](https://github.com/KevinCFechtel/Flux/actions/runs/38924332033)
+passed. C3.1–C3.7 are now merged, so B1 can be tested alongside C3.8 on one
+signed Mac installation **with separate acceptance records**. This does
+**not** satisfy B1 or authorize Mac App Store export until fresh-container
+runtime checks pass. See [MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md).
 
 The implementation-oriented steps below are historical requirements; only
 items not yet proven by the signed-app checklist remain release-open.
@@ -213,11 +227,13 @@ from future Mac App Store signing and does not verify store eligibility.
 7. Only after sandbox acceptance, implement macOS archive/export/Transporter
    scripts according to `RELEASE_DISTRIBUTION.md`.
 
-**Done when:** fresh sandbox install and relaunch function end-to-end, Core
-state and credentials persist within the container, file dialogs work, the
-widget shares data correctly, and the correctly entitled/provisioned Mac App
-Store artifact can be exported and validated. The absence of an old-data
-migration is not a failure.
+**B1 runtime gate done when:** signed development app, fresh sandbox install
+and relaunch function end-to-end; Core data, credentials, media and App Group
+persist; file dialogs, widgets, login item and background operation work; no
+unresolved sandbox denials remain. **Separate R gate:** only *after* B1,
+produce and validate a correctly provisioned Mac App Store archive/export.
+Mac App Store export is not a prerequisite to closing B1; no legacy macOS
+data migration is required.
 
 ### B2 — F-Droid reproducibility/scanner feasibility before publishing
 
@@ -254,6 +270,15 @@ compatibility is demonstrated before publication automation replaces legacy.
 
 ### C1 — Android localization
 
+**Status (16 October): source extraction and the German catalog progressed
+through PRs #44–#47.** The final documented German catalog covers 500
+translatable base entries (including 11 plurals); the additional five locales
+are intentionally awaiting reviewed Weblate translations. Remaining
+unmapped/dynamic messages and actual alternate-locale device behavior have not
+been fully signed off. Historic scan findings are tracked in
+[ANDROID_LOCALIZATION_AUDIT.md](ANDROID_LOCALIZATION_AUDIT.md); do not confuse
+the source-level audit or green CI with runtime or Weblate completion.
+
 Extract user-visible Android text into resources (including settings, readers,
 navigation, download UI, notifications and widgets). Cover the **seven target
 languages specified by the mobile product contract**, with locale-sensitive
@@ -266,16 +291,27 @@ locale/UI tests pass.
 
 ### C2 — Android feed and category creation
 
-Expose native add-feed/add-category flows using existing Core/UniFFI domain
-APIs, including input validation, errors, categories and navigation refresh.
-Do not duplicate Miniflux API/persistence in Kotlin. Follow the product
-contract and existing native Android navigation patterns.
+**Implemented in current source; practical closeout open.**
+`AndroidFeedCreationDialog.kt` exposes feed discovery/selection and category
+creation through Core/UniFFI, with URL/duplicate validation and localized
+failure messages. `AdaptiveAppShell.kt` refreshes navigation, requests sync
+and selects created entities; `AndroidFeedCreationPolicyTest.kt` covers
+validation and errors. Verify success, duplicate/failure, sync and restart
+on a device/emulator before marking C2 accepted. Do not rebuild these flows
+solely because the original roadmap described them as planned.
 
 **Done when:** feeds/categories can be created from the Android UI, appear in
 navigation after success and survive sync/restart; failure and duplicate
 cases are handled.
 
 ### C3 — macOS feature-parity completion (approved scope)
+
+**Implementation status (16 October):** C3.1–C3.7 were merged via PRs #49–#52.
+[Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
+passed on combined `main` `2edc6537`. C3.8 real-Mac functional sign-off
+remains open, including the PR #54 Visual Compact hover overlay. B1 signed
+Sandbox acceptance is separately open; the PR #53 verifier does not replace it.
+See [MACOS_C3_FEATURE_PARITY_ROADMAP.md](MACOS_C3_FEATURE_PARITY_ROADMAP.md).
 
 **Decision (12 October 2026):** Functional parity with iOS/Android is the
 default; macOS retains native menu-bar/window controls rather than copying
@@ -325,7 +361,9 @@ changes include real-device or signed-artifact acceptance as appropriate.
 
 **Sequencing with release work:**
 
-- A1/A2/A3/A4: correctness and baseline CI first.
+- A1/A2/A3: implementation work exists; close actual per-platform runtime and
+  lifecycle regression gaps before the corresponding release. A4 Rust tests/
+  Clippy exist, but formatting is not yet a blocking check.
 - B1 must finish **before** the macOS App Store build/export deliverable
   described in `RELEASE_DISTRIBUTION.md` section 7.
 - B2 must finish **before** the native F-Droid publication workflow described

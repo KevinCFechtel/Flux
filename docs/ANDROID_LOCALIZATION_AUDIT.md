@@ -1,8 +1,19 @@
-# Android localization audit — 2026-10-12
+# Android localization audit — original 2026-10-12 audit; status reviewed 2026-10-16
 
-**Status: the documented high-confidence UI literals have been extracted in this PR; wider dynamic/background localization audit remains open. C1 is not yet fully technically Weblate-ready.**
+**Current status (16 October 2026): C1 SOURCE WORK SUBSTANTIALLY IMPLEMENTED;
+RUNTIME / WEBLATE ACCEPTANCE OPEN.** The later PR #47 follow-ups extracted
+additional visible strings and added a presentation-boundary message resolver.
+The German `values-de` catalog covers **all 500 documented translatable source
+entries (including 11 plurals)**, as recorded in the final 12 October updates
+below. English remains the canonical fallback; `es`, `gl`, `nl`, `ta`, and
+`tr` are *untranslated Weblate targets*, not approved translations.
+The full source scan is heuristic; remaining dynamic/unmapped errors, locale
+refresh, widget/Android Auto, migration status display and device/emulator copy
+review still need acceptance. No live Weblate integration is claimed.
+The section-specific counts and open findings below are dated **historical
+snapshots**, not the current number of untranslated German catalog entries.
 
-## Scope and methodology
+## Scope and methodology (historical initial scan)
 
 - PR #44 was squashed to `main` as `854a9a1376a5efde8fdf0a398b3a870e05ab7152` after Android CI succeeded on its tip.
 - The repository has **71 Kotlin files in `android/app/src/main`**. This audit inspected representative user-facing source files in the merged tree using the same kinds of literal patterns as `android/Build/check-localization.py`, plus manual attention to more complex displayed text.
@@ -150,9 +161,9 @@ The real widget provider now translates the All and Bookmarks scope headers thro
 
 The Android gate for `6aebd3a` failed at Kotlin compilation: `AndroidLegacyMigrationNotice.kt` had one missing parenthesis in the Done/Continue button. The follow-up closes that syntax error. A runtime display-path review additionally found the manual-sync snackbar in `AndroidArticleTimelineShell.kt` bypassing the localization bridge; it now resolves known messages through the Android `Context`. Persisted numeric migration details (missing audio, failed file adoption, missing articles, ambiguous attachments, discarded playback) are now resolved with resource plurals, including skipped-status descriptions. A dedicated JVM test covers the persisted English-format counter matching. These source-level fixes do not establish that another-locale device/emulator acceptance has occurred; target locale catalogs are still awaiting Weblate translations. CI must be rerun on the resulting commit.
 
-## German device-review catalog — 2026-10-12
+## German device-review catalog — 2026-10-12 (intermediate snapshot)
 
-The German `values-de/strings.xml` now contains **433 translated resource entries** (422 strings and 11 plurals) of 501 translatable base entries. One intentionally non-translatable example URL stays in `values/strings.xml`. The remaining 67 translation entries consist of error, failure and diagnostic copy intentionally left in canonical English for the first review, as agreed. The German wording targets ordinary navigation, settings, account, playback, Listening List, widgets, Android Auto, migration, backup, diagnostics UI, accessibility and status labels. `Listening List`, `Reader`, `Miniflux`, `Weblate` and technical proper names are retained where they function as product/feature terms.
+The German `values-de/strings.xml` at this intermediate step contained **433 translated resource entries** (422 strings and 11 plurals) of 501 translatable base entries. One intentionally non-translatable example URL stays in `values/strings.xml`. The remaining 67 translation entries consist of error, failure and diagnostic copy intentionally left in canonical English for the first review, as agreed. The German wording targets ordinary navigation, settings, account, playback, Listening List, widgets, Android Auto, migration, backup, diagnostics UI, accessibility and status labels. `Listening List`, `Reader`, `Miniflux`, `Weblate` and technical proper names are retained where they function as product/feature terms.
 
 Pre-commit source comparison found no duplicate German keys, no dangling `<string>` tags, no XML-invalid bare ampersands and no English/German placeholder token mismatches. This is a **source-level validation** only. German on-device screens still require review for length, idiom, typography, grammatical plural agreement and resource reloading. The CI baseline first failed due to an Android Lint `LocalContextGetResourceValueCall` in `ConfigurationBackupScreen.kt`; addressed by resolving the value with Compose `stringResource()` before the event handler. Do not claim runtime acceptance until the user tests on the device and latest CI is green.
 
@@ -164,3 +175,21 @@ Following the user decision that **technical/internal store errors may remain En
 ### CI fix — staged target locales (2026-10-12)
 
 The Android workflow for PR #47 at `45f79ba` reached the Android CI gate, compiled Kotlin, and passed JVM unit tests, but failed at Android Lint `MissingTranslation` (**501 findings**). The German `values-de` catalog is populated; the other five target-language resource folders intentionally remain empty for reviewed Weblate translations. Android already uses the canonical English source as fallback. The app Gradle configuration therefore disables **only** this particular Lint rule; other lint and test gates remain active. This is a documented staging exception, not proof of translated coverage in Spanish, Galician, Dutch, Tamil or Turkish. Restore `MissingTranslation` once those catalog translations are complete and reviewed. Verification requires a new green workflow on the updated commit.
+
+## Current C1 closeout gates (reconciled 16 October 2026)
+
+- **Already in source:** merged extraction/legacy-message presentation bridge,
+  localized provider scope headings and known migration counter plurals; German
+  base resource coverage documented as 500/500 translatable entries. Do not
+  repeat these source changes without new evidence.
+- **Still open:** classify residual unmapped/dynamic UI error paths and
+  accessibility/Android Auto/widget/migration surfaces, test locale reload,
+  German copy and plurals on a device/emulator, and verify the exact final
+  Android CI for any further code changes.
+- **Translation handoff:** retain English canonical resources and five empty
+  locale targets for reviewed Weblate work. Do not invent or auto-fill
+  Spanish, Galician, Dutch, Tamil or Turkish translations. The
+  `MissingTranslation` lint suppression is a staging exception until reviewed
+  catalogs are supplied.
+- **Sign-off rule:** green CI and resource coverage alone do not close C1;
+  log the device/emulator acceptance and Weblate handoff separately.
