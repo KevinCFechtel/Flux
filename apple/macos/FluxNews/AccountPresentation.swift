@@ -7,7 +7,10 @@ enum SupportLogRedaction {
             result = result.replacingOccurrences(of: secret, with: "<redacted>")
         }
         for pattern in [
-            #"(?i)\b(?:authorization|api[_ -]?key|password|access[_ -]?token|token|cookie)\s*[:=]\s*[^\s,;]+"#,
+            // Mask the complete credential: a generic "Authorization: \S+" rule
+            // leaves the token exposed for schemes such as "Bearer abc123".
+            #"(?i)\b(?:proxy-)?authorization\s*[:=]\s*(?:(?:Bearer|Basic|Token|Digest)\s+)?[^\s,;]+"#,
+            #"(?i)\b(?:api[_ -]?key|password|access[_ -]?token|token|cookie)\s*[:=]\s*[^\s,;]+"#,
             #"(?i)\bBearer\s+[^\s,;]+"#,
             #"(?i)\bhttps?://[^\s<>"']+"#,
             #"(?i)\bfile://[^\s<>"']+"#,

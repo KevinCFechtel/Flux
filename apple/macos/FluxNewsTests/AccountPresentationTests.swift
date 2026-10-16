@@ -32,6 +32,24 @@ final class AccountPresentationTests: XCTestCase {
         XCTAssertEqual(SupportLogRedaction.sanitize("sync completed items=3"), "sync completed items=3")
     }
 
+    func testAuthorizationHeaderMaskingConsumesSchemeAndActualSecret() {
+        let cases = [
+            "Authorization: Bearer abc123",
+            "authorization=Basic QWxhZGRpbjpPcGVuU2VzYW1l",
+            "Proxy-Authorization: Digest username=alice,response=secret",
+            "Authorization: Token sensitive-token",
+            "Authorization: plain-secret"
+        ]
+        for raw in cases {
+            let sanitized = SupportLogRedaction.sanitize(raw)
+            XCTAssertFalse(sanitized.contains("abc123"), "Bearer token leaked")
+            XCTAssertFalse(sanitized.contains("QWxhZGRpbjpPcGVuU2VzYW1l"), "Basic token leaked")
+            XCTAssertFalse(sanitized.contains("sensitive-token"), "Token value leaked")
+            XCTAssertFalse(sanitized.contains("plain-secret"), "Plain token leaked")
+            XCTAssertFalse(sanitized.contains("response=secret"), "Digest parameters leaked")
+        }
+    }
+
     func testUnencryptedHTTPWarningOnlyForValidHTTPServerURLs() {
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("http://news.example:8080/miniflux"))
         XCTAssertTrue(AccountTransportWarning.usesUnencryptedHTTP("  HTTP://news.example/  "))
