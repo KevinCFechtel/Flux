@@ -5,9 +5,9 @@ import pathlib
 import sys
 import xml.etree.ElementTree as ET
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "FluxNews" / "Localizable.xcstrings"
-HANDOFF = ROOT.parent / "Weblate"
+HANDOFF = ROOT / "Weblate"
 LANGUAGES = ("es", "gl", "nl", "ta", "tr")
 IGNORED = {"", "%@", "%arg", "·", "https://example.com"}
 

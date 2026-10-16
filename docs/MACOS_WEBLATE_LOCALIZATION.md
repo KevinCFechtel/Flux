@@ -12,6 +12,6 @@ The XLIFF files are a handoff snapshot, not an automatic two-way sync. When the 
 
 ## Validation
 
-Run `python3 apple/macos/Build/check-localization.py` to check that the five XLIFF scaffolds match the macOS catalog, that no target translations have been invented, and that German entries are marked translated. Verify the resulting Xcode catalog with the Apple CI. XLIFF scaffolding is intentionally not bundled as localized app resources.
+Run `python3 apple/macos/Build/check-localization.py` (also part of the macOS CI gate) to check that the five XLIFF scaffolds match the macOS catalog, that no target translations have been invented, and that German entries are marked translated. Verify the resulting Xcode catalog with the Apple CI. XLIFF scaffolding is intentionally not bundled as localized app resources.
 
 Accessibility acceptance also includes VoiceOver descriptions, keyboard navigation, narrow Settings layout, long copy and localization of new UI strings. Any untranslated future locale falls back to English.
