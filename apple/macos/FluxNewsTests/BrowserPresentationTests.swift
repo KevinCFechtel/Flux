@@ -303,6 +303,60 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertNil(patch.autoDownloadAudio)
     }
 
+    func testC36BackgroundRecoveryRequiresPreferenceConnectionAndNoActiveSync() {
+        let now = Date(timeIntervalSince1970: 1_770_000_000)
+        func allowed(configured: Bool = true, enabled: Bool = true,
+                     available: Bool? = true, inFlight: Bool = false,
+                     last: Date? = nil) -> Bool {
+            BackgroundRecoveryPolicy.shouldAttempt(
+                configured: configured, backgroundEnabled: enabled,
+                networkAvailable: available, syncInFlight: inFlight,
+                lastAttempt: last, now: now
+            )
+        }
+        XCTAssertTrue(allowed())
+        XCTAssertTrue(allowed(available: nil)) // Before first network callback.
+        XCTAssertFalse(allowed(configured: false))
+        XCTAssertFalse(allowed(enabled: false))
+        XCTAssertFalse(allowed(available: false))
+        XCTAssertFalse(allowed(inFlight: true))
+        XCTAssertFalse(allowed(last: now.addingTimeInterval(-10)))
+        XCTAssertFalse(allowed(last: now.addingTimeInterval(-59)))
+        XCTAssertTrue(allowed(last: now.addingTimeInterval(-60)))
+        XCTAssertTrue(allowed(last: now.addingTimeInterval(-900)))
+    }
+
+    func testC36NetworkRecoveryOnlyFiresOnActualReconnect() {
+        var state = NetworkRecoveryState()
+        XCTAssertFalse(state.observe(isAvailable: true)) // Initial online, no duplicate startup sync.
+        XCTAssertFalse(state.observe(isAvailable: true))
+        XCTAssertFalse(state.observe(isAvailable: false))
+        XCTAssertFalse(state.observe(isAvailable: false))
+        XCTAssertTrue(state.observe(isAvailable: true))
+        XCTAssertFalse(state.observe(isAvailable: true))
+        XCTAssertFalse(state.observe(isAvailable: false))
+        XCTAssertTrue(state.observe(isAvailable: true)) // A second real reconnect.
+    }
+
+    func testC36FirstOfflineThenOnlineTriggersRecovery() {
+        var state = NetworkRecoveryState()
+        XCTAssertFalse(state.observe(isAvailable: false))
+        XCTAssertTrue(state.observe(isAvailable: true))
+    }
+
+    func testC36LifecycleObserversExistAndUseSingleRecoveryGate() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let appDelegate = try String(contentsOf: root.appendingPathComponent("FluxNews/AppDelegate.swift"), encoding: .utf8)
+        let store = try String(contentsOf: root.appendingPathComponent("FluxNews/BrowserStore.swift"), encoding: .utf8)
+        XCTAssertTrue(appDelegate.contains("NSWorkspace.didWakeNotification"))
+        XCTAssertTrue(appDelegate.contains("NWPathMonitor()"))
+        XCTAssertTrue(appDelegate.contains("networkMonitor?.cancel()"))
+        XCTAssertTrue(store.contains("BackgroundRecoveryPolicy.shouldAttempt("))
+        XCTAssertTrue(store.contains("networkRecoveryState.observe(isAvailable: isAvailable)"))
+        XCTAssertTrue(store.contains("syncIfStale(reason: .resume)"))
+        XCTAssertTrue(store.contains("lastSyncAttempt = .now"))
+    }
+
     private func listeningItem(enclosures: [ListeningListEnclosure], activeID: Int64?) -> ListeningListItem {
         ListeningListItem(articleId: 7, feedId: 11, title: "Episode", feedTitle: "Feed", publishedAt: "2026-01-01T00:00:00Z", addedAt: "2026-01-02T00:00:00Z", remotePresent: true, audioEnclosures: enclosures, activeEnclosureId: activeID)
     }

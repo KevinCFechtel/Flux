@@ -7,6 +7,8 @@ PROJECT="${REPOSITORY_DIR}/apple/macos/FluxNews.xcodeproj"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData-macos}"
 DESTINATION="${DESTINATION:-platform=macOS}"
 
+python3 "${REPOSITORY_DIR}/apple/macos/Build/check-localization.py"
+
 "${REPOSITORY_DIR}/apple/Build/build-uniffi.sh"
 
 # The test gate validates compilation and tests only. Installable/signed app

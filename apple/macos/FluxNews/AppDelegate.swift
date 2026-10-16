@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CoreSpotlight
+import Network
 import SwiftUI
 
 @MainActor
@@ -13,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var settingsObservation: AnyCancellable?
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
+    private var networkMonitor: NWPathMonitor?
+    private let networkMonitorQueue = DispatchQueue(label: "FluxNews.macOS.network-recovery")
     private let spotlightIndexer = SpotlightIndexer()
     private let playbackPresentationState = MediaPlaybackPresentationState()
     private let transferPresentationState = MediaTransferPresentationState()
@@ -31,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self, name: NSWorkspace.didWakeNotification, object: nil)
+        networkMonitor?.cancel()
+        networkMonitor = nil
         mediaRemoteControlCoordinator?.cleanup()
         playbackCoordinator?.applicationWillTerminate()
     }
@@ -122,9 +128,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 store.globalShortcutRegistrationError = "The selected global shortcut is unavailable. Choose another shortcut."
             }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleSystemWake(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        startNetworkMonitoring()
         store.start()
     }
-    func applicationDidBecomeActive(_ notification: Notification) { playbackCoordinator?.applicationDidBecomeActive(); store.resume(); transferCoordinator?.reconcile() }
+
+    private func startNetworkMonitoring() {
+        guard networkMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let available = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                self?.store.networkAvailabilityChanged(isAvailable: available)
+            }
+        }
+        networkMonitor = monitor
+        monitor.start(queue: networkMonitorQueue)
+    }
+
+    @objc private func handleSystemWake(_ notification: Notification) {
+        store.systemDidWake()
+        transferCoordinator?.reconcile()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        playbackCoordinator?.applicationDidBecomeActive()
+        store.resume()
+        transferCoordinator?.reconcile()
+    }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { _ = AppRouter.shared.handle(url: url) }
     }
