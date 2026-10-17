@@ -33,6 +33,24 @@ final class MacScrolloverEndPolicyTests: XCTestCase {
 
 @MainActor
 final class BrowserPresentationTests: XCTestCase {
+    func testMacMediaArtworkProbeParityWithIOSAndUsesSessionBoundCore() throws {
+        let project = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let browser = try String(contentsOf: project.appendingPathComponent("FluxNews/BrowserStore.swift"), encoding: .utf8)
+        let list = try String(contentsOf: project.appendingPathComponent("FluxNews/ListeningListViews.swift"), encoding: .utf8)
+        let player = try String(contentsOf: project.appendingPathComponent("FluxNews/PlayerView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(browser.contains("func requestMediaArtworkProbe(articleID: Int64)"))
+        XCTAssertTrue(browser.contains("try core.probeMediaArtwork(enclosureId: enclosureID)"))
+        XCTAssertTrue(browser.contains("self.requestMediaArtworkProbe(articleID: articleID)"))
+        XCTAssertTrue(browser.contains("if source == nil { self.enqueueMediaArtworkProbes([enclosureID]) }"))
+        XCTAssertTrue(browser.contains("if case .success(true) = result"))
+        XCTAssertTrue(browser.contains("self.core === core"))
+        XCTAssertTrue(browser.contains("artworkProbeInFlight"))
+        XCTAssertTrue(list.contains("store.artworkProbeRevisions["))
+        XCTAssertTrue(player.contains("store.artworkProbeRevisions["))
+    }
+
     func testHostATSAllowsUserSuppliedHTTPMediaWithoutChangingWidgetPolicy() throws {
         let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let hostData = try Data(contentsOf: project.appendingPathComponent("FluxNews/Info.plist"))
