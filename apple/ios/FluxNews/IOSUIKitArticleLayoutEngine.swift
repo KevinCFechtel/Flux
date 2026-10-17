@@ -589,9 +589,14 @@ struct IOSVisualCompactPreviewFlow: Equatable {
         }
         let scale = max(1, displayScale)
         let lineStep = font.lineHeight + font.leading
-        let sideLines = narrowWidth > 0 && heightBesideImage >= font.lineHeight
-            ? min(maxLines, max(0, Int(floor(
-                (heightBesideImage + font.leading + 0.01) / max(1, lineStep)
+        // A side-column line only needs to START above the image bottom.
+        // It can extend below that edge without ever crossing the image:
+        // the whole line remains in the narrow column. Requiring the entire
+        // glyph height to fit leaves a visible empty strip before the first
+        // full-width continuation line.
+        let sideLines = narrowWidth > 0 && heightBesideImage > 0
+            ? min(maxLines, max(0, Int(ceil(
+                heightBesideImage / max(1, lineStep)
             )))) : 0
 
         let content = text as NSString
@@ -726,6 +731,11 @@ enum IOSUIKitArticleLayoutEngine {
             ?? coreTextHeight(input.preview, font: previewFont, width: previewWidth,
                 maximumLines: input.previewLines.rawValue, displayScale: scale)
         let continuationHeight = sidePreviewFlow?.belowHeight ?? 0
+        // This is one continuous paragraph, not two independently spaced
+        // paragraphs. Only keep the normal text spacing if there was no line
+        // beside the image at all.
+        let continuationSpacing = (sidePreviewFlow?.besideHeight ?? 0) > 0
+            ? CGFloat.zero : IOSUIKitArticleGeometry.textSpacing
 
         let dateRowReadingTimeTextWidth = usesDateRowReadingTime
             ? coreTextWidth(input.readingTime ?? "", font: dateFont, displayScale: scale)
@@ -752,7 +762,7 @@ enum IOSUIKitArticleLayoutEngine {
         if isSideTitleVariant {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing
                 + sideTitleRowHeight
-                + (continuationHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + continuationHeight : 0)
+                + (continuationHeight > 0 ? continuationSpacing + continuationHeight : 0)
         } else if variant == .visualSideTitleTextOnly {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing
                 + sideTitleRowHeight
@@ -933,7 +943,7 @@ enum IOSUIKitArticleLayoutEngine {
         )
         let previewContinuationFrame: CGRect?
         if continuationHeight > 0 && isSideTitleVariant {
-            let nextY = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
+            let nextY = titleTop + sideTitleRowHeight + continuationSpacing
             previewContinuationFrame = CGRect(
                 x: textOrigin.x, y: nextY,
                 width: infoWidth, height: continuationHeight
