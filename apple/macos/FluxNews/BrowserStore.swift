@@ -440,7 +440,7 @@ final class BrowserStore: ObservableObject {
         }
         return ArticleQuery(
             scope: coreScope,
-            readFilter: unreadOnly ? .unread : .all,
+            readFilter: requestedScope == .starred ? .all : (unreadOnly ? .unread : .all),
             starredFilter: requestedScope == .starred ? .starred : .all,
             sort: newestFirst ? .newestFirst : .oldestFirst,
             limit: 0,
