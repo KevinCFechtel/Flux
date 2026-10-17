@@ -9,7 +9,8 @@ final class MacPlayerM1SourceTests: XCTestCase {
         let source = try playerSource()
         XCTAssertTrue(source.contains("Image(nsImage: artworkImage)"))
         XCTAssertTrue(source.contains(".task(id: artworkKey)"))
-        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $showNotesExpanded)"))
+        XCTAssertTrue(source.contains("showNotesExpanded.toggle()"))
+        XCTAssertTrue(source.contains("if showNotesExpanded {"))
         XCTAssertTrue(source.contains("loadPlayerShowNotes(articleID: articleID)"))
         XCTAssertTrue(source.contains("Button(\"Retry\")"))
         XCTAssertTrue(source.contains("onPlayEnclosure(enclosure.enclosure)"))
@@ -363,7 +364,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 18_000)
     }
 
-    func testStopKeepsNativePlaybackItemLoaded() throws {
+    func testStopUnloadsNativePlaybackItem() throws {
         let core = FakePlaybackCore(status: .inProgress)
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
@@ -371,8 +372,9 @@ final class MediaCoordinatorTests: XCTestCase {
 
         coordinator.stop()
 
-        XCTAssertEqual(engine.unloadCount, 0)
-        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+        XCTAssertNil(coordinator.presentationState.loadedEnclosure)
         XCTAssertEqual(coordinator.presentationState.status, .stopped)
     }
 
