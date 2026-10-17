@@ -50,6 +50,62 @@ internal object AndroidArticleRowPolicy {
     }
 }
 
+/**
+ * The preview shares the narrow column only while a new text line can begin
+ * above the thumbnail's bottom. It can finish a little below that edge; its
+ * successor then starts at full width without an extra paragraph gap.
+ *
+ * Line coordinates and character indices come from Compose TextMeasurer.
+ * This pure policy is shared with unit tests and caps the total preview lines.
+ */
+internal data class AndroidVisualCompactPreviewBreak(
+    val sideLines: Int,
+    val splitIndex: Int,
+) {
+    fun sideText(preview: String, totalLineLimit: Int): String =
+        if (sideLines == 0) "" else if (sideLines >= totalLineLimit) preview
+        else preview.substring(0, splitIndex).trimEnd()
+
+    fun continuationText(preview: String, totalLineLimit: Int): String =
+        if (sideLines >= totalLineLimit) "" else preview.substring(splitIndex).trimStart()
+
+    fun continuationLines(totalLineLimit: Int): Int = (totalLineLimit - sideLines).coerceAtLeast(0)
+}
+
+internal object AndroidVisualCompactFlowPolicy {
+    fun breakFor(
+        textLength: Int,
+        maximumLines: Int,
+        availableSideHeightPx: Float,
+        measuredLineCount: Int,
+        lineTopPx: (Int) -> Float,
+        lineEnd: (Int) -> Int,
+    ): AndroidVisualCompactPreviewBreak {
+        if (textLength == 0 || availableSideHeightPx <= 0f || maximumLines <= 0) {
+            return AndroidVisualCompactPreviewBreak(sideLines = 0, splitIndex = 0)
+        }
+        var sideLines = 0
+        val limit = minOf(maximumLines, measuredLineCount)
+        while (sideLines < limit && lineTopPx(sideLines) < availableSideHeightPx) {
+            sideLines++
+        }
+        val index = if (sideLines == 0) 0
+        else lineEnd(sideLines - 1).coerceIn(0, textLength)
+        return AndroidVisualCompactPreviewBreak(sideLines, index)
+    }
+
+    fun continuationTop(
+        imageBottomPx: Int,
+        publicationBottomPx: Int,
+        sidePreviewBottomPx: Int?,
+        textSpacingPx: Int,
+    ): Int = if (sidePreviewBottomPx == null) {
+        maxOf(imageBottomPx, publicationBottomPx) + textSpacingPx
+    } else {
+        maxOf(imageBottomPx, sidePreviewBottomPx)
+    }
+}
+
 internal fun parseArticlePublishedAtMillis(value: String): Long? =
     runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
         .recoverCatching { Instant.parse(value).toEpochMilli() }

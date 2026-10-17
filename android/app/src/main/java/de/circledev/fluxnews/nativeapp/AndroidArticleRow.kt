@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -138,55 +143,143 @@ internal fun AndroidArticleTimelineRow(
                 }
             }
 
-            AndroidArticleRowLayoutVariant.VisualCompactNarrow -> {
-                val imageWidth = availableWidth * 0.32f
+            AndroidArticleRowLayoutVariant.VisualCompactNarrow,
+            AndroidArticleRowLayoutVariant.VisualCompactWide,
+            -> {
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     metadata()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            title()
-                            publication()
-                        }
-                        ArticleImage(
-                            imageUrl = article.imageUrl!!,
-                                                modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
-                        )
-                    }
-                    preview()
+                    AndroidVisualCompactFlowBody(
+                        article = article,
+                        hasAudio = hasAudio,
+                        preferences = preferences,
+                        publicationReferenceMillis = publicationReferenceMillis,
+                    )
                 }
             }
+        }
+    }
+}
 
-            AndroidArticleRowLayoutVariant.VisualCompactWide -> {
-                val imageWidth = availableWidth * 0.32f
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    metadata()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            title()
-                            publication()
-                            preview()
-                        }
-                        ArticleImage(
-                            imageUrl = article.imageUrl!!,
-                                                modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
-                        )
-                    }
-                }
-            }
+/**
+ * Visual Compact keeps the feed/status row full width. Inside this body the
+ * preview uses real Compose text line breaks beside the trailing 4:3 image,
+ * then continues at full width below it without inserting a new paragraph.
+ *
+ * The measured layout belongs to the visible LazyColumn item; an image load
+ * does not change any of its dimensions.
+ */
+@Composable
+private fun AndroidVisualCompactFlowBody(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+    preferences: AndroidArticlePreferenceState,
+    publicationReferenceMillis: Long,
+) {
+    val previewText = article.preview.trim()
+    val previewStyle = MaterialTheme.typography.bodyMedium
+    val previewColor = MaterialTheme.colorScheme.onSurface.copy(
+        alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+    )
+    val textMeasurer = rememberTextMeasurer()
+    val imageUrl = article.imageUrl ?: return
+    val gap = 7.dp
+    val imageGap = 12.dp
+    val maxPreviewLines = preferences.previewLines.lineCount
+
+    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
+        val width = constraints.maxWidth
+        val imageWidth = (width * 0.32f).roundToInt().coerceIn(1, width)
+        val imageHeight = (imageWidth * 3f / 4f).roundToInt()
+        val gapPx = gap.roundToPx()
+        val imageGapPx = imageGap.roundToPx()
+        val columnWidth = (width - imageWidth - imageGapPx).coerceAtLeast(1)
+        val textConstraints = Constraints(maxWidth = columnWidth)
+        val fullConstraints = Constraints(maxWidth = width)
+
+        val titlePlaceable = subcompose("title") { ArticleTitle(article) }
+            .first().measure(textConstraints)
+        val publicationPlaceable = subcompose("publication") {
+            ArticlePublicationRow(
+                article = article,
+                hasAudio = hasAudio,
+                preferences = preferences,
+                publicationReferenceMillis = publicationReferenceMillis,
+            )
+        }.first().measure(textConstraints)
+        val imagePlaceable = subcompose("image") {
+            ArticleImage(
+                imageUrl = imageUrl,
+                modifier = Modifier.size(imageWidth.toDp(), imageHeight.toDp()),
+            )
+        }.first().measure(Constraints.fixed(imageWidth, imageHeight))
+
+        val publicationTop = titlePlaceable.height + gapPx
+        val publicationBottom = publicationTop + publicationPlaceable.height
+        val previewTop = publicationBottom + if (previewText.isNotEmpty()) gapPx else 0
+
+        val lineBreak = if (previewText.isNotEmpty() && previewTop < imageHeight) {
+            val measured = textMeasurer.measure(
+                text = AnnotatedString(previewText),
+                style = previewStyle,
+                constraints = textConstraints,
+                maxLines = maxPreviewLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+            AndroidVisualCompactFlowPolicy.breakFor(
+                textLength = previewText.length,
+                maximumLines = maxPreviewLines,
+                availableSideHeightPx = (imageHeight - previewTop).toFloat(),
+                measuredLineCount = measured.lineCount,
+                lineTopPx = { line -> measured.getLineTop(line) },
+                lineEnd = { line -> measured.getLineEnd(line, visibleEnd = false) },
+            )
+        } else {
+            AndroidVisualCompactPreviewBreak(sideLines = 0, splitIndex = 0)
+        }
+        val sideText = lineBreak.sideText(previewText, maxPreviewLines)
+        val continuationText = lineBreak.continuationText(previewText, maxPreviewLines)
+        val sidePlaceable = if (sideText.isNotEmpty()) {
+            subcompose("previewSide") {
+                Text(
+                    text = sideText,
+                    style = previewStyle,
+                    color = previewColor,
+                    maxLines = lineBreak.sideLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }.first().measure(textConstraints)
+        } else null
+        val sideBottom = sidePlaceable?.let { previewTop + it.height }
+        val continuationTop = AndroidVisualCompactFlowPolicy.continuationTop(
+            imageBottomPx = imageHeight,
+            publicationBottomPx = publicationBottom,
+            sidePreviewBottomPx = sideBottom,
+            textSpacingPx = gapPx,
+        )
+        val continuationPlaceable = if (continuationText.isNotEmpty() &&
+            lineBreak.continuationLines(maxPreviewLines) > 0) {
+            subcompose("previewContinuation") {
+                Text(
+                    text = continuationText,
+                    style = previewStyle,
+                    color = previewColor,
+                    maxLines = lineBreak.continuationLines(maxPreviewLines),
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }.first().measure(fullConstraints)
+        } else null
+        val height = maxOf(
+            imagePlaceable.height,
+            publicationBottom,
+            sideBottom ?: 0,
+            continuationPlaceable?.let { continuationTop + it.height } ?: 0,
+        )
+        layout(width, height) {
+            titlePlaceable.placeRelative(0, 0)
+            publicationPlaceable.placeRelative(0, publicationTop)
+            sidePlaceable?.placeRelative(0, previewTop)
+            continuationPlaceable?.placeRelative(0, continuationTop)
+            imagePlaceable.placeRelative(width - imageWidth, 0)
         }
     }
 }
