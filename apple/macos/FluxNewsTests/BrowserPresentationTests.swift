@@ -81,10 +81,10 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
-    func testHoverActionsStayBelowMetadataAndUseModeSpecificOrientation() {
-        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .visual), .vertical)
-        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .visualCompact), .vertical)
-        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .compact), .horizontal)
+    func testHoverActionsUseDistinctAnchorsWithOneVerticalStack() {
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .previewText)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visualCompact), .trailingThumbnail)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .articleText)
     }
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
