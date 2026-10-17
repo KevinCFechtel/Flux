@@ -1,13 +1,21 @@
 import AppKit
 import SwiftUI
 
-// Keep actions attached to the row metadata's trailing edge. Visual layouts
-// stack beneath the read indicator; Compact keeps a horizontal action strip.
+// All modes use the same vertical hover controls. Only the surface directly
+// below the metadata/read-indicator row changes with the presentation style.
 enum ArticleHoverActionsLayout {
-    enum Orientation: Equatable { case vertical, horizontal }
+    enum Anchor: Equatable {
+        case previewText
+        case trailingThumbnail
+        case articleText
+    }
 
-    static func orientation(for mode: ArticlePresentationMode) -> Orientation {
-        mode == .compact ? .horizontal : .vertical
+    static func anchor(for mode: ArticlePresentationMode) -> Anchor {
+        switch mode {
+        case .visual: .previewText
+        case .visualCompact: .trailingThumbnail
+        case .compact: .articleText
+        }
     }
 }
 
@@ -75,47 +83,44 @@ struct ArticleItem: View {
         VStack(alignment: .leading, spacing: 8) {
             metadata
 
-            // Anchor directly below the metadata/read-indicator row. The
-            // vertical controls cover the trailing thumbnail instead of
-            // floating at the end of the (variable-height) preview.
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button { onSelect(); store.open(article) } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        headline(lineLimit: 3)
+                        publicationRow
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if hasAvailableThumbnail {
                     Button { onSelect(); store.open(article) } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            headline(lineLimit: 3)
-                            publicationRow
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: 112,
+                            height: 84,
+                            cornerRadius: 9
+                        )
                     }
                     .buttonStyle(.plain)
-
-                    if hasAvailableThumbnail {
-                        Button { onSelect(); store.open(article) } label: {
-                            ThumbnailSlot(
-                                article: article,
-                                store: store,
-                                width: 112,
-                                height: 84,
-                                cornerRadius: 9
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                if !article.preview.isEmpty {
-                    Text(article.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(store.articlePreviewLines.rawValue)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The right-hand image sits immediately below the metadata/read
+            // indicator. Anchor to it, never to the preview's variable height.
+            // Without a thumbnail, the controls overlap the trailing headline.
             .overlay(alignment: .topTrailing) {
                 hoverActions
+            }
+
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             audioActions
@@ -155,29 +160,42 @@ struct ArticleItem: View {
             }
             .buttonStyle(.plain)
 
-            // A separate full-width article button keeps the metadata
-            // clickable while the overlay remains outside the button label.
             Button { onSelect(); store.open(article) } label: {
                 VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
                     headline(lineLimit: mode == .compact ? 2 : 3)
                     publicationRow
-                    if !article.preview.isEmpty {
-                        Text(article.preview)
-                            .font(mode == .compact ? .caption : .subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(store.articlePreviewLines.rawValue)
-                            .multilineTextAlignment(.leading)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            // Both orientations begin immediately below the read indicator,
-            // overlap the text rather than consume any of its width, and do
-            // not affect the article row's intrinsic height.
             .overlay(alignment: .topTrailing) {
-                hoverActions
+                // Compact always overlays the text below the read indicator.
+                // Visual only falls back to the headline when no preview exists.
+                if ArticleHoverActionsLayout.anchor(for: mode) == .articleText
+                    || (mode == .visual && article.preview.isEmpty) {
+                    hoverActions
+                }
+            }
+
+            if !article.preview.isEmpty {
+                Button { onSelect(); store.open(article) } label: {
+                    Text(article.preview)
+                        .font(mode == .compact ? .caption : .subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(store.articlePreviewLines.rawValue)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .overlay(alignment: .topTrailing) {
+                    // Visual: headline/date above keep their full width; only
+                    // the preview is covered on hover, with no reserved space.
+                    if ArticleHoverActionsLayout.anchor(for: mode) == .previewText {
+                        hoverActions
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -294,16 +312,8 @@ struct ArticleItem: View {
     }
 
     private var hoverActions: some View {
-        Group {
-            if ArticleHoverActionsLayout.orientation(for: mode) == .vertical {
-                VStack(spacing: 4) {
-                    hoverActionControls
-                }
-            } else {
-                HStack(spacing: 8) {
-                    hoverActionControls
-                }
-            }
+        VStack(spacing: 4) {
+            hoverActionControls
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
