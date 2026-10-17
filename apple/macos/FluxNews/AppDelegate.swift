@@ -51,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             transferCoordinator?.onWorkChanged = nil
             store.onMediaTransferRequested = { [weak self] in self?.transferCoordinator?.reconcile() }
             store.onCancelMediaTransferRequested = { [weak self] id in self?.transferCoordinator?.cancel(enclosureID: id) }
+            store.onReleaseMediaForDownloadDeletion = { [weak self] id in
+                self?.playbackCoordinator?.releaseForDownloadDeletion(enclosureID: id)
+            }
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
             }, presentationState: self.transferPresentationState)
@@ -248,7 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
         let visibleFrame = NSScreen.main?.visibleFrame
         let width = min(820, max(680, (visibleFrame?.width ?? 900) - 80))
-        let height = min(500, max(420, (visibleFrame?.height ?? 580) - 80))
+        // Accommodate all settings sections in the permanently visible sidebar.
+        let height = min(650, max(540, (visibleFrame?.height ?? 730) - 80))
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: height)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -257,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         )
         window.title = "FluxNews Settings"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: min(680, width), height: min(420, height))
+        window.minSize = NSSize(width: min(680, width), height: min(540, height))
         window.delegate = self
         window.contentViewController = NSHostingController(rootView: SettingsView(store: store))
         window.center()

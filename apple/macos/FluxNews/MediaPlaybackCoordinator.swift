@@ -23,6 +23,7 @@ protocol MediaPlaybackCore: AnyObject {
     func restartPlayback(enclosureId: Int64) throws
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws
     func mediaChapters(enclosureId: Int64) throws -> [MediaChapter]
+    func mediaDownload(enclosureId: Int64) throws -> MediaDownload
     func mediaArtwork(reference: String) throws -> Data?
 }
 
@@ -293,7 +294,10 @@ final class MediaPlaybackCoordinator {
     }
 
     func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused }
-    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped }
+    func stop() {
+        guard let activeEnclosureID else { return }
+        releaseForDownloadDeletion(enclosureID: activeEnclosureID)
+    }
     func applicationDidResignActive() { checkpoint() }
     func applicationDidBecomeActive() { sleepTimer.evaluate() }
     func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
@@ -359,6 +363,36 @@ final class MediaPlaybackCoordinator {
             }
         }
     }
+    /// Release a loaded media item after explicit deletion or Stop.
+    /// Pause retains the AVPlayer item so playback can resume immediately.
+    /// The playback checkpoint is persisted before AVPlayer releases the file.
+    func releaseForDownloadDeletion(enclosureID: Int64, checkpointBeforeUnloading: Bool = true) {
+        guard activeEnclosureID == enclosureID else { return }
+        engine.pause()
+        // Completion is already persisted after natural end; a fresh checkpoint
+        // here could overwrite the completed position/status in Core.
+        if checkpointBeforeUnloading { checkpoint() }
+        stopCheckpointTimer()
+        engine.unload()
+        activeEnclosureID = nil
+        completionSent = false
+        preparedDurationMs = nil
+        lastObservedDurationMs = nil
+        preparedStatus = .notStarted
+        presentationState.loadedEnclosure = nil
+        presentationState.feedTitle = ""
+        presentationState.mediaTitle = ""
+        presentationState.artworkSource = nil
+        presentationState.chapters = []
+        presentationState.positionMs = 0
+        presentationState.durationMs = nil
+        presentationState.status = .stopped
+        presentationState.errorMessage = nil
+        presentationState.isLoading = false
+        presentationState.isBuffering = false
+        onPlaybackUseChanged?()
+    }
+
     func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
 
     func setPlaybackRate(_ rate: Double) {
@@ -398,7 +432,14 @@ final class MediaPlaybackCoordinator {
         presentationState.status = .paused
         presentationState.positionMs = engine.currentPositionMs
         stopCheckpointTimer()
-        onPlaybackUseChanged?()
+        // Core requests automatic deletion on completed playback when the
+        // corresponding policy is enabled. AVPlayer must let go of its local
+        // file before transfer reconciliation can remove it.
+        if (try? core.mediaDownload(enclosureId: activeEnclosureID))?.state == .deleteRequested {
+            releaseForDownloadDeletion(enclosureID: activeEnclosureID, checkpointBeforeUnloading: false)
+        } else {
+            onPlaybackUseChanged?()
+        }
     }
 
     private func handleDuration(_ duration: UInt64) {

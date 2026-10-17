@@ -9,7 +9,8 @@ final class MacPlayerM1SourceTests: XCTestCase {
         let source = try playerSource()
         XCTAssertTrue(source.contains("Image(nsImage: artworkImage)"))
         XCTAssertTrue(source.contains(".task(id: artworkKey)"))
-        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $showNotesExpanded)"))
+        XCTAssertTrue(source.contains("showNotesExpanded.toggle()"))
+        XCTAssertTrue(source.contains("if showNotesExpanded {"))
         XCTAssertTrue(source.contains("loadPlayerShowNotes(articleID: articleID)"))
         XCTAssertTrue(source.contains("Button(\"Retry\")"))
         XCTAssertTrue(source.contains("onPlayEnclosure(enclosure.enclosure)"))
@@ -19,6 +20,28 @@ final class MacPlayerM1SourceTests: XCTestCase {
         let source = try sourceFile("ListeningListViews.swift")
         XCTAssertTrue(source.contains(".onTapGesture { onOpenPlayer(item.articleId) }"))
         XCTAssertFalse(source.contains(".onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item)"))
+    }
+
+    func testEpisodePreviewUsesIndependentChapterAndOriginalArticleQueries() throws {
+        let player = try playerSource()
+        let browser = try sourceFile("BrowserStore.swift")
+        XCTAssertTrue(player.contains("loadPlayerPreviewChapters(enclosureID: id)"))
+        XCTAssertTrue(player.contains("previewing ? previewChapters : state.chapters"))
+        XCTAssertTrue(player.contains(".disabled(previewing)"))
+        XCTAssertTrue(player.contains("store.openOriginalArticle(articleID: articleID)"))
+        XCTAssertTrue(browser.contains("try core.mediaChapters(enclosureId: enclosureID)"))
+        XCTAssertTrue(browser.contains("try core.articleSummary(articleId: articleID)"))
+    }
+
+    func testCompactPlayerOffersArtworkAndPlayPauseWithoutOpeningFullPlayer() throws {
+        let nav = try sourceFile("PopoverNavigationViews.swift")
+        let popover = try sourceFile("PopoverContentView.swift")
+        XCTAssertTrue(nav.contains("struct MacCompactPlayerBar: View"))
+        XCTAssertTrue(nav.contains("Image(nsImage: artwork)"))
+        XCTAssertTrue(nav.contains("coordinator.pause()"))
+        XCTAssertTrue(nav.contains("coordinator.play(enclosureID: enclosure.id)"))
+        XCTAssertTrue(popover.contains("MacCompactPlayerBar("))
+        XCTAssertTrue(popover.contains("if playbackState.loadedEnclosure != nil"))
     }
 
     func testPlayerReaderRequestsAreIndependent() throws {
@@ -64,6 +87,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     var restartCount = 0
     var observedDurations = [(Int64, UInt64)]()
     var chapters = [MediaChapter]()
+    var download: MediaDownload?
     var completionShouldFail = false
 
     init(status: PlaybackStatus = .notStarted, positionMs: UInt64 = 0, durationMs: UInt64? = 120_000) {
@@ -88,6 +112,17 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     func restartPlayback(enclosureId: Int64) throws { restartCount += 1; preparation.playbackState = PlaybackState(enclosureId: 7, positionMs: 0, durationMs: 120_000, status: .inProgress, updatedAt: nil) }
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws { observedDurations.append((enclosureId, durationMs)) }
     func mediaChapters(enclosureId: Int64) throws -> [MediaChapter] { chapters }
+    func mediaDownload(enclosureId: Int64) throws -> MediaDownload {
+        download ?? MediaDownload(
+            enclosureId: enclosureId,
+            state: .notDownloaded,
+            origin: nil,
+            localFile: nil,
+            fileSizeBytes: nil,
+            downloadedAt: nil,
+            failureKind: nil
+        )
+    }
     func mediaArtwork(reference: String) throws -> Data? { nil }
 }
 
@@ -329,7 +364,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 18_000)
     }
 
-    func testStopKeepsNativePlaybackItemLoaded() throws {
+    func testStopUnloadsNativePlaybackItem() throws {
         let core = FakePlaybackCore(status: .inProgress)
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
@@ -337,9 +372,70 @@ final class MediaCoordinatorTests: XCTestCase {
 
         coordinator.stop()
 
-        XCTAssertEqual(engine.unloadCount, 0)
-        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+        XCTAssertNil(coordinator.presentationState.loadedEnclosure)
         XCTAssertEqual(coordinator.presentationState.status, .stopped)
+    }
+
+    func testExplicitDownloadDeletionUnloadsPlayingMediaAndCheckpoints() throws {
+        let core = FakePlaybackCore(status: .inProgress, positionMs: 13_000)
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        var released = false
+        playback.onPlaybackUseChanged = { released = true }
+        try playback.play(enclosureID: 7)
+        engine.currentPositionMs = 22_000
+
+        playback.releaseForDownloadDeletion(enclosureID: 7)
+
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(playback.isUsing(enclosureID: 7))
+        XCTAssertNil(playback.presentationState.loadedEnclosure)
+        XCTAssertEqual(playback.presentationState.status, .stopped)
+        XCTAssertEqual(core.checkpoints.last?.1, 22_000)
+        XCTAssertTrue(released)
+    }
+
+    func testExplicitDeletionDoesNotInterruptDifferentLoadedMedia() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        try playback.play(enclosureID: 7)
+
+        playback.releaseForDownloadDeletion(enclosureID: 8)
+
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(engine.unloadCount, 0)
+        XCTAssertTrue(playback.isUsing(enclosureID: 7))
+        XCTAssertTrue(core.checkpoints.isEmpty)
+    }
+
+    func testExplicitDeletionAllowsDeferredFileRemovalOnNextReconcile() throws {
+        let root = temporaryMediaRoot()
+        let local = root.appendingPathComponent("downloads/enclosure-7.media")
+        try FileManager.default.createDirectory(
+            at: local.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data("media".utf8).write(to: local)
+        let playback = MediaPlaybackCoordinator(core: FakePlaybackCore(), engine: FakePlaybackEngine())
+        _ = try playback.prepare(enclosureID: 7)
+        let core = FakeTransferCore()
+        core.deletions = [transferWork(localFile: "downloads/enclosure-7.media")]
+        core.states[7] = .deleteRequested
+        let transfer = MediaTransferCoordinator(
+            core: core, mediaRoot: root,
+            isMediaInUse: { playback.isUsing(enclosureID: $0) }
+        )
+        transfer.reconcile()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertTrue(core.deleted.isEmpty)
+
+        playback.releaseForDownloadDeletion(enclosureID: 7)
+        transfer.reconcile()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertEqual(core.deleted, [7])
     }
 
     func testPlaybackRateIsClampedToContractAndAppliedToEngine() throws {
@@ -641,6 +737,37 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(core.completions.count, 1)
         XCTAssertEqual(core.completions[0].1, 120_000)
+    }
+
+    func testNaturalEndReleasesAutoDeletedDownloadWithoutOverwritingCompletion() throws {
+        let core = FakePlaybackCore(status: .inProgress, positionMs: 1_000)
+        core.download = MediaDownload(enclosureId: 7, state: .deleteRequested, origin: .manual,
+            localFile: "downloads/enclosure-7.media", fileSizeBytes: 10,
+            downloadedAt: nil, failureKind: nil)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        var changed = 0
+        coordinator.onPlaybackUseChanged = { changed += 1 }
+        try coordinator.play(enclosureID: 7)
+        engine.finish()
+
+        XCTAssertEqual(core.completions.count, 1)
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+        XCTAssertNil(coordinator.presentationState.loadedEnclosure)
+        XCTAssertTrue(core.checkpoints.isEmpty)
+        XCTAssertGreaterThanOrEqual(changed, 2)
+    }
+
+    func testNaturalEndRetainsCompletedMediaWhenNoDeletionRequested() throws {
+        let core = FakePlaybackCore(status: .inProgress)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        try coordinator.play(enclosureID: 7)
+        engine.finish()
+        XCTAssertEqual(engine.unloadCount, 0)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(core.completions.count, 1)
     }
 
     func testNaturalEndDoesNotClaimCompletionWhenCoreRejectsIt() throws {

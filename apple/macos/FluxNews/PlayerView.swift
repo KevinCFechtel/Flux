@@ -59,6 +59,7 @@ struct PlayerView: View {
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
     let onCancel: (Int64, Int64) -> Void
+    let onStop: () -> Void
     @ObservedObject private var sleepTimer: MediaSleepTimer
     @State private var isScrubbing = false
     @State private var scrubPositionMs = 0.0
@@ -67,14 +68,17 @@ struct PlayerView: View {
     @State private var readerError: String?
     @State private var readerRequest = 0
     @State private var showNotesExpanded = false
+    @State private var advancedSettingsExpanded = false
     @State private var artworkImage: NSImage?
     @State private var artworkLoading = false
+    @State private var previewChapters: [MediaChapter] = []
 
     init(store: BrowserStore, state: MediaPlaybackPresentationState, coordinator: MediaPlaybackCoordinator?,
          previewArticleID: Int64? = nil, onPlayEnclosure: @escaping (Enclosure) -> Void = { _ in },
          onDownload: @escaping (Int64, Int64) -> Void = { _, _ in },
          onDelete: @escaping (Int64, Int64) -> Void = { _, _ in },
-         onCancel: @escaping (Int64, Int64) -> Void = { _, _ in }) {
+         onCancel: @escaping (Int64, Int64) -> Void = { _, _ in },
+         onStop: @escaping () -> Void = {}) {
         self.store = store
         self.state = state
         self.coordinator = coordinator
@@ -83,6 +87,7 @@ struct PlayerView: View {
         self.onDownload = onDownload
         self.onDelete = onDelete
         self.onCancel = onCancel
+        self.onStop = onStop
         _sleepTimer = ObservedObject(wrappedValue: coordinator?.sleepTimer ?? MediaSleepTimer())
     }
 
@@ -109,6 +114,7 @@ struct PlayerView: View {
         .onAppear { resetShowNotes() }
         .onChange(of: displayedArticleID) { _, _ in resetShowNotes() }
         .task(id: artworkKey) { await loadArtwork() }
+        .task(id: chapterPreviewKey) { await loadPreviewChapters() }
     }
 
     private var previewItem: ListeningListItem? {
@@ -126,12 +132,33 @@ struct PlayerView: View {
         return item.audioEnclosures.first(where: { $0.enclosure.id == item.activeEnclosureId })
             ?? item.audioEnclosures.first
     }
+    private var chapterPreviewKey: String {
+        previewing ? "preview:\(previewEnclosure?.enclosure.id ?? -1)" : "active"
+    }
+    private var displayedChapters: [MediaChapter] {
+        previewing ? previewChapters : state.chapters
+    }
+    private func loadPreviewChapters() async {
+        previewChapters = []
+        guard previewing, let id = previewEnclosure?.enclosure.id else { return }
+        let chapters: [MediaChapter] = await withCheckedContinuation { continuation in
+            store.loadPlayerPreviewChapters(enclosureID: id) {
+                continuation.resume(returning: $0)
+            }
+        }
+        guard !Task.isCancelled, previewing, previewEnclosure?.enclosure.id == id else { return }
+        previewChapters = chapters
+    }
+    private var artworkEnclosureID: Int64? {
+        previewing ? previewEnclosure?.enclosure.id : state.loadedEnclosure?.id
+    }
     private var artworkKey: String {
-        if previewing { return "preview:\(previewEnclosure?.enclosure.id ?? -1)" }
+        let revision = store.artworkProbeRevisions[artworkEnclosureID ?? -1, default: 0]
+        if previewing { return "preview:\(artworkEnclosureID ?? -1)|probe:\(revision)" }
         switch state.artworkSource {
-        case let .some(.localReference(reference)): return "local:\(reference)"
-        case let .some(.remoteUrl(url)): return "remote:\(url)"
-        case .none: return "none"
+        case let .some(.localReference(reference)): return "local:\(reference)|probe:\(revision)"
+        case let .some(.remoteUrl(url)): return "remote:\(url)|probe:\(revision)"
+        case .none: return "none|probe:\(revision)"
         }
     }
     private func loadArtwork() async {
@@ -140,7 +167,7 @@ struct PlayerView: View {
         defer { artworkLoading = false }
         guard let coordinator else { return }
         let source: MediaArtworkSource?
-        if previewing, let id = previewEnclosure?.enclosure.id {
+        if let id = artworkEnclosureID, (previewing || state.artworkSource == nil) {
             source = await withCheckedContinuation { continuation in
                 store.loadPlayerArtworkSource(enclosureID: id) { continuation.resume(returning: $0) }
             }
@@ -156,11 +183,19 @@ struct PlayerView: View {
     private var fixedPlayback: some View {
         VStack(alignment: .leading, spacing: 14) {
             if previewing {
-                Text("Episode preview").font(.caption).foregroundStyle(.secondary)
-                if let enclosure = previewEnclosure {
-                    Button("Play Episode") { onPlayEnclosure(enclosure.enclosure) }
-                        .buttonStyle(.borderedProminent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Slider(value: .constant(0), in: 0...1)
+                        .disabled(true)
+                        .accessibilityLabel("Playback timeline unavailable")
+                    HStack {
+                        Text("0:00")
+                        Spacer()
+                        Text("--:--")
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
                 }
+                controls
             } else {
                 timeline
                 controls
@@ -238,24 +273,36 @@ struct PlayerView: View {
     private var controls: some View {
         HStack(spacing: 18) {
             controlButton("gobackward.15", label: "Back 15 seconds") { seek(by: -Int64(AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds * 1_000)) }
-            controlButton(state.status == .playing ? "pause.fill" : "play.fill", label: state.status == .playing ? "Pause" : "Play") { togglePlayback() }
-                .disabled(state.isLoading || state.loadedEnclosure == nil)
-            controlButton("stop.fill", label: "Stop") { coordinator?.stop() }
-                .disabled(state.loadedEnclosure == nil)
+                .disabled(previewing || state.loadedEnclosure == nil)
+            controlButton(!previewing && state.status == .playing ? "pause.fill" : "play.fill", label: !previewing && state.status == .playing ? "Pause" : "Play") {
+                if previewing {
+                    if let enclosure = previewEnclosure { onPlayEnclosure(enclosure.enclosure) }
+                } else {
+                    togglePlayback()
+                }
+            }
+                .disabled(state.isLoading || (previewing ? previewEnclosure == nil : state.loadedEnclosure == nil))
+            controlButton("stop.fill", label: "Stop") {
+                coordinator?.stop()
+                onStop()
+            }
+                .disabled(previewing || state.loadedEnclosure == nil)
             controlButton("goforward.30", label: "Forward 30 seconds") { seek(by: Int64(AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds * 1_000)) }
+                .disabled(previewing || state.loadedEnclosure == nil)
             controlButton("arrow.counterclockwise", label: "Restart") { restart() }
+                .disabled(previewing || state.loadedEnclosure == nil)
         }
         .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var chapters: some View {
-        if !state.chapters.isEmpty {
+        if !displayedChapters.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Chapters").font(.headline)
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 2) {
-                            ForEach(Array(state.chapters.enumerated()), id: \.offset) { index, chapter in
+                            ForEach(Array(displayedChapters.enumerated()), id: \.offset) { index, chapter in
                                 chapterRow(chapter, index: index)
                             }
                         }
@@ -273,7 +320,7 @@ struct PlayerView: View {
     private func chapterRow(_ chapter: MediaChapter, index: Int) -> some View {
         let active = activeChapterIndex == index
         return Button {
-            guard let coordinator, let enclosure = state.loadedEnclosure else { return }
+            guard !previewing, let coordinator, let enclosure = state.loadedEnclosure else { return }
             coordinator.seek(toMs: chapter.startMs)
             if state.status != .playing { try? coordinator.play(enclosureID: enclosure.id) }
         } label: {
@@ -287,6 +334,7 @@ struct PlayerView: View {
             .background(active ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
+        .disabled(previewing)
         .accessibilityLabel(chapter.title.isEmpty ? String(localized: "Untitled Chapter") : chapter.title)
         .accessibilityValue(String(localized: "Starts at \(PlayerPresentation.formatDuration(chapter.startMs))") + (active ? String(localized: ", current chapter") : ""))
         .id(index)
@@ -295,7 +343,7 @@ struct PlayerView: View {
     @ViewBuilder private var audioSelection: some View {
         if let item = previewItem ?? displayedArticleID.flatMap({ id in
             store.listeningListItems.first(where: { $0.articleId == id })
-        }), !item.audioEnclosures.isEmpty {
+        }), item.audioEnclosures.count > 1 {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio").font(.headline)
                 ForEach(Array(item.audioEnclosures.enumerated()), id: \.offset) { index, audio in
@@ -329,8 +377,23 @@ struct PlayerView: View {
     }
 
     private var showNotes: some View {
-        DisclosureGroup(isExpanded: $showNotesExpanded) {
-            VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                showNotesExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showNotesExpanded ? 90 : 0))
+                    Label("Show Notes", systemImage: "doc.text")
+                        .font(.headline)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showNotesExpanded {
+                VStack(alignment: .leading, spacing: 10) {
                 if isLoadingReaderDocument {
                     ProgressView("Loading Show Notes...").controlSize(.small)
                 } else if let readerError {
@@ -344,9 +407,9 @@ struct PlayerView: View {
                     Text("Show Notes unavailable").font(.caption).foregroundStyle(.secondary)
                     Button("Retry") { loadReaderDocument() }.buttonStyle(.bordered)
                 }
-            }.padding(.top, 8)
-        } label: {
-            Label("Show Notes", systemImage: "doc.text").font(.headline)
+                }
+                .padding(.top, 8)
+            }
         }
         .onChange(of: showNotesExpanded) { _, expanded in
             if expanded && readerDocument == nil && !isLoadingReaderDocument { loadReaderDocument() }
@@ -354,8 +417,22 @@ struct PlayerView: View {
     }
 
     private var advancedSettings: some View {
-        DisclosureGroup("Advanced Settings") {
-            VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                advancedSettingsExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(advancedSettingsExpanded ? 90 : 0))
+                    Text("Advanced Settings")
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if advancedSettingsExpanded {
+                VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Playback Speed")
@@ -379,8 +456,9 @@ struct PlayerView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
         }
     }
 
@@ -417,7 +495,7 @@ struct PlayerView: View {
     }
 
     private var activeChapterIndex: Int? {
-        PlayerPresentation.activeChapterIndex(positionMs: state.positionMs, chapters: state.chapters)
+        previewing ? nil : PlayerPresentation.activeChapterIndex(positionMs: state.positionMs, chapters: displayedChapters)
     }
 
     private func sleepTimerDescription(_ seconds: Int) -> String {
@@ -457,9 +535,8 @@ struct PlayerView: View {
     }
 
     private func openOriginal() {
-        guard let articleID = state.loadedEnclosure?.articleId,
-              let article = store.articles.first(where: { $0.id == articleID }) else { return }
-        store.openOriginal(article)
+        guard let articleID = displayedArticleID else { return }
+        store.openOriginalArticle(articleID: articleID)
     }
 
     private func finishScrubbing(_ editing: Bool) {

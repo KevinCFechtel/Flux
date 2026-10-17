@@ -149,6 +149,99 @@ struct PlayerNavigationButton: View {
     }
 }
 
+/// Compact playback dock for the menu-bar popover. The full player remains
+/// reachable by tapping the episode title/cover; play/pause acts in place.
+struct MacCompactPlayerBar: View {
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let coordinator: MediaPlaybackCoordinator?
+    let openPlayer: () -> Void
+    @State private var artwork: NSImage?
+
+    private var artworkKey: String {
+        switch playbackState.artworkSource {
+        case let .some(.localReference(reference)): return "local:\(reference)"
+        case let .some(.remoteUrl(url)): return "remote:\(url)"
+        case .none: return "none"
+        }
+    }
+
+    var body: some View {
+        if let enclosure = playbackState.loadedEnclosure {
+            HStack(spacing: 10) {
+                Button(action: openPlayer) {
+                    HStack(spacing: 9) {
+                        Group {
+                            if let artwork {
+                                Image(nsImage: artwork).resizable().scaledToFill()
+                            } else if let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:)) {
+                                Image(nsImage: fallback).resizable().scaledToFill()
+                            } else {
+                                Image(systemName: "waveform").font(.title3)
+                            }
+                        }
+                        .frame(width: 36, height: 36)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(PlayerPresentation.textOrFallback(
+                                playbackState.mediaTitle, fallback: String(localized: "Audio")
+                            ))
+                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text(playbackState.feedTitle).font(.caption)
+                                .foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Show Player")
+                .accessibilityLabel("Show Player")
+                Button {
+                    coordinator?.skip(bySeconds: -15)
+                } label: {
+                    Image(systemName: "gobackward.15").frame(width: 23, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .help("Back 15 seconds")
+                .accessibilityLabel("Back 15 seconds")
+                Button {
+                    guard let coordinator else { return }
+                    if playbackState.status == .playing {
+                        coordinator.pause()
+                    } else {
+                        try? coordinator.play(enclosureID: enclosure.id)
+                    }
+                } label: {
+                    Image(systemName: playbackState.status == .playing ? "pause.fill" : "play.fill")
+                        .frame(width: 28, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .disabled(playbackState.isLoading)
+                .help(playbackState.status == .playing ? "Pause" : "Play")
+                .accessibilityLabel(playbackState.status == .playing ? "Pause" : "Play")
+                Button {
+                    coordinator?.skip(bySeconds: 30)
+                } label: {
+                    Image(systemName: "goforward.30").frame(width: 23, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .help("Forward 30 seconds")
+                .accessibilityLabel("Forward 30 seconds")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(.regularMaterial)
+            .task(id: artworkKey) {
+                artwork = nil
+                guard let source = playbackState.artworkSource, let coordinator else { return }
+                let data = await coordinator.artwork(source: source)
+                guard !Task.isCancelled else { return }
+                artwork = data.flatMap(NSImage.init(data:))
+            }
+        }
+    }
+}
+
 struct MoreMenu: View {
     let isListeningList: Bool
     let unreadOnly: Bool

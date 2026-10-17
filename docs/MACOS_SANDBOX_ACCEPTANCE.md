@@ -1,7 +1,6 @@
 # macOS App Sandbox — B1 implementation and acceptance
 
-**Status (16 October 2026): B1 code implemented; signed fresh-container
-runtime acceptance OPEN.** The macOS app has **not been released**. The developer
+**Status (17 October 2026): B1 OWNER-ACCEPTED / CLOSED following successful macOS device tests, by explicit project-owner decision.** The macOS app has **not been released**. The developer
 has explicitly accepted losing existing local macOS development data when the
 app switches to sandboxed storage. There is **no migration or compatibility path**.
 
@@ -43,7 +42,7 @@ Before any Mac App Store production export, submission or release-readiness
 claim, complete and record the signed-app checklist below. No migration from
 the unreleased, unsandboxed macOS development app is required.
 
-## Required device and signed-app acceptance (open)
+## Signed-app acceptance checklist (owner sign-off recorded 17 October 2026)
 
 1. Sign the app with an actual development/distribution profile supporting its host+widget App Group. Inspect **signed** entitlements, not only XML sources.
 2. Start with a fresh sandbox container and fresh account credentials. Confirm that Core database and caches persist across relaunch.
@@ -53,6 +52,8 @@ the unreleased, unsandboxed macOS development app is required.
 6. Verify Keychain save/load after relaunch, periodic sync, menu bar controls, login-item registration and media remote controls.
 7. Test existing Developer ID packaging separately if it is retained; implement and validate the Mac App Store archive/Transporter path only after acceptance.
 8. Keep a record of sandbox-denial logs and resolve actual missing capabilities without granting broad filesystem access.
+
+**Acceptance evidence:** On 17 October 2026 the project owner confirmed the macOS tests were good and explicitly instructed that B1 be closed. Individual signed fresh-container checklist results and sandbox-denial logs were not separately supplied in this handoff; do not misrepresent them as independently verified. Follow up on any later reproducible Sandbox defect as a regression.
 
 CI compilation and source-plist tests alone **do not prove** end-to-end sandbox behavior.
 
@@ -72,4 +73,4 @@ CONFIGURATION=Debug DEVELOPMENT_SIGNING=1 ./apple/macos/Build/build-app.sh
 ./apple/macos/Build/install-local.sh
 ```
 
-The verifier checks actual signatures, host/widget IDs and versions, Sandbox and App Group entitlements, signing team and embedded development provisioning. The installer validates both source and staged copy **before** replacing the application; no app container or Keychain data is deleted. A truly fresh-container test requires a clean macOS user or separately approved manual cleanup. Run all runtime checklist steps before marking B1 accepted. Unsigned CI checks do not establish signed Sandbox acceptance. Developer ID and Mac App Store distribution remain separate.
+The verifier checks actual signatures, host/widget IDs and versions, Sandbox and App Group entitlements, signing team and embedded development provisioning. The installer validates both source and staged copy **before** replacing the application; no app container or Keychain data is deleted. A truly fresh-container test requires a clean macOS user or separately approved manual cleanup. The project owner has explicitly accepted B1 as complete following device testing; the individual fresh-container checks above were not separately documented here. Unsigned CI checks alone do not establish signed Sandbox acceptance. Developer ID and Mac App Store distribution remain separate.

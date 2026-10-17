@@ -63,7 +63,6 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var globalShortcut = GlobalShortcutChoice.optionCommandF
     @State private var section: SettingsSection = .account
-    @State private var settingsSidebarVisible = true
     @State private var backupFlow: BackupPasswordFlow?
     @State private var settingsWindow: NSWindow?
 
@@ -73,15 +72,6 @@ struct SettingsView: View {
                 Text("FluxNews Settings")
                     .font(.title2.bold())
 
-                Button {
-                    settingsSidebarVisible.toggle()
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .buttonStyle(.borderless)
-                .help(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
-                .accessibilityLabel(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
-
                 Spacer()
             }
             .padding(.horizontal, 20)
@@ -90,11 +80,9 @@ struct SettingsView: View {
             Divider()
 
             HStack(spacing: 0) {
-                if settingsSidebarVisible {
-                    SettingsSidebar(selection: $section)
-                        .frame(width: 170)
-                        .overlay(alignment: .trailing) { Divider() }
-                }
+                SettingsSidebar(selection: $section)
+                    .frame(width: 190)
+                    .overlay(alignment: .trailing) { Divider() }
 
                 ScrollView {
                     settingsPage
@@ -121,7 +109,7 @@ struct SettingsView: View {
             }
                 .padding(16)
         }
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 640, minHeight: 540)
         .overlay(alignment: .bottom) {
             if let confirmation = store.actionConfirmation {
                 Text(confirmation)

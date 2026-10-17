@@ -127,10 +127,25 @@ private struct ArticlePane: View {
                     previewArticleID: previewArticleID, onPlayEnclosure: playAudio,
                     onDownload: { store.requestManualDownload(articleID: $0, enclosureID: $1) },
                     onDelete: { store.deleteDownload(articleID: $0, enclosureID: $1) },
-                    onCancel: { store.cancelDownload(articleID: $0, enclosureID: $1) }
+                    onCancel: { store.cancelDownload(articleID: $0, enclosureID: $1) },
+                    onStop: {
+                        previewArticleID = nil
+                        showingPlayer = false
+                    }
                 )
             } else {
                 content
+                if playbackState.loadedEnclosure != nil {
+                    Divider()
+                    MacCompactPlayerBar(
+                        playbackState: playbackState,
+                        coordinator: playbackCoordinator,
+                        openPlayer: {
+                            previewArticleID = nil
+                            showingPlayer = true
+                        }
+                    )
+                }
             }
         }
         .background {
@@ -210,7 +225,9 @@ private struct ArticlePane: View {
             .disabled(store.isLoading)
             .help("Refresh Miniflux now")
             .accessibilityLabel("Refresh")
-            PlayerNavigationButton(playbackState: playbackState, showingPlayer: $showingPlayer)
+            if showingPlayer {
+                PlayerNavigationButton(playbackState: playbackState, showingPlayer: $showingPlayer)
+            }
             moreMenu
         }
         .padding(.horizontal, 12)
