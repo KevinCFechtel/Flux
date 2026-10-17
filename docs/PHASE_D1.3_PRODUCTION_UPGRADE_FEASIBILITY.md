@@ -145,12 +145,12 @@ use an internal TestFlight tester to validate the production Flutter upgrade.
 ```bash
 # Existing Flutter production bundle ID, for a true in-place TestFlight upgrade:
 ./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
-./apple/ios/Build/export-testflight.sh productionRelease
+./apple/ios/Build/export-appstore.sh productionRelease
 # IPA: dist/ProductionExport/*.ipa
 
 # Separately installable development identity:
 ./apple/ios/Build/archive.sh developmentRelease 3001 3.0.0
-./apple/ios/Build/export-testflight.sh developmentRelease
+./apple/ios/Build/export-appstore.sh developmentRelease
 # IPA: dist/TestFlightExport/*.ipa
 ```
 
