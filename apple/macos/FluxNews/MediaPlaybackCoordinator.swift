@@ -294,7 +294,10 @@ final class MediaPlaybackCoordinator {
     }
 
     func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused }
-    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped }
+    func stop() {
+        guard let activeEnclosureID else { return }
+        releaseForDownloadDeletion(enclosureID: activeEnclosureID)
+    }
     func applicationDidResignActive() { checkpoint() }
     func applicationDidBecomeActive() { sleepTimer.evaluate() }
     func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
@@ -360,8 +363,8 @@ final class MediaPlaybackCoordinator {
             }
         }
     }
-    /// Explicit user deletion releases a locally loaded file before transfer
-    /// reconciliation. Pause/Stop deliberately retain their current media item.
+    /// Release a loaded media item after explicit deletion or Stop.
+    /// Pause retains the AVPlayer item so playback can resume immediately.
     /// The playback checkpoint is persisted before AVPlayer releases the file.
     func releaseForDownloadDeletion(enclosureID: Int64, checkpointBeforeUnloading: Bool = true) {
         guard activeEnclosureID == enclosureID else { return }
