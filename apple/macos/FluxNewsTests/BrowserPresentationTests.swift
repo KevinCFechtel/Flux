@@ -31,6 +31,7 @@ final class MacScrolloverEndPolicyTests: XCTestCase {
     }
 }
 
+@MainActor
 final class BrowserPresentationTests: XCTestCase {
     func testHostATSAllowsUserSuppliedHTTPMediaWithoutChangingWidgetPolicy() throws {
         let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
