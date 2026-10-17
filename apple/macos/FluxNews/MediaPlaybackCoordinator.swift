@@ -23,7 +23,7 @@ protocol MediaPlaybackCore: AnyObject {
     func restartPlayback(enclosureId: Int64) throws
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws
     func mediaChapters(enclosureId: Int64) throws -> [MediaChapter]
-    func mediaDownload(enclosureId: Int64) throws -> MediaDownload?
+    func mediaDownload(enclosureId: Int64) throws -> MediaDownload
     func mediaArtwork(reference: String) throws -> Data?
 }
 
