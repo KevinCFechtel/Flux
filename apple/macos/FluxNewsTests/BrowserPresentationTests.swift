@@ -92,8 +92,8 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleHoverActionsLayout.minimumOverlayHeight, 94)
     }
 
-    func testHoverActionsRequireQuarterSecondPointerDwell() {
-        XCTAssertEqual(ArticleHoverActionsLayout.hoverRevealDelayNanoseconds, 250_000_000)
+    func testHoverActionsRequireFourHundredMillisecondPointerDwell() {
+        XCTAssertEqual(ArticleHoverActionsLayout.hoverRevealDelayNanoseconds, 400_000_000)
     }
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
