@@ -268,7 +268,7 @@ private struct MacListeningListArtworkView: View {
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: CFDictionary = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailMaxPixelSize: 240,
+                kCGImageSourceThumbnailMaxPixelSize: 240,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceShouldCacheImmediately: true
             ] as CFDictionary
