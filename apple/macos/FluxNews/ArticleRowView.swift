@@ -12,16 +12,14 @@ enum ArticleHoverActionsLayout {
     static let minimumOverlayHeight = 3 * controlSize + 2 * controlSpacing + 2 * verticalPadding
 
     enum Anchor: Equatable {
-        case previewText
         case trailingThumbnail
         case articleText
     }
 
     static func anchor(for mode: ArticlePresentationMode) -> Anchor {
         switch mode {
-        case .visual: .previewText
+        case .visual, .compact: .articleText
         case .visualCompact: .trailingThumbnail
-        case .compact: .articleText
         }
     }
 }
@@ -212,35 +210,19 @@ struct ArticleItem: View {
                     }
                     .buttonStyle(.plain)
                     .focused($focusedControl, equals: .preview)
-                    .frame(
-                        minHeight: mode == .visual
-                            ? ArticleHoverActionsLayout.minimumOverlayHeight
-                            : 0,
-                        alignment: .topLeading
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        // Visual: the preview has its full text width, and
-                        // carries the vertical actions at its right edge.
-                        if ArticleHoverActionsLayout.anchor(for: mode) == .previewText {
-                            hoverActions
-                        }
-                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Visual and Compact both attach the actions to the right of
+            // the headline, immediately below the metadata/read indicator.
+            // Measure the complete text block to avoid overlap with the next
+            // article while preserving the text's full available width.
             .frame(
-                minHeight: mode == .compact || article.preview.isEmpty
-                    ? ArticleHoverActionsLayout.minimumOverlayHeight
-                    : 0,
+                minHeight: ArticleHoverActionsLayout.minimumOverlayHeight,
                 alignment: .topLeading
             )
             .overlay(alignment: .topTrailing) {
-                // Compact overlays the full text area; Visual without a
-                // preview falls back to the headline/date area.
-                if ArticleHoverActionsLayout.anchor(for: mode) == .articleText
-                    || (mode == .visual && article.preview.isEmpty) {
-                    hoverActions
-                }
+                hoverActions
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
