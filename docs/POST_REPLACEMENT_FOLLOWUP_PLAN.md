@@ -6,8 +6,8 @@
 > (16 October 2026; [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
 > passed). Original plan baseline was `9bd6ea9` (11 October).
 > C3.1–C3.7 are **merged**; C3.8 functional and B1 Sandbox gates
-> are **owner-accepted (17 October 2026)**. PR #61 remains subject to CI and merge approval. A1–A4 and Android C2 have implemented work; C1 is owner-accepted
-> described below, with different remaining gates. Source/CI evidence is not
+> are **owner-accepted (17 October 2026)**. PR #61 is merged. A1–A4, B1, C1, C2 and C3 are accepted or completed as
+> described below; B2 and release track R remain open. Source/CI evidence is not
 > a device-acceptance or App Store submission claim.
 >
 > **Relationship to existing contracts:** `ARCHITECTURE_DECISIONS.md` and the
@@ -54,12 +54,12 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 | A1 | P0 | iOS + macOS | ATS host policies and structural tests implemented | Actual HTTP/HTTPS media, redirect and playback tests per platform | — |
 | A2 | P0 | Rust + Apple | Rust `EventSubscription` Drop fallback implemented | Apple listener lifecycle/retention and regression evidence | — |
 | A3 | P0 | Android | WorkManager policy-tagged `updateWork()` and unit tests implemented | Runtime network-policy transitions | — |
-| A4 | P0 | CI | `.github/workflows/rust.yml` implemented | Make `cargo fmt --check` blocking after baseline formatting cleanup; confirm required-check policy separately | — |
+| A4 | P0 | CI | **Implemented and Rust CI green** (PR #62 merged); blocking `cargo fmt --check` | Required-check branch protection remains a separate repository setting to verify if desired | — |
 | B1 | P0 before Mac App Store release | macOS | **Owner-accepted 17 Oct 2026** after successful Mac testing; entitlements/verifier/installer implemented (#38, #53) | Closed by owner sign-off; distribution validation belongs to R | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
 | C1 | P1 | Android | **Owner-accepted 17 Oct 2026**; Android localization closed for this roadmap | Weblate is a separate future cross-platform workstream; subsequent localization defects are bugs | — |
-| C2 | P1 | Android | Native add-feed/add-category flows and policy tests implemented | End-to-end device/sync/restart/duplicate acceptance | A4 |
-| C3 | P1 | macOS | C3.1–C3.7 merged; **C3.8 owner-accepted 17 Oct 2026** | PR #61 CI / merge still outstanding | Feature code independent of B1 |
+| C2 | P1 | Android | **Owner-accepted 17 Oct 2026**; native add-feed/add-category flows and policy tests implemented | Closed by owner sign-off; subsequent defects are regressions | — |
+| C3 | P1 | macOS | C3.1–C3.8 merged; **C3.8 owner-accepted 17 Oct 2026** (PR #61 merged) | Closed; subsequent defects are regressions | — |
 | C4 | P2 | Shared/clients | Selective maintenance | Evidence-driven tasks only | Earlier relevant gates |
 | R | Release track | All platforms | Unified release layer planned | Shared CLI, Play/iOS paths; macOS after B1, F-Droid publishing after B2 | B1 for macOS; B2 for F-Droid publishing |
 
@@ -305,7 +305,7 @@ cases are handled.
 
 **Implementation / acceptance status (17 October):** C3.1–C3.7 were merged via PRs #49–#52.
 [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
-passed on combined `main` `2edc6537`. The project owner accepted C3.8 real-Mac testing and B1 on 17 October 2026. PR #61 CI and merge remain separate outstanding steps.
+passed on combined `main` `2edc6537`. The project owner accepted C3.8 real-Mac testing and B1 on 17 October 2026. PR #61 has since been merged into `main`.
 See [MACOS_C3_FEATURE_PARITY_ROADMAP.md](MACOS_C3_FEATURE_PARITY_ROADMAP.md).
 
 **Decision (12 October 2026):** Functional parity with iOS/Android is the
@@ -380,3 +380,9 @@ The separate release/distribution acceptance criteria still live in
 ## 17 October 2026 — C1 owner acceptance and Weblate scope
 
 The owner considers Android localization (C1) complete for this roadmap. Weblate integration and further translations will be tracked separately as a cross-platform effort for all apps, rather than as a remaining Android C1 gate. Subsequent defects in existing Android localization are handled as bugs.
+
+## 17 October 2026 — C2 owner acceptance and merged PR reconciliation
+
+The project owner accepted Android C2 (feed and category creation) on 17 October 2026. The implemented flows are considered complete for this roadmap; subsequent issues are tracked as regression bugs rather than reopening C2. This is owner-reported acceptance, not a separately attached device test protocol.
+
+PR #61 (macOS parity, listening list and player fixes), PR #63 (C1 owner acceptance) and PR #64 (Android navigation action placement) have been merged into `main`. PR #62 implemented the blocking Rust formatting gate and was also merged. Remaining planned work is B2 (F-Droid feasibility/build/scanner/signing), release track R (unified release tooling and distribution validation), and separately scoped cross-platform Weblate integration. Historical descriptions of earlier validation gates remain as background, not as a reopening of accepted items.
