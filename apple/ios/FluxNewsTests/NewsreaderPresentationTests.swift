@@ -3459,6 +3459,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
         if let previewActual = actual.previewFrame, let previewExpected = expected.previewFrame {
             XCTAssertEqual(previewActual.origin.y, previewExpected.origin.y, accuracy: 0.5, "preview y", line: line)
+        } else {
+            XCTAssertNil(actual.previewFrame, "no narrow preview frame", line: line)
+            XCTAssertNil(expected.previewFrame, "no measured narrow preview", line: line)
+        }
+        if let continuation = expected.previewContinuationFrame {
+            let actualContinuation = actual.previewContinuationFrame
+            XCTAssertNotNil(actualContinuation, "expected full-width continuation", line: line)
+            XCTAssertEqual(actualContinuation?.origin.y ?? -1, continuation.minY, accuracy: 0.5, "continuation y", line: line)
+            XCTAssertEqual(actualContinuation?.width ?? -1, continuation.width, accuracy: 0.5, "continuation width", line: line)
+        } else {
+            XCTAssertNil(actual.previewContinuationFrame, "no extra continuation view", line: line)
         }
     }
 
