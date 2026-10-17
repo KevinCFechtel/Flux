@@ -43,6 +43,7 @@ struct PopoverContentView: View {
     let dismiss: () -> Void
     @State private var sidebarVisible = false
     @State private var showingPlayer = false
+    @State private var previewArticleID: Int64?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -62,6 +63,7 @@ struct PopoverContentView: View {
                 transferState: transferState,
                 sidebarVisible: $sidebarVisible,
                 showingPlayer: $showingPlayer,
+                previewArticleID: $previewArticleID,
                 layoutChanged: layoutChanged,
                 showSettings: showSettings,
                 dismiss: dismiss
@@ -84,6 +86,7 @@ private struct ArticlePane: View {
     let transferState: MediaTransferPresentationState
     @Binding var sidebarVisible: Bool
     @Binding var showingPlayer: Bool
+    @Binding var previewArticleID: Int64?
     let layoutChanged: (Bool) -> Void
     let showSettings: () -> Void
     let dismiss: () -> Void
@@ -98,13 +101,14 @@ private struct ArticlePane: View {
     @State private var pendingAudioReplacement: Enclosure?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
-    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, showSettings: @escaping () -> Void, dismiss: @escaping () -> Void) {
+    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, previewArticleID: Binding<Int64?>, layoutChanged: @escaping (Bool) -> Void, showSettings: @escaping () -> Void, dismiss: @escaping () -> Void) {
         self.store = store
         self.playbackState = playbackState
         self.playbackCoordinator = playbackCoordinator
         self.transferState = transferState
         _sidebarVisible = sidebarVisible
         _showingPlayer = showingPlayer
+        _previewArticleID = previewArticleID
         self.layoutChanged = layoutChanged
         self.showSettings = showSettings
         self.dismiss = dismiss
@@ -116,7 +120,13 @@ private struct ArticlePane: View {
             header
             Divider()
             if showingPlayer {
-                PlayerView(store: store, state: playbackState, coordinator: playbackCoordinator)
+                PlayerView(
+                    store: store, state: playbackState, coordinator: playbackCoordinator,
+                    previewArticleID: previewArticleID, onPlayEnclosure: playAudio,
+                    onDownload: { store.requestManualDownload(articleID: $0, enclosureID: $1) },
+                    onDelete: { store.deleteDownload(articleID: $0, enclosureID: $1) },
+                    onCancel: { store.cancelDownload(articleID: $0, enclosureID: $1) }
+                )
             } else {
                 content
             }
@@ -152,7 +162,10 @@ private struct ArticlePane: View {
             selectedID = nil
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
         }
-        .onChange(of: store.scope) { _, _ in showingPlayer = false }
+        .onChange(of: store.scope) { _, _ in
+            showingPlayer = false
+            previewArticleID = nil
+        }
         .onChange(of: store.articlePresentationMode) { _, _ in layoutChanged(sidebarVisible) }
         .onChange(of: selectedID) { _, articleID in
             store.selectArticleAudioActions(for: articleID)
@@ -229,7 +242,11 @@ private struct ArticlePane: View {
 
     @ViewBuilder private var content: some View {
         if store.isListeningList {
-            ListeningListView(store: store, playbackState: playbackState, transferState: transferState, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onCancel: { articleID, enclosureID in store.cancelDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
+            ListeningListView(store: store, playbackState: playbackState, transferState: transferState,
+                onOpenPlayer: { articleID in
+                    previewArticleID = articleID
+                    showingPlayer = true
+                }, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onCancel: { articleID, enclosureID in store.cancelDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
         } else if store.isSearchActive {
              SearchResultsView(store: store, transferState: transferState, onPlay: playAudio, onDownload: { enclosure in store.requestManualDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onDelete: { enclosure in store.deleteDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onAdd: { articleID in store.addToListeningList(articleID: articleID) })
         } else if let error = store.errorMessage, store.articles.isEmpty {
@@ -395,6 +412,7 @@ private struct ArticlePane: View {
         startAudio(enclosure)
     }
     private func startAudio(_ enclosure: Enclosure) {
+        previewArticleID = nil
         guard let coordinator = playbackCoordinator else { return }
         do {
             if playbackState.loadedEnclosure?.id == enclosure.id, playbackState.status == .playing {
