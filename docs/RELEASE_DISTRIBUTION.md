@@ -33,7 +33,7 @@ differences between Gradle, Xcode, Play, F-Droid and App Store Connect.
 The existing platform build scripts now default to production **release build configurations**, not debug configurations. Debug/development identities require explicit arguments. This does **not** mean that a normal build publishes to a store, nor that every release-configured artifact is store-signed.
 
 - Android: `android/Build/build-app.sh` defaults to `productionRelease` (APK). Use `developmentDebug` explicitly for debug and `productionBundle <versionCode> <versionName>` for a signed Play AAB.
-- iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-testflight.sh` default to the production identity; `developmentRelease` remains explicit.
+- iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-appstore.sh` default to the production identity; `developmentRelease` remains explicit.
 - macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. `--build-number N --version-name V` overrides the version for normal builds. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged; store-signed distribution uses the separate archive/export scripts.
 
 The shared entry point is now `bash Build/release.sh`. Examples:
@@ -209,7 +209,7 @@ Current building blocks already exist:
 
 - `apple/ios/Build/build-app.sh`;
 - `apple/ios/Build/archive.sh`;
-- `apple/ios/Build/export-testflight.sh`.
+- `apple/ios/Build/export-appstore.sh`.
 
 These should be normalized into the common release model.
 
@@ -226,7 +226,7 @@ The final iOS App Store release path should:
 - clearly report that the IPA is ready for Transporter/manual App Store Connect
   upload.
 
-Rename `export-testflight.sh` to a more accurate App Store-oriented name if the
+Rename `export-appstore.sh` to a more accurate App Store-oriented name if the
 implementation confirms that it is a general `app-store-connect` export rather
 than TestFlight-specific behavior. Preserve compatibility temporarily if other
 automation already calls the old name.
@@ -419,4 +419,4 @@ The central `Build/release.sh` accepts `--version-code` and `--version-name` for
 
 ## macOS local installation default
 
-`apple/macos/Build/install-local.sh` now defaults to strict `developer-id` verification, requiring a Developer ID Application signed host, widget and embedded Rust library with matching team, Sandbox and App Group entitlements. Set `SOURCE_APP=/path/to/FluxNews.app` to select the built artifact. For deliberate development-only installs, `INSTALL_MODE=development` opts into the prior Apple Development/provisioning verification. Note that the ordinary `macos` build and App Store archive do **not** produce a Developer ID signed app: use `apple/macos/Build/release.sh` (Developer ID signing/notarization pipeline) before the default local installation. The Developer ID release pipeline still has its own environment/signing prerequisites.
+`apple/macos/Build/install-local.sh` now defaults to strict `developer-id` verification, requiring a Developer ID Application signed host, widget and embedded Rust library with matching team, Sandbox and App Group entitlements. Set `SOURCE_APP=/path/to/FluxNews.app` to select the built artifact. For deliberate development-only installs, `INSTALL_MODE=development` opts into the prior Apple Development/provisioning verification. Note that the ordinary `macos` build and App Store archive do **not** produce a Developer ID signed app: use `apple/macos/Build/release-developer-id.sh` (Developer ID signing/notarization pipeline) before the default local installation. The Developer ID release pipeline still has its own environment/signing prerequisites.
