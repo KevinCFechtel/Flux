@@ -1149,6 +1149,33 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+    /// Player show notes must not use the global Reader request generation:
+    /// opening a separate Reader must never silently discard this callback.
+    func loadPlayerShowNotes(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "Flux is not configured")])))
+            return
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let result = await coordinator.blockingResult(
+                for: core, { try core.readerDocument(articleId: articleID) }
+            )
+            guard let self, self.core === core else {
+                completion(.failure(NSError(domain: "FluxNews", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: String(localized: "Session no longer available")])))
+                return
+            }
+            if let result {
+                completion(result)
+            } else {
+                completion(.failure(NSError(domain: "FluxNews", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: String(localized: "Show Notes unavailable")])))
+            }
+        }
+    }
+
     func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         loadReaderDocument(articleID: article.id, forSearch: ReaderDocumentSource.forScope(scope) == .search, completion: completion)
     }
