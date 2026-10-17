@@ -1,12 +1,12 @@
 # Post-Replacement Stabilization and Store-Readiness Plan
 
-> **Status: IN PROGRESS — implementation/acceptance reconciled 16 October 2026**
+> **Status: IN PROGRESS — macOS C3.8 and B1 owner-accepted 17 October 2026**
 >
 > **Verified code baseline:** `main` at `2edc6537aebac35260d35f4dcbcab8dcfc7a0ae9`
 > (16 October 2026; [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
 > passed). Original plan baseline was `9bd6ea9` (11 October).
-> C3.1–C3.7 are **merged**; C3.8 functional and B1 signed Sandbox acceptance
-> are **open**, independently. A1–A4 and Android C1/C2 have implemented work
+> C3.1–C3.7 are **merged**; C3.8 functional and B1 Sandbox gates
+> are **owner-accepted (17 October 2026)**. PR #61 remains subject to CI and merge approval. A1–A4 and Android C1/C2 have implemented work
 > described below, with different remaining gates. Source/CI evidence is not
 > a device-acceptance or App Store submission claim.
 >
@@ -55,11 +55,11 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 | A2 | P0 | Rust + Apple | Rust `EventSubscription` Drop fallback implemented | Apple listener lifecycle/retention and regression evidence | — |
 | A3 | P0 | Android | WorkManager policy-tagged `updateWork()` and unit tests implemented | Runtime network-policy transitions | — |
 | A4 | P0 | CI | `.github/workflows/rust.yml` implemented | Make `cargo fmt --check` blocking after baseline formatting cleanup; confirm required-check policy separately | — |
-| B1 | P0 before Mac App Store release | macOS | Entitlements, storage and signed verifier/installer implemented (#38, #53) | Signed fresh-container runtime acceptance | A1/A2 validation as applicable |
+| B1 | P0 before Mac App Store release | macOS | **Owner-accepted 17 Oct 2026** after successful Mac testing; entitlements/verifier/installer implemented (#38, #53) | Closed by owner sign-off; distribution validation belongs to R | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
 | C1 | P1 | Android | Resource extraction and 500 German translations implemented | Residual runtime-string audit, locale/device review, Weblate for five target languages | A3/A4 as relevant |
 | C2 | P1 | Android | Native add-feed/add-category flows and policy tests implemented | End-to-end device/sync/restart/duplicate acceptance | A4 |
-| C3 | P1 | macOS | C3.1–C3.7 merged (#49–#52), combined Apple CI green | C3.8 real-Mac parity tests; B1 separately | Feature code independent of B1 |
+| C3 | P1 | macOS | C3.1–C3.7 merged; **C3.8 owner-accepted 17 Oct 2026** | PR #61 CI / merge still outstanding | Feature code independent of B1 |
 | C4 | P2 | Shared/clients | Selective maintenance | Evidence-driven tasks only | Earlier relevant gates |
 | R | Release track | All platforms | Unified release layer planned | Shared CLI, Play/iOS paths; macOS after B1, F-Droid publishing after B2 | B1 for macOS; B2 for F-Droid publishing |
 
@@ -185,14 +185,11 @@ independently of UniFFI compilation, while native tests remain intact.
 
 ### B1 — Enable the macOS App Sandbox before App Store export
 
-**Code implemented; signed acceptance still open:** PR #38 added the host
+**Owner-accepted 17 October 2026:** PR #38 added the host
 Sandbox entitlements and sandbox-local media paths. PR #53 added
 `verify-sandbox.sh`, signed development build validation and protected
 `install-local.sh` staging; [Apple CI #164](https://github.com/KevinCFechtel/Flux/actions/runs/38924332033)
-passed. C3.1–C3.7 are now merged, so B1 can be tested alongside C3.8 on one
-signed Mac installation **with separate acceptance records**. This does
-**not** satisfy B1 or authorize Mac App Store export until fresh-container
-runtime checks pass. See [MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md).
+passed. The project owner reported successful macOS tests and explicitly closed both B1 and C3.8 on 17 October 2026. This is owner-reported sign-off, not independently captured evidence for each signed fresh-container check. Mac App Store archive/export and Transporter verification remain part of release track R. See [MACOS_SANDBOX_ACCEPTANCE.md](MACOS_SANDBOX_ACCEPTANCE.md).
 
 The implementation-oriented steps below are historical requirements; only
 items not yet proven by the signed-app checklist remain release-open.
@@ -306,11 +303,9 @@ cases are handled.
 
 ### C3 — macOS feature-parity completion (approved scope)
 
-**Implementation status (16 October):** C3.1–C3.7 were merged via PRs #49–#52.
+**Implementation / acceptance status (17 October):** C3.1–C3.7 were merged via PRs #49–#52.
 [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
-passed on combined `main` `2edc6537`. C3.8 real-Mac functional sign-off
-remains open, including the PR #54 Visual Compact hover overlay. B1 signed
-Sandbox acceptance is separately open; the PR #53 verifier does not replace it.
+passed on combined `main` `2edc6537`. The project owner accepted C3.8 real-Mac testing and B1 on 17 October 2026. PR #61 CI and merge remain separate outstanding steps.
 See [MACOS_C3_FEATURE_PARITY_ROADMAP.md](MACOS_C3_FEATURE_PARITY_ROADMAP.md).
 
 **Decision (12 October 2026):** Functional parity with iOS/Android is the
@@ -327,8 +322,7 @@ HTTP account warning, About and player 15/30-second controls; background-sync
 recovery; locale/accessibility and functional acceptance.
 
 **Dependency clarification:** C3 feature code can be developed/tested before
-B1. **B1 signed fresh-sandbox acceptance remains mandatory before Mac App
-Store distribution**, not before beginning C3. Do not add a macOS migration.
+B1. **B1 has been closed by project-owner acceptance on 17 October 2026.** Mac App Store signing/export/Transporter validation remains a separate release-track gate. Do not add a macOS migration.
 
 **Done when:** accepted C3 features are tested and merged, current macOS
 Apple CI is green, real-Mac functional acceptance is recorded, Core remains
