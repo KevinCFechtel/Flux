@@ -29,6 +29,62 @@ import uniffi.flux_uniffi.SyncReason
 
 class AndroidArticleTimelineTest {
     @Test
+    fun visualCompactFlowStartsBesideImageAndContinuesWithoutParagraphGap() {
+        val input = "The preview uses the free space beside the thumbnail and continues underneath"
+        val lines = listOf(0f, 18f, 36f, 54f, 72f)
+        val lineEnds = listOf(12, 26, 43, 58, input.length)
+        val split = AndroidVisualCompactFlowPolicy.breakFor(
+            textLength = input.length,
+            maximumLines = 5,
+            availableSideHeightPx = 40f,
+            measuredLineCount = lines.size,
+            lineTopPx = { lines[it] },
+            lineEnd = { lineEnds[it] },
+        )
+        assertEquals(3, split.sideLines)
+        assertEquals(43, split.splitIndex)
+        assertEquals(2, split.continuationLines(5))
+        assertEquals(input.substring(0, 43).trimEnd(), split.sideText(input, 5))
+        assertEquals(input.substring(43).trimStart(), split.continuationText(input, 5))
+        assertEquals(
+            104,
+            AndroidVisualCompactFlowPolicy.continuationTop(
+                imageBottomPx = 100,
+                publicationBottomPx = 60,
+                sidePreviewBottomPx = 104,
+                textSpacingPx = 7,
+            ),
+        )
+    }
+
+    @Test
+    fun visualCompactFlowWithoutSideRoomOrImageKeepsTextAndSpacing() {
+        val input = "A short article preview"
+        val emptySide = AndroidVisualCompactFlowPolicy.breakFor(
+            textLength = input.length,
+            maximumLines = 3,
+            availableSideHeightPx = 0f,
+            measuredLineCount = 2,
+            lineTopPx = { it * 18f },
+            lineEnd = { input.length },
+        )
+        assertEquals(0, emptySide.sideLines)
+        assertEquals("", emptySide.sideText(input, 3))
+        assertEquals(input, emptySide.continuationText(input, 3))
+        assertEquals(
+            110,
+            AndroidVisualCompactFlowPolicy.continuationTop(
+                imageBottomPx = 100,
+                publicationBottomPx = 85,
+                sidePreviewBottomPx = null,
+                textSpacingPx = 10,
+            ),
+        )
+        val allSide = AndroidVisualCompactPreviewBreak(sideLines = 3, splitIndex = 9)
+        assertEquals("", allSide.continuationText(input, 3))
+        assertEquals(0, allSide.continuationLines(3))
+    }
+    @Test
     fun readPresentationKeepsHeadlineGeometryStable() {
         assertEquals(
             AndroidArticleStatusPresentationPolicy.titleFontWeight(isRead = false),
