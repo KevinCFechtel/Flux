@@ -36,7 +36,21 @@ The existing platform build scripts now default to production **release build co
 - iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-testflight.sh` default to the production identity; `developmentRelease` remains explicit.
 - macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged: this is not yet a Mac App Store archive/export.
 
-**R1 is partial:** common root CLI, consistent explicit version requirements, output normalization, signed distribution validation, and CI orchestration are still to be implemented. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
+The shared entry point is now `bash Build/release.sh`. Examples:
+
+```bash
+bash Build/release.sh android
+bash Build/release.sh android --debug
+bash Build/release.sh android --target play --version-code 2026101701 --version-name 3.0.0
+bash Build/release.sh ios
+bash Build/release.sh ios --target appstore --version-code 3002 --version-name 3.0.0
+bash Build/release.sh macos
+bash Build/release.sh macos --debug
+```
+
+The entry point delegates to the existing platform scripts. Apple App Store export creates an IPA for **manual** Transporter upload only. Play produces an AAB without uploading. Version inputs are mandatory for store targets. macOS App Store export and F-Droid targets intentionally fail until implemented.
+
+**R1 is partial:** output normalization, comprehensive signed distribution validation, macOS App Store export, and CI orchestration are still to be implemented. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
 
 ## 2. Target command model
 
