@@ -184,8 +184,6 @@ internal fun NewsNavigationContent(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
-            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
-            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
         }
 
         if (projection == null) {
@@ -248,6 +246,14 @@ internal fun NewsNavigationContent(
                         onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                     )
                 }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+        ) {
+            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
+            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
         }
 
         Spacer(Modifier.height(12.dp))
