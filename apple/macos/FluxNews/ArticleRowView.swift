@@ -4,6 +4,13 @@ import SwiftUI
 // All modes use the same vertical hover controls. Only the surface directly
 // below the metadata/read-indicator row changes with the presentation style.
 enum ArticleHoverActionsLayout {
+    // Three full-size controls plus the gaps/padding; fixed at all times so
+    // hovering or moving keyboard focus never changes the row height.
+    static let controlSize: CGFloat = 28
+    static let controlSpacing: CGFloat = 2
+    static let verticalPadding: CGFloat = 3
+    static let minimumOverlayHeight = 3 * controlSize + 2 * controlSpacing + 2 * verticalPadding
+
     enum Anchor: Equatable {
         case previewText
         case trailingThumbnail
@@ -32,8 +39,19 @@ struct ArticleItem: View {
     let onDeleteDownload: (Enclosure) -> Void
     let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @FocusState private var focusedControl: FocusedControl?
     @State private var hovered = false
     @State private var temporalReferenceDate = Date()
+
+    private enum FocusedControl: Hashable {
+        case thumbnail, metadata, headline, preview, read, star, more
+    }
+
+    // Mouse, keyboard and VoiceOver all reveal the same controls.
+    private var actionsVisible: Bool {
+        hovered || focusedControl != nil || voiceOverEnabled
+    }
 
     @ViewBuilder
     var body: some View {
@@ -60,6 +78,7 @@ struct ArticleItem: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .focused($focusedControl, equals: .thumbnail)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -93,6 +112,7 @@ struct ArticleItem: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focused($focusedControl, equals: .headline)
 
                 if hasAvailableThumbnail {
                     Button { onSelect(); store.open(article) } label: {
@@ -100,13 +120,17 @@ struct ArticleItem: View {
                             article: article,
                             store: store,
                             width: 112,
-                            height: 84,
+                            height: ArticleHoverActionsLayout.minimumOverlayHeight,
                             cornerRadius: 9
                         )
                     }
                     .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .thumbnail)
                 }
             }
+            // Give text-only items the same minimum height; the hover overlay
+            // must never spill into the preview or adjacent article.
+            .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .top)
             // The right-hand image sits immediately below the metadata/read
             // indicator. Anchor to it, never to the preview's variable height.
             // Without a thumbnail, the controls overlap the trailing headline.
@@ -159,42 +183,63 @@ struct ArticleItem: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .focused($focusedControl, equals: .metadata)
 
-            Button { onSelect(); store.open(article) } label: {
-                VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-                    headline(lineLimit: mode == .compact ? 2 : 3)
-                    publicationRow
+            // The whole article-text region is measured in Compact, not just
+            // the headline. A long preview naturally supplies enough height;
+            // a short one gets only the missing space below the read indicator.
+            VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
+                Button { onSelect(); store.open(article) } label: {
+                    VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
+                        headline(lineLimit: mode == .compact ? 2 : 3)
+                        publicationRow
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .focused($focusedControl, equals: .headline)
+
+                if !article.preview.isEmpty {
+                    Button { onSelect(); store.open(article) } label: {
+                        Text(article.preview)
+                            .font(mode == .compact ? .caption : .subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(store.articlePreviewLines.rawValue)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .preview)
+                    .frame(
+                        minHeight: mode == .visual
+                            ? ArticleHoverActionsLayout.minimumOverlayHeight
+                            : 0,
+                        alignment: .topLeading
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        // Visual: the preview has its full text width, and
+                        // carries the vertical actions at its right edge.
+                        if ArticleHoverActionsLayout.anchor(for: mode) == .previewText {
+                            hoverActions
+                        }
+                    }
+                }
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(
+                minHeight: mode == .compact || article.preview.isEmpty
+                    ? ArticleHoverActionsLayout.minimumOverlayHeight
+                    : 0,
+                alignment: .topLeading
+            )
             .overlay(alignment: .topTrailing) {
-                // Compact always overlays the text below the read indicator.
-                // Visual only falls back to the headline when no preview exists.
+                // Compact overlays the full text area; Visual without a
+                // preview falls back to the headline/date area.
                 if ArticleHoverActionsLayout.anchor(for: mode) == .articleText
                     || (mode == .visual && article.preview.isEmpty) {
                     hoverActions
-                }
-            }
-
-            if !article.preview.isEmpty {
-                Button { onSelect(); store.open(article) } label: {
-                    Text(article.preview)
-                        .font(mode == .compact ? .caption : .subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(store.articlePreviewLines.rawValue)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .overlay(alignment: .topTrailing) {
-                    // Visual: headline/date above keep their full width; only
-                    // the preview is covered on hover, with no reserved space.
-                    if ArticleHoverActionsLayout.anchor(for: mode) == .previewText {
-                        hoverActions
-                    }
                 }
             }
         }
@@ -293,6 +338,7 @@ struct ArticleItem: View {
             ) {
                 store.setRead(article, !article.isRead)
             }
+            .focused($focusedControl, equals: .read)
         }
         iconButton(
             article.isStarred ? "star.fill" : "star",
@@ -300,32 +346,34 @@ struct ArticleItem: View {
         ) {
             store.setStarred(article, !article.isStarred)
         }
+        .focused($focusedControl, equals: .star)
         Menu { actionMenu } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 22, height: 22)
+                .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .frame(width: 22, height: 22)
+        .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
+        .focused($focusedControl, equals: .more)
         .help("More")
         .accessibilityLabel("More")
     }
 
     private var hoverActions: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: ArticleHoverActionsLayout.controlSpacing) {
             hoverActionControls
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 5)
+        .padding(.vertical, ArticleHoverActionsLayout.verticalPadding)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
         .overlay {
             RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(.primary.opacity(0.08))
                 .allowsHitTesting(false)
         }
-        .opacity(hovered ? 1 : 0)
-        .allowsHitTesting(hovered)
-        .accessibilityHidden(!hovered)
+        .opacity(actionsVisible ? 1 : 0)
+        .allowsHitTesting(actionsVisible)
+        .accessibilityHidden(!actionsVisible)
     }
 
     private var interactionBackground: Color {
@@ -367,9 +415,9 @@ struct ArticleItem: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .frame(width: 22, height: 22)
+                .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
         }
-            .buttonStyle(.borderless)
+        .buttonStyle(.borderless)
             .help(label)
             .accessibilityLabel(label)
     }
