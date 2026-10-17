@@ -1223,6 +1223,43 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+    /// Preview chapter metadata without preparing or playing an audio item.
+    func loadPlayerPreviewChapters(enclosureID: Int64, completion: @escaping ([MediaChapter]) -> Void) {
+        guard let core else { completion([]); return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let result = await coordinator.responsiveResult(
+                for: core, { try core.mediaChapters(enclosureId: enclosureID) }
+            )
+            guard let self, self.core === core else { completion([]); return }
+            completion((try? result?.get()) ?? [])
+        }
+    }
+
+    /// Resolve Listening List articles independently of the currently visible
+    /// timeline (which can be filtered to a different feed or scope).
+    func openOriginalArticle(articleID: Int64) {
+        if let article = articles.first(where: { $0.id == articleID }) {
+            openOriginal(article)
+            return
+        }
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core, { try core.articleSummary(articleId: articleID) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            switch result {
+            case let .success(article):
+                if let article { self.openOriginal(article) }
+                else { self.errorMessage = String(localized: "Article unavailable") }
+            case let .failure(error):
+                self.errorMessage = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     /// Player show notes must not use the global Reader request generation:
     /// opening a separate Reader must never silently discard this callback.
     func loadPlayerShowNotes(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
