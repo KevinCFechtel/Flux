@@ -205,7 +205,7 @@ private struct MacListeningListArtworkView: View {
         cache.totalCostLimit = 16 * 1_024 * 1_024
         cache.countLimit = 160
         return cache
-    }
+    }()
     private static let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:))
 
     let enclosureID: Int64?
