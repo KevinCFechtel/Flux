@@ -6,7 +6,7 @@
 > (16 October 2026; [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
 > passed). Original plan baseline was `9bd6ea9` (11 October).
 > C3.1–C3.7 are **merged**; C3.8 functional and B1 Sandbox gates
-> are **owner-accepted (17 October 2026)**. PR #61 remains subject to CI and merge approval. A1–A4 and Android C1/C2 have implemented work
+> are **owner-accepted (17 October 2026)**. PR #61 remains subject to CI and merge approval. A1–A4 and Android C2 have implemented work; C1 is owner-accepted
 > described below, with different remaining gates. Source/CI evidence is not
 > a device-acceptance or App Store submission claim.
 >
@@ -57,7 +57,7 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 | A4 | P0 | CI | `.github/workflows/rust.yml` implemented | Make `cargo fmt --check` blocking after baseline formatting cleanup; confirm required-check policy separately | — |
 | B1 | P0 before Mac App Store release | macOS | **Owner-accepted 17 Oct 2026** after successful Mac testing; entitlements/verifier/installer implemented (#38, #53) | Closed by owner sign-off; distribution validation belongs to R | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
-| C1 | P1 | Android | Resource extraction and 500 German translations implemented | Residual runtime-string audit, locale/device review, Weblate for five target languages | A3/A4 as relevant |
+| C1 | P1 | Android | **Owner-accepted 17 Oct 2026**; Android localization closed for this roadmap | Weblate is a separate future cross-platform workstream; subsequent localization defects are bugs | — |
 | C2 | P1 | Android | Native add-feed/add-category flows and policy tests implemented | End-to-end device/sync/restart/duplicate acceptance | A4 |
 | C3 | P1 | macOS | C3.1–C3.7 merged; **C3.8 owner-accepted 17 Oct 2026** | PR #61 CI / merge still outstanding | Feature code independent of B1 |
 | C4 | P2 | Shared/clients | Selective maintenance | Evidence-driven tasks only | Earlier relevant gates |
@@ -376,3 +376,7 @@ feasibility is demonstrated, and the accepted C1/C2/C3 items are either
 implemented with tests or explicitly deferred as separate decisions.
 The separate release/distribution acceptance criteria still live in
 `RELEASE_DISTRIBUTION.md`.
+
+## 17 October 2026 — C1 owner acceptance and Weblate scope
+
+The owner considers Android localization (C1) complete for this roadmap. Weblate integration and further translations will be tracked separately as a cross-platform effort for all apps, rather than as a remaining Android C1 gate. Subsequent defects in existing Android localization are handled as bugs.
