@@ -84,7 +84,8 @@ private struct ListeningListRow: View {
             )
             MacListeningListArtworkView(
                 enclosureID: artwork?.enclosure.id,
-                refreshToken: ListeningListPresentation.artworkRefreshToken(artwork),
+                refreshToken: ListeningListPresentation.artworkRefreshToken(artwork)
+                    + "|probe:\(store.artworkProbeRevisions[artwork?.enclosure.id ?? -1, default: 0])",
                 store: store,
                 coordinator: coordinator
             )
