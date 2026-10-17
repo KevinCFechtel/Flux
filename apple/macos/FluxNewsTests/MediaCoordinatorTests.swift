@@ -21,6 +21,28 @@ final class MacPlayerM1SourceTests: XCTestCase {
         XCTAssertFalse(source.contains(".onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item)"))
     }
 
+    func testEpisodePreviewUsesIndependentChapterAndOriginalArticleQueries() throws {
+        let player = try playerSource()
+        let browser = try sourceFile("BrowserStore.swift")
+        XCTAssertTrue(player.contains("loadPlayerPreviewChapters(enclosureID: id)"))
+        XCTAssertTrue(player.contains("previewing ? previewChapters : state.chapters"))
+        XCTAssertTrue(player.contains(".disabled(previewing)"))
+        XCTAssertTrue(player.contains("store.openOriginalArticle(articleID: articleID)"))
+        XCTAssertTrue(browser.contains("try core.mediaChapters(enclosureId: enclosureID)"))
+        XCTAssertTrue(browser.contains("try core.articleSummary(articleId: articleID)"))
+    }
+
+    func testCompactPlayerOffersArtworkAndPlayPauseWithoutOpeningFullPlayer() throws {
+        let nav = try sourceFile("PopoverNavigationViews.swift")
+        let popover = try sourceFile("PopoverContentView.swift")
+        XCTAssertTrue(nav.contains("struct MacCompactPlayerBar: View"))
+        XCTAssertTrue(nav.contains("Image(nsImage: artwork)"))
+        XCTAssertTrue(nav.contains("coordinator.pause()"))
+        XCTAssertTrue(nav.contains("coordinator.play(enclosureID: enclosure.id)"))
+        XCTAssertTrue(popover.contains("MacCompactPlayerBar("))
+        XCTAssertTrue(popover.contains("if playbackState.loadedEnclosure != nil"))
+    }
+
     func testPlayerReaderRequestsAreIndependent() throws {
         let source = try sourceFile("BrowserStore.swift")
         XCTAssertTrue(source.contains("func loadPlayerShowNotes(articleID:"))
