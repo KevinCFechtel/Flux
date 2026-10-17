@@ -81,6 +81,12 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
+    func testHoverActionsStayBelowMetadataAndUseModeSpecificOrientation() {
+        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .visual), .vertical)
+        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .visualCompact), .vertical)
+        XCTAssertEqual(ArticleHoverActionsLayout.orientation(for: .compact), .horizontal)
+    }
+
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
         // macOS now renders `visualCompact` as its own side-thumbnail layout,
