@@ -192,6 +192,87 @@ private struct ListeningListRow: View {
 
 }
 
+/// Per-row artwork uses a bounded decoded-pixel cache. The row's task is
+/// cancelled as soon as its LazyVStack view leaves the viewport.
+private struct MacListeningListArtworkView: View {
+    private struct PreparedImage: @unchecked Sendable {
+        let image: NSImage
+        let pixelCost: Int
+    }
+
+    nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
+    private static let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:))
+
+    let enclosureID: Int64?
+    let refreshToken: String
+    let store: BrowserStore
+    let coordinator: MediaPlaybackCoordinator?
+    @State private var image: NSImage?
+
+    private var cacheKey: NSString? {
+        enclosureID.map { "\($0)|\(refreshToken)" as NSString }
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if let fallback = Self.fallback {
+                Image(nsImage: fallback).resizable().scaledToFill()
+            } else {
+                Image(systemName: "waveform")
+                    .resizable().scaledToFit().padding(14)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 80, height: 80)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityLabel("Media artwork")
+        .task(id: refreshToken, priority: .utility) {
+            image = nil
+            guard let enclosureID, let cacheKey, let coordinator else { return }
+            if let cached = Self.cache.object(forKey: cacheKey) {
+                image = cached
+                return
+            }
+            // Avoid starting Core and network work for rows passed in a fast fling.
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled else { return }
+            let source: MediaArtworkSource? = await withCheckedContinuation { continuation in
+                store.loadPlayerArtworkSource(enclosureID: enclosureID) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            guard !Task.isCancelled, let source else { return }
+            guard let data = await coordinator.artwork(source: source),
+                  !Task.isCancelled else { return }
+            guard let prepared = await Self.prepareThumbnail(data), !Task.isCancelled else { return }
+            Self.cache.setObject(prepared.image, forKey: cacheKey, cost: prepared.pixelCost)
+            image = prepared.image
+        }
+    }
+
+    private static func prepareThumbnail(_ data: Data) async -> PreparedImage? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: CFDictionary = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailMaxPixelSize: 240,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ] as CFDictionary
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
+                return nil
+            }
+            return PreparedImage(
+                image: NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height)),
+                pixelCost: thumbnail.bytesPerRow * thumbnail.height
+            )
+        }.value
+    }
+}
+
 private struct DownloadControl: View {
     let item: ListeningListItem
     @ObservedObject var transferState: MediaTransferPresentationState
