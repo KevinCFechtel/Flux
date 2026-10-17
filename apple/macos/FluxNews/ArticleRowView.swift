@@ -624,6 +624,218 @@ private struct AudioActionsView: View {
     }
 }
 
+// A single TextKit layout lets the preview continue at full width once the
+// text reaches the bottom of the thumbnail. The image remains a SwiftUI view.
+enum VisualCompactFlowMetrics {
+    static let imageWidth: CGFloat = 112
+    static let imageHeight: CGFloat = ArticleHoverActionsLayout.minimumOverlayHeight
+    static let imageGap: CGFloat = 12
+
+    static func exclusionRect(width: CGFloat) -> CGRect {
+        CGRect(
+            x: max(0, width - imageWidth - imageGap),
+            y: 0,
+            width: imageWidth + imageGap,
+            height: imageHeight
+        )
+    }
+}
+
+private struct VisualCompactFlowText: NSViewRepresentable {
+    let title: String
+    let date: String
+    let readingTime: String?
+    let preview: String
+    let isRead: Bool
+    let showRelativeTime: Bool
+    let hasAudio: Bool
+    let previewLines: Int
+
+    func makeNSView(context: Context) -> VisualCompactFlowNSView {
+        VisualCompactFlowNSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: VisualCompactFlowNSView, context: Context) {
+        view.setContent(
+            title: title, date: date, readingTime: readingTime,
+            preview: preview, isRead: isRead,
+            showRelativeTime: showRelativeTime, hasAudio: hasAudio,
+            previewLines: previewLines
+        )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: VisualCompactFlowNSView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        return CGSize(width: width, height: nsView.measure(width: width))
+    }
+}
+
+private final class VisualCompactFlowNSView: NSView {
+    override var isFlipped: Bool { true }
+
+    private let storage = NSTextStorage()
+    private let manager = NSLayoutManager()
+    private let container = NSTextContainer(size: .zero)
+    private var value: Values?
+    private var measuredWidth: CGFloat = 0
+    private var measuredHeight: CGFloat = VisualCompactFlowMetrics.imageHeight
+    private var needsLayoutUpdate = true
+
+    private struct Values: Equatable {
+        let title: String
+        let date: String
+        let readingTime: String?
+        let preview: String
+        let isRead: Bool
+        let showRelativeTime: Bool
+        let hasAudio: Bool
+        let previewLines: Int
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setContent(
+        title: String, date: String, readingTime: String?, preview: String,
+        isRead: Bool, showRelativeTime: Bool, hasAudio: Bool, previewLines: Int
+    ) {
+        let next = Values(
+            title: title, date: date, readingTime: readingTime, preview: preview,
+            isRead: isRead, showRelativeTime: showRelativeTime,
+            hasAudio: hasAudio, previewLines: previewLines
+        )
+        guard value != next else { return }
+        value = next
+        needsLayoutUpdate = true
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    func measure(width: CGFloat) -> CGFloat {
+        let width = max(1, width)
+        if !needsLayoutUpdate && measuredWidth == width { return measuredHeight }
+        measuredWidth = width
+        needsLayoutUpdate = false
+        let exclusion = VisualCompactFlowMetrics.exclusionRect(width: width)
+        container.size = CGSize(width: width, height: 100_000)
+        container.exclusionPaths = [NSBezierPath(rect: exclusion)]
+        guard let value else { return VisualCompactFlowMetrics.imageHeight }
+
+        let narrowWidth = max(1, exclusion.minX)
+        let titleFont = NSFont.systemFont(ofSize: 14, weight: value.isRead ? .regular : .semibold)
+        let title = Self.limit(value.title, font: titleFont, width: narrowWidth, lines: 3)
+        let dateFont = NSFont.systemFont(ofSize: 11)
+        var date = (value.showRelativeTime ? "↻ " : "") + value.date
+        if let readingTime = value.readingTime {
+            date += " · " + (value.hasAudio ? "♫ " : "") + readingTime
+        }
+        date = Self.limit(date, font: dateFont, width: narrowWidth, lines: 1)
+
+        let text = NSMutableAttributedString(string: "")
+        let titleStyle = NSMutableParagraphStyle()
+        titleStyle.lineBreakMode = .byWordWrapping
+        titleStyle.paragraphSpacing = 5
+        text.append(NSAttributedString(string: title + "\n", attributes: [
+            .font: titleFont,
+            .foregroundColor: value.isRead ? NSColor.secondaryLabelColor : NSColor.labelColor,
+            .paragraphStyle: titleStyle
+        ]))
+        let dateStyle = NSMutableParagraphStyle()
+        dateStyle.lineBreakMode = .byWordWrapping
+        dateStyle.paragraphSpacing = value.preview.isEmpty ? 0 : 5
+        text.append(NSAttributedString(
+            string: date + (value.preview.isEmpty ? "" : "\n"),
+            attributes: [
+                .font: dateFont, .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: dateStyle
+            ]
+        ))
+        if !value.preview.isEmpty {
+            let style = NSMutableParagraphStyle()
+            style.lineBreakMode = .byWordWrapping
+            text.append(NSAttributedString(string: value.preview, attributes: [
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style
+            ]))
+        }
+
+        // The preview remains subject to the configured 2/3/5-line limit.
+        // Title and publication use their own bounded lines above it.
+        container.maximumNumberOfLines = Self.numberOfLines(
+            title, font: titleFont, width: narrowWidth
+        ) + 1 + (value.preview.isEmpty ? 0 : max(1, value.previewLines))
+        storage.setAttributedString(text)
+        manager.ensureLayout(for: container)
+        measuredHeight = max(
+            VisualCompactFlowMetrics.imageHeight,
+            ceil(manager.usedRect(for: container).height)
+        )
+        needsDisplay = true
+        return measuredHeight
+    }
+
+    override func layout() {
+        super.layout()
+        if bounds.width > 0 { _ = measure(width: bounds.width) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let glyphs = manager.glyphRange(for: container)
+        manager.drawGlyphs(forGlyphRange: glyphs, at: .zero)
+    }
+
+    private static func numberOfLines(
+        _ value: String, font: NSFont, width: CGFloat
+    ) -> Int {
+        let text = NSTextStorage(string: value, attributes: [.font: font])
+        let layout = NSLayoutManager()
+        let box = NSTextContainer(size: CGSize(width: width, height: 100_000))
+        box.lineFragmentPadding = 0
+        layout.addTextContainer(box)
+        text.addLayoutManager(layout)
+        layout.ensureLayout(for: box)
+        var count = 0
+        layout.enumerateLineFragments(
+            forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs)
+        ) { _, _, _, _, _ in count += 1 }
+        return max(1, count)
+    }
+
+    private static func limit(
+        _ value: String, font: NSFont, width: CGFloat, lines: Int
+    ) -> String {
+        guard numberOfLines(value, font: font, width: width) > lines else {
+            return value
+        }
+        let letters = Array(value)
+        var low = 0, high = letters.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            let sample = String(letters.prefix(mid))
+                .trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+            if numberOfLines(sample, font: font, width: width) <= lines {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+        return String(letters.prefix(low))
+            .trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+}
+
 private struct ThumbnailSlot: View {
     let article: ArticleSummary
     @ObservedObject var store: BrowserStore
