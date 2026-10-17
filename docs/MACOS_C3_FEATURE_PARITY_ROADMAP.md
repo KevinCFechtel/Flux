@@ -1,6 +1,6 @@
 # macOS C3 — Feature-Parity Completion Roadmap
 
-> **Status (16 October 2026): C3.1–C3.7 IMPLEMENTED AND MERGED; C3.8 REAL-MAC ACCEPTANCE OPEN.**
+> **Status (17 October 2026): C3.1–C3.7 IMPLEMENTED AND MERGED; C3.8 OWNER-ACCEPTED ON REAL MAC.**
 >
 > **Current code baseline:** `main` at `2edc6537aebac35260d35f4dcbcab8dcfc7a0ae9`. The original source
 > inventory was prepared on `9783d7e790858e79f00cab95b6b1c7b6bff513df`
@@ -254,6 +254,8 @@ For **C3.8 macOS functional acceptance**, test on a Mac:
 - Visual Compact hover overlay (Gelesen/Stern/Mehr): right-bottom anchoring on
   article preview, fallback without preview, long/short titles, clicking and
   focus/VoiceOver; verify unchanged row height and other display styles.
+
+**C3.8 sign-off (17 October 2026):** The project owner confirmed successful macOS app testing and expressly approved closing C3.8. This is an owner-reported device acceptance, not an independently captured per-case test log. Final code/CI and merge of PR #61 remain separate gates.
 
 The C3.8 smoke checks may use the same **Apple Development-signed, sandboxed**
 installation as B1; record pass/fail evidence for **C3.8 and B1 separately**.
