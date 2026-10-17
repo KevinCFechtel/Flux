@@ -1054,8 +1054,8 @@ impl MinifluxClient {
         if max_bytes == 0 {
             return Ok(Vec::new());
         }
-        let parsed = url::Url::parse(url)
-            .map_err(|_| CoreError::data("media probe URL is invalid"))?;
+        let parsed =
+            url::Url::parse(url).map_err(|_| CoreError::data("media probe URL is invalid"))?;
         if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
             return Err(CoreError::data("media probe URL must use HTTP(S)"));
         }
@@ -1063,7 +1063,10 @@ impl MinifluxClient {
         let response = self
             .media_probe_agent
             .get(url)
-            .set("Accept", "audio/*,video/*,application/octet-stream;q=0.8,*/*;q=0.1")
+            .set(
+                "Accept",
+                "audio/*,video/*,application/octet-stream;q=0.8,*/*;q=0.1",
+            )
             .set("Range", range)
             .call()
             .map_err(map_http_error)?;
@@ -1074,7 +1077,9 @@ impl MinifluxClient {
                 .header("Content-Length")
                 .and_then(|value| value.parse::<usize>().ok());
             if status != 200 || length.is_none_or(|length| length > max_bytes) {
-                return Err(CoreError::data("media server ignored bounded Range request"));
+                return Err(CoreError::data(
+                    "media server ignored bounded Range request",
+                ));
             }
         }
 
