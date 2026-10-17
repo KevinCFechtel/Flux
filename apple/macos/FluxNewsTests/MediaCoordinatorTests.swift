@@ -111,7 +111,17 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     func restartPlayback(enclosureId: Int64) throws { restartCount += 1; preparation.playbackState = PlaybackState(enclosureId: 7, positionMs: 0, durationMs: 120_000, status: .inProgress, updatedAt: nil) }
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws { observedDurations.append((enclosureId, durationMs)) }
     func mediaChapters(enclosureId: Int64) throws -> [MediaChapter] { chapters }
-    func mediaDownload(enclosureId: Int64) throws -> MediaDownload? { download }
+    func mediaDownload(enclosureId: Int64) throws -> MediaDownload {
+        download ?? MediaDownload(
+            enclosureId: enclosureId,
+            state: .notDownloaded,
+            origin: nil,
+            localFile: nil,
+            fileSizeBytes: nil,
+            downloadedAt: nil,
+            failureKind: nil
+        )
+    }
     func mediaArtwork(reference: String) throws -> Data? { nil }
 }
 
