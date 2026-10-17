@@ -57,7 +57,7 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 | A4 | P0 | CI | Blocking Rust formatting gate proposed in dedicated PR (17 Oct 2026) | Verify CI green; required-check branch protection remains repository setting | — |
 | B1 | P0 before Mac App Store release | macOS | Entitlements, storage and signed verifier/installer implemented (#38, #53) | Signed fresh-container runtime acceptance | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
-| C1 | P1 | Android | Resource extraction and 500 German translations implemented | Residual runtime-string audit, locale/device review, Weblate for five target languages | A3/A4 as relevant |
+| C1 | P1 | Android | **Owner-accepted 17 Oct 2026**; Android localization closed for this roadmap | Weblate is a separate future cross-platform workstream; subsequent localization defects are bugs | — |
 | C2 | P1 | Android | Native add-feed/add-category flows and policy tests implemented | End-to-end device/sync/restart/duplicate acceptance | A4 |
 | C3 | P1 | macOS | C3.1–C3.7 merged (#49–#52), combined Apple CI green | C3.8 real-Mac parity tests; B1 separately | Feature code independent of B1 |
 | C4 | P2 | Shared/clients | Selective maintenance | Evidence-driven tasks only | Earlier relevant gates |
@@ -388,3 +388,7 @@ The separate release/distribution acceptance criteria still live in
 The project owner accepted A1, A2 and A3 based on existing implementation and practical testing. They are closed by owner sign-off; no individual protocol/retention/network transition test report was supplied. Any subsequent issue is handled as a regression bug, not a reopening of these roadmap gates.
 
 A4: make `cargo fmt --manifest-path core/Cargo.toml --all --check` blocking in the Rust workflow. The historical formatting debt may require a mechanical rustfmt-only follow-up if the CI check fails. Verify the resulting CI before closing A4. GitHub branch protection / required-check settings cannot be inferred from the workflow alone.
+
+## 17 October 2026 — C1 owner acceptance and Weblate scope
+
+The owner considers Android localization (C1) complete for this roadmap. Weblate integration and further translations will be tracked separately as a cross-platform effort for all apps, rather than as a remaining Android C1 gate. Subsequent defects in existing Android localization are handled as bugs.
