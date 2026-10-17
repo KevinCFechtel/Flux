@@ -26,6 +26,7 @@ check_failure "Invalid version name" bash "$RELEASE" android --version-code 12 -
 check_failure "Play bundle requires explicit version" bash "$RELEASE" android --target play
 check_failure "App Store export requires explicit version" bash "$RELEASE" ios --target appstore
 check_failure "--debug cannot be combined" bash "$RELEASE" android --target play --debug
+check_failure "--debug cannot be combined" bash "$RELEASE" macos --target developer-id --debug
 check_failure "Unsupported target" bash "$RELEASE" macos --target fdroid
 check_failure "App Store export requires explicit version" bash "$RELEASE" macos --target appstore
 check_failure "--debug cannot be combined" bash "$RELEASE" macos --target appstore --debug
