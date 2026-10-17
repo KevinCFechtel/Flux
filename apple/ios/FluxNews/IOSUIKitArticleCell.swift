@@ -960,6 +960,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let landscapeReadingTimeIconFrame: CGRect?
         let landscapeReadingTimeFrame: CGRect?
         let previewFrame: CGRect?
+        let previewContinuationFrame: CGRect?
     }
 
     var layoutDiagnosticsForTesting: LayoutDiagnostics {
@@ -988,7 +989,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             landscapeReadingTimeFrame: currentReadingTime != nil
                 ? frame(landscapeReadingTimeLabel)
                 : nil,
-            previewFrame: previewLabel.isHidden ? nil : frame(previewLabel)
+            previewFrame: previewLabel.isHidden ? nil : frame(previewLabel),
+            previewContinuationFrame: previewContinuationLabel.isHidden
+                ? nil : frame(previewContinuationLabel)
         )
     }
 
