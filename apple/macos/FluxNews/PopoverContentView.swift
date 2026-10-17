@@ -89,6 +89,8 @@ private struct ArticlePane: View {
     let dismiss: () -> Void
     @State private var visibleArticleIDs = Set<Int64>()
     @State private var scrollDirection: CGFloat = 0
+    @State private var reachedListBottom = false
+    @State private var bottomScrolloverArmed = false
     @State private var trackerRevision: UInt64
     @State private var selectedID: Int64?
     @State private var hoveredID: Int64?
@@ -274,11 +276,19 @@ private struct ArticlePane: View {
                     .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
                         scrollChanged(new - old)
                     }
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        geometry.contentOffset.y + geometry.containerSize.height
+                            >= geometry.contentSize.height + geometry.contentInsets.bottom - 1
+                    } action: { _, atBottom in
+                        reachedListBottom = atBottom
+                        if atBottom { finishLastScrolloverItems() }
+                    }
                     .onScrollPhaseChange { previous, phase in
                         if !isUserScrollPhase(previous), isUserScrollPhase(phase) {
                             store.beginScrolloverUndoBatch()
                         }
                         if isUserScrollPhase(previous), !isUserScrollPhase(phase) {
+                            if reachedListBottom { finishLastScrolloverItems() }
                             store.finishScrolloverUndoBatch()
                         }
                         scrollPhase = phase
@@ -288,6 +298,8 @@ private struct ArticlePane: View {
                         NativeLog.snapshot.debug("snapshot reset requested revision=\(revision, privacy: .public)")
                         visibleArticleIDs.removeAll()
                         scrollDirection = 0
+                        reachedListBottom = false
+                        bottomScrolloverArmed = false
                         suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
                         scrollPosition.scrollTo(edge: .top)
                         NativeLog.snapshot.debug("snapshot reset completed revision=\(revision, privacy: .public)")
@@ -296,6 +308,8 @@ private struct ArticlePane: View {
                     .onChange(of: geometry.size) { _, _ in
                         visibleArticleIDs.removeAll()
                         scrollDirection = 0
+                        reachedListBottom = false
+                        bottomScrolloverArmed = false
                     }
                 }
             }
@@ -340,6 +354,24 @@ private struct ArticlePane: View {
         }
         store.noteMeaningfulInteraction()
         scrollDirection = delta
+        if delta > 0 { bottomScrolloverArmed = true }
+        if delta < 0 { bottomScrolloverArmed = false }
+        if reachedListBottom { finishLastScrolloverItems() }
+    }
+
+    private func finishLastScrolloverItems() {
+        guard reachedListBottom, bottomScrolloverArmed,
+              !store.isSearchActive, store.popoverVisible,
+              store.markReadOnScrolloverEnabled,
+              ProcessInfo.processInfo.systemUptime >= suppressUntil,
+              trackerRevision == store.listPresentationRevision,
+              let last = store.articles.last,
+              visibleArticleIDs.contains(last.id) else { return }
+        let remaining = store.articles
+            .filter { visibleArticleIDs.contains($0.id) && !$0.isRead }
+            .map(\.id)
+        bottomScrolloverArmed = false
+        if !remaining.isEmpty { store.flushScrollover(remaining) }
     }
 
     private func visibleArticlesChanged(_ newVisibleIDs: Set<Int64>) {
@@ -367,6 +399,7 @@ private struct ArticlePane: View {
             .sorted { (order[$0] ?? .max) < (order[$1] ?? .max) }
 
         if !ids.isEmpty { store.flushScrollover(ids) }
+        if reachedListBottom { finishLastScrolloverItems() }
     }
 
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
