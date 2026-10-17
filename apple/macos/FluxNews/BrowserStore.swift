@@ -139,6 +139,7 @@ final class BrowserStore: ObservableObject {
     private var articleAudioRequestGeneration: UInt64 = 0
     var onMediaTransferRequested: (() -> Void)?
     var onCancelMediaTransferRequested: ((Int64) -> Void)?
+    var onReleaseMediaForDownloadDeletion: ((Int64) -> Void)?
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -1382,6 +1383,9 @@ final class BrowserStore: ObservableObject {
             { try $0.requestDownloadDeletion(enclosureId: enclosureID) },
             onSuccess: { [weak self] in
                 guard let self else { return }
+                // A paused/stopped AVPlayer can still hold the file descriptor.
+                // Release the explicitly deleted media before attempting removal.
+                self.onReleaseMediaForDownloadDeletion?(enclosureID)
                 self.showActionConfirmation(String(localized: "Download deletion requested"))
                 self.onMediaTransferRequested?()
                 self.refreshListeningListIfVisible()
