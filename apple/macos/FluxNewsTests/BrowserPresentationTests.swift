@@ -3,6 +3,35 @@ import XCTest
 @testable import FluxNews
 
 @MainActor
+final class MacScrolloverEndPolicyTests: XCTestCase {
+    private func article(_ id: Int64, read: Bool = false) -> ArticleSummary {
+        ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed",
+            title: "Article", url: "https://example.test", commentsUrl: "",
+            publishedAt: "2026-10-17T10:00:00Z", isRead: read, isStarred: false,
+            readingTimeMinutes: 0, preview: "", imageUrl: nil)
+    }
+
+    func testEndMarksOnlyVisibleUnreadTailInListOrder() {
+        let items = [article(1), article(2, read: true), article(3), article(4)]
+        XCTAssertEqual(MacScrolloverEndPolicy.remainingUnreadIDs(
+            articles: items, visibleIDs: [2, 3, 4], atBottom: true,
+            forwardScrollArmed: true), [3, 4])
+    }
+
+    func testNoEndCompletionBeforeBottomOrWithoutForwardScroll() {
+        let items = [article(1), article(2)]
+        for (atBottom, armed) in [(false, true), (true, false)] {
+            XCTAssertTrue(MacScrolloverEndPolicy.remainingUnreadIDs(
+                articles: items, visibleIDs: [1, 2], atBottom: atBottom,
+                forwardScrollArmed: armed).isEmpty)
+        }
+        XCTAssertTrue(MacScrolloverEndPolicy.remainingUnreadIDs(
+            articles: items, visibleIDs: [1], atBottom: true,
+            forwardScrollArmed: true).isEmpty)
+    }
+}
+
+@MainActor
 final class BrowserPresentationTests: XCTestCase {
     func testHostATSAllowsUserSuppliedHTTPMediaWithoutChangingWidgetPolicy() throws {
         let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

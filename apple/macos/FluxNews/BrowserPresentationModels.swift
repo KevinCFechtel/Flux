@@ -64,6 +64,21 @@ enum ListeningListPresentation {
     }
 }
 
+enum MacScrolloverEndPolicy {
+    /// Only complete the remaining visible items after an intentional forward
+    /// scroll reaches the actual bottom; visibility alone must not mark them.
+    static func remainingUnreadIDs(
+        articles: [ArticleSummary],
+        visibleIDs: Set<Int64>,
+        atBottom: Bool,
+        forwardScrollArmed: Bool
+    ) -> [Int64] {
+        guard atBottom, forwardScrollArmed,
+              let last = articles.last, visibleIDs.contains(last.id) else { return [] }
+        return articles.filter { visibleIDs.contains($0.id) && !$0.isRead }.map(\.id)
+    }
+}
+
 enum ArticleAudioActions {
     enum DownloadAction: Equatable { case download, pending, delete, downloading, pendingDeletion, retry }
 
