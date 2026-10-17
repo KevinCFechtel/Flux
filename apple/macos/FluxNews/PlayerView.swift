@@ -126,12 +126,16 @@ struct PlayerView: View {
         return item.audioEnclosures.first(where: { $0.enclosure.id == item.activeEnclosureId })
             ?? item.audioEnclosures.first
     }
+    private var artworkEnclosureID: Int64? {
+        previewing ? previewEnclosure?.enclosure.id : state.loadedEnclosure?.id
+    }
     private var artworkKey: String {
-        if previewing { return "preview:\(previewEnclosure?.enclosure.id ?? -1)" }
+        let revision = store.artworkProbeRevisions[artworkEnclosureID ?? -1, default: 0]
+        if previewing { return "preview:\(artworkEnclosureID ?? -1)|probe:\(revision)" }
         switch state.artworkSource {
-        case let .some(.localReference(reference)): return "local:\(reference)"
-        case let .some(.remoteUrl(url)): return "remote:\(url)"
-        case .none: return "none"
+        case let .some(.localReference(reference)): return "local:\(reference)|probe:\(revision)"
+        case let .some(.remoteUrl(url)): return "remote:\(url)|probe:\(revision)"
+        case .none: return "none|probe:\(revision)"
         }
     }
     private func loadArtwork() async {
@@ -140,7 +144,7 @@ struct PlayerView: View {
         defer { artworkLoading = false }
         guard let coordinator else { return }
         let source: MediaArtworkSource?
-        if previewing, let id = previewEnclosure?.enclosure.id {
+        if let id = artworkEnclosureID, (previewing || state.artworkSource == nil) {
             source = await withCheckedContinuation { continuation in
                 store.loadPlayerArtworkSource(enclosureID: id) { continuation.resume(returning: $0) }
             }
