@@ -4,6 +4,39 @@ import AppKit
 import XCTest
 @testable import FluxNews
 
+final class MacPlayerM1SourceTests: XCTestCase {
+    func testPlayerHasArtworkAndLazyRetryableShowNotes() throws {
+        let source = try playerSource()
+        XCTAssertTrue(source.contains("Image(nsImage: artworkImage)"))
+        XCTAssertTrue(source.contains(".task(id: artworkKey)"))
+        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded: $showNotesExpanded)"))
+        XCTAssertTrue(source.contains("loadPlayerShowNotes(articleID: articleID)"))
+        XCTAssertTrue(source.contains("Button(\"Retry\")"))
+        XCTAssertTrue(source.contains("onPlayEnclosure(enclosure.enclosure)"))
+    }
+
+    func testListeningListOpensPlayerWithoutAutoplay() throws {
+        let source = try sourceFile("ListeningListViews.swift")
+        XCTAssertTrue(source.contains(".onTapGesture { onOpenPlayer(item.articleId) }"))
+        XCTAssertFalse(source.contains(".onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item)"))
+    }
+
+    func testPlayerReaderRequestsAreIndependent() throws {
+        let source = try sourceFile("BrowserStore.swift")
+        XCTAssertTrue(source.contains("func loadPlayerShowNotes(articleID:"))
+        XCTAssertTrue(source.contains("func loadPlayerArtworkSource(enclosureID:"))
+    }
+
+    private func playerSource() throws -> String { try sourceFile("PlayerView.swift") }
+
+    private func sourceFile(_ name: String) throws -> String {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("FluxNews").appendingPathComponent(name)
+        return try String(contentsOf: path, encoding: .utf8)
+    }
+}
+
 final class MacSandboxStorageTests: XCTestCase {
     func testMediaFilesUseApplicationSupportInsteadOfMovies() {
         let media = MediaPlaybackPaths.mediaRootURL.standardizedFileURL

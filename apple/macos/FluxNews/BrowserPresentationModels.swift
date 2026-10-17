@@ -33,6 +33,34 @@ enum ListeningListPresentation {
         return item.audioEnclosures.count == 1 ? item.audioEnclosures[0].enclosure : nil
     }
 
+    /// The list always has a cover candidate, even when a multi-audio entry
+    /// has not yet selected a preferred playback enclosure.
+    static func artworkEnclosure(_ item: ListeningListItem, loadedEnclosureID: Int64?) -> ListeningListEnclosure? {
+        if let loadedEnclosureID,
+           let loaded = item.audioEnclosures.first(where: { $0.enclosure.id == loadedEnclosureID }) {
+            return loaded
+        }
+        if let activeID = item.activeEnclosureId,
+           let active = item.audioEnclosures.first(where: { $0.enclosure.id == activeID }) {
+            return active
+        }
+        return item.audioEnclosures.first
+    }
+
+    /// Invalidate the artwork when download/probe metadata changes, not on every
+    /// playback tick or parent-row presentation update.
+    static func artworkRefreshToken(_ enclosure: ListeningListEnclosure?) -> String {
+        guard let enclosure else { return "none" }
+        let state = enclosure.download.map { String(describing: $0.state) } ?? "none"
+        return [
+            String(enclosure.enclosure.id), state, enclosure.download?.downloadedAt ?? ""
+        ].joined(separator: "|")
+    }
+
+    static func shouldPause(enclosureID: Int64, loadedEnclosureID: Int64?, isPlaying: Bool) -> Bool {
+        loadedEnclosureID == enclosureID && isPlaying
+    }
+
     @MainActor static func progress(_ item: ListeningListItem, runtime: MediaPlaybackPresentationState? = nil) -> ListeningListProgress? {
         let selected = item.activeEnclosureId.flatMap { id in item.audioEnclosures.first(where: { $0.enclosure.id == id }) }
             ?? (item.audioEnclosures.count == 1 ? item.audioEnclosures[0] : nil)

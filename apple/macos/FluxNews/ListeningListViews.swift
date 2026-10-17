@@ -1,10 +1,15 @@
 import SwiftUI
+import AppKit
+import ImageIO
 
 struct ListeningListView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     @ObservedObject var transferState: MediaTransferPresentationState
+    let onOpenPlayer: (Int64) -> Void
     let onPlay: (Enclosure) -> Void
+    let onPause: () -> Void
+    let coordinator: MediaPlaybackCoordinator?
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
     let onCancel: (Int64, Int64) -> Void
@@ -21,7 +26,7 @@ struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onCancel: onCancel, onRemove: onRemove)
+                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onOpenPlayer: onOpenPlayer, onPlay: onPlay, onPause: onPause, coordinator: coordinator, onDownload: onDownload, onDelete: onDelete, onCancel: onCancel, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -35,7 +40,10 @@ private struct ListeningListRow: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     @ObservedObject var transferState: MediaTransferPresentationState
+    let onOpenPlayer: (Int64) -> Void
     let onPlay: (Enclosure) -> Void
+    let onPause: () -> Void
+    let coordinator: MediaPlaybackCoordinator?
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
     let onCancel: (Int64, Int64) -> Void
@@ -45,29 +53,47 @@ private struct ListeningListRow: View {
     private static let isoFormatter = ISO8601DateFormatter()
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(3)
-                HStack(spacing: 5) {
-                    FeedIconSlot(feedID: item.feedId, store: store)
-                    Text(ListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed"))).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 5) {
+                        FeedIconSlot(feedID: item.feedId, store: store)
+                        Text(ListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed")))
+                            .foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .font(.caption)
                     if let date = Self.isoFormatter.date(from: item.publishedAt) {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.tertiary)
+                        Text(date.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { onOpenPlayer(item.articleId) }
                 progress
+                status
             }
-            Spacer(minLength: 4)
-            status
+            .frame(maxWidth: .infinity, alignment: .leading)
+            let artwork = ListeningListPresentation.artworkEnclosure(
+                item, loadedEnclosureID: playbackState.loadedEnclosure?.id
+            )
+            MacListeningListArtworkView(
+                enclosureID: artwork?.enclosure.id,
+                refreshToken: ListeningListPresentation.artworkRefreshToken(artwork),
+                store: store,
+                coordinator: coordinator
+            )
+            .frame(width: 80, height: 80)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpenPlayer(item.articleId) }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .contentShape(Rectangle())
-        .onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item) { onPlay(enclosure) } }
         .contextMenuIf(item.audioEnclosures.count > 1 && item.activeEnclosureId == nil) {
             ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
                 Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
@@ -107,29 +133,49 @@ private struct ListeningListRow: View {
     }
 
     @ViewBuilder private var status: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            if ListeningListPresentation.preferredEnclosure(item) == nil {
+        HStack(spacing: 8) {
+            if let selected = ListeningListPresentation.preferredEnclosure(item) {
+                let pause = ListeningListPresentation.shouldPause(
+                    enclosureID: selected.id,
+                    loadedEnclosureID: playbackState.loadedEnclosure?.id,
+                    isPlaying: playbackState.status == .playing
+                )
+                Button {
+                    if pause { onPause() }
+                    else { onPlay(selected) }
+                } label: {
+                    Image(systemName: pause ? "pause.fill" : "play.fill")
+                        .frame(width: 24, height: 22)
+                }
+                .buttonStyle(.bordered)
+                .help(pause ? "Pause" : "Play")
+                .accessibilityLabel(pause ? "Pause" : "Play")
+            } else if !item.audioEnclosures.isEmpty {
                 Menu {
                     ForEach(item.audioEnclosures.indices, id: \.self) { index in
                         let audio = item.audioEnclosures[index]
-                        Button(ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)) { onPlay(audio.enclosure) }
+                        Button(ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)) {
+                            onPlay(audio.enclosure)
+                        }
                     }
                 } label: {
-                    Image(systemName: "play.fill")
+                    Image(systemName: "play.fill").frame(width: 24, height: 22)
                 }
                 .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
                 .help("Choose audio to play")
+                .accessibilityLabel("Choose audio to play")
             }
-            let count = ListeningListPresentation.downloadedCount(item)
-            HStack(spacing: 4) {
-                DownloadControl(item: item, transferState: transferState, onDownload: onDownload, onDelete: { pendingDeletion = $0 }, onCancel: onCancel)
-                if count.total > 1 {
-                    Text("\(count.downloaded)/\(count.total)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+
+            DownloadControl(
+                item: item, transferState: transferState, onDownload: onDownload,
+                onDelete: { pendingDeletion = $0 }, onCancel: onCancel
+            )
+            let downloads = ListeningListPresentation.downloadedCount(item)
+            if downloads.total > 1 {
+                Text("\(downloads.downloaded)/\(downloads.total)")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
             Button {
                 if ArticleAudioActions.hasLocalDownload(item) { confirmingRemoval = true }
                 else { onRemove(item.articleId) }
@@ -144,6 +190,96 @@ private struct ListeningListRow: View {
         String(max(0, Int(milliseconds / 60_000)))
     }
 
+}
+
+/// Per-row artwork uses a bounded decoded-pixel cache. The row's task is
+/// cancelled as soon as its LazyVStack view leaves the viewport.
+private struct MacListeningListArtworkView: View {
+    private struct PreparedThumbnail: @unchecked Sendable {
+        let cgImage: CGImage
+        let pixelCost: Int
+    }
+
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 16 * 1_024 * 1_024
+        cache.countLimit = 160
+        return cache
+    }()
+    private static let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:))
+
+    let enclosureID: Int64?
+    let refreshToken: String
+    let store: BrowserStore
+    let coordinator: MediaPlaybackCoordinator?
+    @State private var image: NSImage?
+
+    private var cacheKey: NSString? {
+        enclosureID.map { "\($0)|\(refreshToken)" as NSString }
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if let fallback = Self.fallback {
+                Image(nsImage: fallback).resizable().scaledToFill()
+            } else {
+                Image(systemName: "waveform")
+                    .resizable().scaledToFit().padding(14)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 80, height: 80)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityLabel("Media artwork")
+        .task(id: refreshToken, priority: .utility) {
+            image = nil
+            guard let enclosureID, let cacheKey, let coordinator else { return }
+            if let cached = Self.cache.object(forKey: cacheKey) {
+                image = cached
+                return
+            }
+            // Avoid starting Core and network work for rows passed in a fast fling.
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled else { return }
+            let source: MediaArtworkSource? = await withCheckedContinuation { continuation in
+                store.loadPlayerArtworkSource(enclosureID: enclosureID) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            guard !Task.isCancelled, let source else { return }
+            guard let data = await coordinator.artwork(source: source),
+                  !Task.isCancelled else { return }
+            guard let prepared = await Self.prepareThumbnail(data), !Task.isCancelled else { return }
+            // AppKit image creation stays on the main actor; only ImageIO decode runs detached.
+            let image = NSImage(
+                cgImage: prepared.cgImage,
+                size: NSSize(width: prepared.cgImage.width, height: prepared.cgImage.height)
+            )
+            Self.cache.setObject(image, forKey: cacheKey, cost: prepared.pixelCost)
+            self.image = image
+        }
+    }
+
+    private static func prepareThumbnail(_ data: Data) async -> PreparedThumbnail? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: CFDictionary = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 240,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ] as CFDictionary
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
+                return nil
+            }
+            return PreparedThumbnail(
+                cgImage: thumbnail, pixelCost: thumbnail.bytesPerRow * thumbnail.height
+            )
+        }.value
+    }
 }
 
 private struct DownloadControl: View {

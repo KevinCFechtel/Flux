@@ -54,6 +54,11 @@ struct PlayerView: View {
     let store: BrowserStore
     @ObservedObject var state: MediaPlaybackPresentationState
     let coordinator: MediaPlaybackCoordinator?
+    let previewArticleID: Int64?
+    let onPlayEnclosure: (Enclosure) -> Void
+    let onDownload: (Int64, Int64) -> Void
+    let onDelete: (Int64, Int64) -> Void
+    let onCancel: (Int64, Int64) -> Void
     @ObservedObject private var sleepTimer: MediaSleepTimer
     @State private var isScrubbing = false
     @State private var scrubPositionMs = 0.0
@@ -61,11 +66,23 @@ struct PlayerView: View {
     @State private var isLoadingReaderDocument = false
     @State private var readerError: String?
     @State private var readerRequest = 0
+    @State private var showNotesExpanded = false
+    @State private var artworkImage: NSImage?
+    @State private var artworkLoading = false
 
-    init(store: BrowserStore, state: MediaPlaybackPresentationState, coordinator: MediaPlaybackCoordinator?) {
+    init(store: BrowserStore, state: MediaPlaybackPresentationState, coordinator: MediaPlaybackCoordinator?,
+         previewArticleID: Int64? = nil, onPlayEnclosure: @escaping (Enclosure) -> Void = { _ in },
+         onDownload: @escaping (Int64, Int64) -> Void = { _, _ in },
+         onDelete: @escaping (Int64, Int64) -> Void = { _, _ in },
+         onCancel: @escaping (Int64, Int64) -> Void = { _, _ in }) {
         self.store = store
         self.state = state
         self.coordinator = coordinator
+        self.previewArticleID = previewArticleID
+        self.onPlayEnclosure = onPlayEnclosure
+        self.onDownload = onDownload
+        self.onDelete = onDelete
+        self.onCancel = onCancel
         _sleepTimer = ObservedObject(wrappedValue: coordinator?.sleepTimer ?? MediaSleepTimer())
     }
 
@@ -77,9 +94,10 @@ struct PlayerView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    audioSelection
+                    showNotes
                     chapters
                     advancedSettings
-                    showNotes
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,41 +106,105 @@ struct PlayerView: View {
         .onChange(of: state.positionMs) { _, position in
             if !isScrubbing { scrubPositionMs = Double(position) }
         }
-        .onAppear { loadReaderDocument() }
-        .onChange(of: state.loadedEnclosure?.articleId) { _, _ in loadReaderDocument() }
+        .onAppear { resetShowNotes() }
+        .onChange(of: displayedArticleID) { _, _ in resetShowNotes() }
+        .task(id: artworkKey) { await loadArtwork() }
+    }
+
+    private var previewItem: ListeningListItem? {
+        previewArticleID.flatMap { id in store.listeningListItems.first(where: { $0.articleId == id }) }
+    }
+    private var previewing: Bool {
+        guard let previewArticleID else { return false }
+        return state.loadedEnclosure?.articleId != previewArticleID
+    }
+    private var displayedArticleID: Int64? {
+        previewing ? previewArticleID : state.loadedEnclosure?.articleId
+    }
+    private var previewEnclosure: ListeningListEnclosure? {
+        guard let item = previewItem else { return nil }
+        return item.audioEnclosures.first(where: { $0.enclosure.id == item.activeEnclosureId })
+            ?? item.audioEnclosures.first
+    }
+    private var artworkKey: String {
+        if previewing { return "preview:\(previewEnclosure?.enclosure.id ?? -1)" }
+        switch state.artworkSource {
+        case let .some(.localReference(reference)): return "local:\(reference)"
+        case let .some(.remoteUrl(url)): return "remote:\(url)"
+        case .none: return "none"
+        }
+    }
+    private func loadArtwork() async {
+        artworkImage = nil
+        artworkLoading = true
+        defer { artworkLoading = false }
+        guard let coordinator else { return }
+        let source: MediaArtworkSource?
+        if previewing, let id = previewEnclosure?.enclosure.id {
+            source = await withCheckedContinuation { continuation in
+                store.loadPlayerArtworkSource(enclosureID: id) { continuation.resume(returning: $0) }
+            }
+        } else {
+            source = state.artworkSource
+        }
+        guard !Task.isCancelled, let source else { return }
+        let data = await coordinator.artwork(source: source)
+        guard !Task.isCancelled else { return }
+        artworkImage = data.flatMap(NSImage.init(data:))
     }
 
     private var fixedPlayback: some View {
         VStack(alignment: .leading, spacing: 14) {
-            timeline
-            controls
-            runtimeStatus
+            if previewing {
+                Text("Episode preview").font(.caption).foregroundStyle(.secondary)
+                if let enclosure = previewEnclosure {
+                    Button("Play Episode") { onPlayEnclosure(enclosure.enclosure) }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else {
+                timeline
+                controls
+                runtimeStatus
+            }
         }
         .padding(16)
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if let articleID = state.loadedEnclosure?.articleId,
-               let feedID = store.feedID(forArticleID: articleID) {
-                FeedIconSlot(feedID: feedID, store: store)
-            } else {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10).fill(.secondary.opacity(0.12))
+                if let artworkImage {
+                    Image(nsImage: artworkImage).resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel("Media artwork")
+                } else if artworkLoading {
+                    ProgressView().controlSize(.small)
+                } else if let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:)) {
+                    Image(nsImage: fallback).resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Image(systemName: "waveform").font(.title).foregroundStyle(.secondary)
+                }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(PlayerPresentation.textOrFallback(state.feedTitle, fallback: String(localized: "Unknown Feed")))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(PlayerPresentation.textOrFallback(state.mediaTitle, fallback: String(localized: "Untitled Media")))
-                    .font(.headline)
-                    .lineLimit(2)
+            .frame(width: 88, height: 88)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if let articleID = displayedArticleID,
+                       let feedID = store.feedID(forArticleID: articleID) {
+                        FeedIconSlot(feedID: feedID, store: store)
+                    }
+                    Text(PlayerPresentation.textOrFallback(previewing ? (previewItem?.feedTitle ?? "") : state.feedTitle,
+                        fallback: String(localized: "Unknown Feed")))
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text(PlayerPresentation.textOrFallback(previewing ? (previewItem?.title ?? "") : state.mediaTitle,
+                    fallback: String(localized: "Untitled Media")))
+                    .font(.headline).lineLimit(3)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 16).padding(.vertical, 14)
     }
 
     private var timeline: some View {
@@ -210,20 +292,64 @@ struct PlayerView: View {
         .id(index)
     }
 
-    @ViewBuilder private var showNotes: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Show Notes").font(.headline)
-            if isLoadingReaderDocument {
-                ProgressView("Loading Show Notes...").controlSize(.small)
-            } else if let readerError {
-                Label(readerError, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if let readerDocument {
-                ReaderDocumentContent(document: readerDocument, openOriginal: openOriginal)
-                    .textSelection(.enabled)
-            } else {
-                Text("Show Notes unavailable").font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder private var audioSelection: some View {
+        if let item = previewItem ?? displayedArticleID.flatMap({ id in
+            store.listeningListItems.first(where: { $0.articleId == id })
+        }), !item.audioEnclosures.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Audio").font(.headline)
+                ForEach(Array(item.audioEnclosures.enumerated()), id: \.offset) { index, audio in
+                    HStack(spacing: 8) {
+                        Text(ArticleAudioActions.enclosureLabel(audio.enclosure, index: index))
+                            .font(.caption).lineLimit(2)
+                        Spacer(minLength: 4)
+                        Button { onPlayEnclosure(audio.enclosure) } label: {
+                            Image(systemName: "play.fill")
+                        }.buttonStyle(.borderless).help("Play")
+                        switch ArticleAudioActions.downloadAction(audio.download) {
+                        case .download, .retry:
+                            Button { onDownload(item.articleId, audio.enclosure.id) } label: {
+                                Image(systemName: "arrow.down.circle")
+                            }.buttonStyle(.borderless).help("Download")
+                        case .pending, .downloading:
+                            Button { onCancel(item.articleId, audio.enclosure.id) } label: {
+                                Image(systemName: "xmark.circle")
+                            }.buttonStyle(.borderless).help("Cancel Download")
+                        case .delete:
+                            Button { onDelete(item.articleId, audio.enclosure.id) } label: {
+                                Image(systemName: "trash")
+                            }.buttonStyle(.borderless).help("Delete Download")
+                        case .pendingDeletion:
+                            Image(systemName: "clock").foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    private var showNotes: some View {
+        DisclosureGroup(isExpanded: $showNotesExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                if isLoadingReaderDocument {
+                    ProgressView("Loading Show Notes...").controlSize(.small)
+                } else if let readerError {
+                    Label(readerError, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Retry") { loadReaderDocument() }.buttonStyle(.bordered)
+                } else if let readerDocument {
+                    ReaderDocumentContent(document: readerDocument, openOriginal: openOriginal, contentPadding: 0)
+                        .textSelection(.enabled)
+                } else {
+                    Text("Show Notes unavailable").font(.caption).foregroundStyle(.secondary)
+                    Button("Retry") { loadReaderDocument() }.buttonStyle(.bordered)
+                }
+            }.padding(.top, 8)
+        } label: {
+            Label("Show Notes", systemImage: "doc.text").font(.headline)
+        }
+        .onChange(of: showNotesExpanded) { _, expanded in
+            if expanded && readerDocument == nil && !isLoadingReaderDocument { loadReaderDocument() }
         }
     }
 
@@ -300,10 +426,18 @@ struct PlayerView: View {
         return remainder == 0 ? "\(minutes)m" : "\(minutes)m \(remainder)s"
     }
 
+    private func resetShowNotes() {
+        readerRequest += 1
+        readerDocument = nil
+        readerError = nil
+        isLoadingReaderDocument = false
+        if showNotesExpanded { loadReaderDocument() }
+    }
+
     private func loadReaderDocument() {
         readerRequest += 1
         let request = readerRequest
-        guard let articleID = state.loadedEnclosure?.articleId else {
+        guard let articleID = displayedArticleID else {
             readerDocument = nil
             isLoadingReaderDocument = false
             readerError = nil
@@ -312,8 +446,8 @@ struct PlayerView: View {
         readerDocument = nil
         readerError = nil
         isLoadingReaderDocument = true
-        store.loadReaderDocument(articleID: articleID) { result in
-            guard request == readerRequest, state.loadedEnclosure?.articleId == articleID else { return }
+        store.loadPlayerShowNotes(articleID: articleID) { result in
+            guard request == readerRequest, displayedArticleID == articleID else { return }
             isLoadingReaderDocument = false
             switch result {
             case let .success(document): readerDocument = document
