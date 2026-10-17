@@ -416,3 +416,7 @@ This follow-up does not:
 ## R1 version argument parity
 
 The central `Build/release.sh` accepts `--version-code` and `--version-name` for normal and store builds on Android, iOS and macOS. For Apple, `--version-code` maps to `CFBundleVersion` / `CURRENT_PROJECT_VERSION` and `--version-name` to `CFBundleShortVersionString` / `MARKETING_VERSION`. Normal builds may omit both and use the project values; store release targets require both. The macOS direct build script accepts `--build-number N --version-name V` and passes both to Xcode, affecting app and widget targets. The iOS direct build and archive scripts already support equivalent version inputs; export scripts inherit the archived version. This is a CLI contract change, not a claim of device/store acceptance.
+
+## macOS local installation default
+
+`apple/macos/Build/install-local.sh` now defaults to strict `developer-id` verification, requiring a Developer ID Application signed host, widget and embedded Rust library with matching team, Sandbox and App Group entitlements. Set `SOURCE_APP=/path/to/FluxNews.app` to select the built artifact. For deliberate development-only installs, `INSTALL_MODE=development` opts into the prior Apple Development/provisioning verification. Note that the ordinary `macos` build and App Store archive do **not** produce a Developer ID signed app: use `apple/macos/Build/release.sh` (Developer ID signing/notarization pipeline) before the default local installation. The Developer ID release pipeline still has its own environment/signing prerequisites.
