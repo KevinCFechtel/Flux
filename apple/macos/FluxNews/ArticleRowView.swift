@@ -1,6 +1,30 @@
 import AppKit
 import SwiftUI
 
+// Visual/Compact use the original adjacent hover buttons. Visual Compact
+// keeps its trailing-thumbnail overlay and pointer dwell behavior.
+enum ArticleHoverActionsLayout {
+    // Only Visual Compact uses these overlay sizes and the dwell delay.
+    static let controlSize: CGFloat = 28
+    static let controlSpacing: CGFloat = 2
+    static let verticalPadding: CGFloat = 3
+    static let minimumOverlayHeight = 3 * controlSize + 2 * controlSpacing + 2 * verticalPadding
+    // Avoid revealing actions on rows briefly crossed while scrolling.
+    static let hoverRevealDelayNanoseconds: UInt64 = 400_000_000
+
+    enum Anchor: Equatable {
+        case adjacentBelowMetadata
+        case trailingThumbnail
+    }
+
+    static func anchor(for mode: ArticlePresentationMode) -> Anchor {
+        switch mode {
+        case .visual, .compact: .adjacentBelowMetadata
+        case .visualCompact: .trailingThumbnail
+        }
+    }
+}
+
 struct ArticleItem: View {
     let article: ArticleSummary
     let mode: ArticlePresentationMode
@@ -14,8 +38,21 @@ struct ArticleItem: View {
     let onDeleteDownload: (Enclosure) -> Void
     let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @FocusState private var focusedControl: FocusedControl?
     @State private var hovered = false
+    @State private var hoverActionsReady = false
+    @State private var hoverRevealTask: Task<Void, Never>?
     @State private var temporalReferenceDate = Date()
+
+    private enum FocusedControl: Hashable {
+        case thumbnail, metadata, headline, preview, read, star, more
+    }
+
+    // Pointer dwell is delayed; keyboard focus and VoiceOver stay immediate.
+    private var actionsVisible: Bool {
+        hoverActionsReady || focusedControl != nil || voiceOverEnabled
+    }
 
     @ViewBuilder
     var body: some View {
@@ -45,15 +82,27 @@ struct ArticleItem: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    // Keep the entire feed/status row full width. The adjacent
+                    // vertical hover buttons start only below this row.
                     Button { onSelect(); store.open(article) } label: {
-                        semanticTextComposition
+                        metadata
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    quickActions
-                        .opacity(hovered ? 1 : 0)
-                        .allowsHitTesting(hovered)
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Button { onSelect(); store.open(article) } label: {
+                            articleTextBelowMetadata
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        quickActions
+                            .opacity(hovered ? 1 : 0)
+                            .allowsHitTesting(hovered)
+                    }
                 }
                 audioActions
             }
@@ -74,48 +123,75 @@ struct ArticleItem: View {
         VStack(alignment: .leading, spacing: 8) {
             metadata
 
-            HStack(alignment: .top, spacing: 12) {
-                Button { onSelect(); store.open(article) } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        headline(lineLimit: 3)
-                        publicationRow
+            if hasAvailableThumbnail {
+                // One TextKit block flows the preview beside, then underneath,
+                // the image. The full-width feed metadata stays above it.
+                ZStack(alignment: .topTrailing) {
+                    Button { onSelect(); store.open(article) } label: {
+                        VisualCompactFlowText(
+                            title: ListeningListPresentation.textOrFallback(
+                                article.title, fallback: String(localized: "Untitled News")
+                            ),
+                            date: publicationValue,
+                            readingTime: readingTime,
+                            preview: article.preview,
+                            isRead: article.isRead,
+                            showRelativeTime: store.showRelativePublicationTime,
+                            hasAudio: hasAudio,
+                            previewLines: store.articlePreviewLines.rawValue
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(
+                            [article.title, publicationValue, article.preview]
+                                .filter { !$0.isEmpty }.joined(separator: ". ")
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .headline)
 
-                if hasAvailableThumbnail {
                     Button { onSelect(); store.open(article) } label: {
                         ThumbnailSlot(
                             article: article,
                             store: store,
-                            width: 112,
-                            height: 84,
+                            width: VisualCompactFlowMetrics.imageWidth,
+                            height: VisualCompactFlowMetrics.imageHeight,
                             cornerRadius: 9
                         )
                     }
                     .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .thumbnail)
+                    .overlay(alignment: .topTrailing) { hoverActions }
                 }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if article.preview.isEmpty {
-                    visualCompactHoverActions
-                }
-            }
-
-            // The preview retains its full width and the overlay never
-            // changes the row height or compresses text.
-            if !article.preview.isEmpty {
-                Text(article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(store.articlePreviewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .bottomTrailing) {
-                        visualCompactHoverActions
+                .frame(minHeight: VisualCompactFlowMetrics.imageHeight, alignment: .top)
+            } else {
+                // No thumbnail: never reserve an image-sized gap between the
+                // publication row and preview. Keep the action stack inside
+                // the complete text block instead of sizing the headline only.
+                VStack(alignment: .leading, spacing: 5) {
+                    Button { onSelect(); store.open(article) } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            headline(lineLimit: 3)
+                            publicationRow
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .headline)
+
+                    if !article.preview.isEmpty {
+                        Text(article.preview)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(store.articlePreviewLines.rawValue)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .topLeading)
+                .overlay(alignment: .topTrailing) { hoverActions }
             }
 
             audioActions
@@ -129,21 +205,35 @@ struct ArticleItem: View {
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+        .onDisappear {
+            updateHover(false)
+            store.retryUnavailableArticleThumbnail(article)
+        }
     }
 
     private var compact: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                // Like Visual, the feed title and status indicators occupy
+                // the complete row; hover controls start underneath them.
                 Button { onSelect(); store.open(article) } label: {
-                    semanticTextComposition
+                    metadata
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                quickActions
-                    .opacity(hovered ? 1 : 0)
-                    .allowsHitTesting(hovered)
+                HStack(alignment: .top, spacing: 10) {
+                    Button { onSelect(); store.open(article) } label: {
+                        articleTextBelowMetadata
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
+                }
             }
             audioActions
         }
@@ -156,9 +246,8 @@ struct ArticleItem: View {
         .contextMenu { actionMenu }
     }
 
-    private var semanticTextComposition: some View {
+    private var articleTextBelowMetadata: some View {
         VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-            metadata
             headline(lineLimit: mode == .compact ? 2 : 3)
             publicationRow
             if !article.preview.isEmpty {
@@ -254,17 +343,19 @@ struct ArticleItem: View {
         }
     }
 
+    // Original adjacent vertical actions for Visual and Compact; these
+    // reserve their width and appear immediately on row hover.
     private var quickActions: some View {
         VStack(spacing: 8) {
             if !store.isSearchActive {
-                iconButton(
+                legacyQuickActionButton(
                     article.isRead ? "circle.fill" : "checkmark.circle",
                     label: readActionLabel
                 ) {
                     store.setRead(article, !article.isRead)
                 }
             }
-            iconButton(
+            legacyQuickActionButton(
                 article.isStarred ? "star.fill" : "star",
                 label: starActionLabel
             ) {
@@ -281,44 +372,63 @@ struct ArticleItem: View {
         }
     }
 
-    // A translucent surface hides the text behind the icons while hovered;
-    // the preview never reserves horizontal space for the action controls.
-    private var visualCompactHoverActions: some View {
-        HStack(spacing: 10) {
-            if !store.isSearchActive {
-                iconButton(
-                    article.isRead ? "circle.fill" : "checkmark.circle",
-                    label: readActionLabel
-                ) {
-                    store.setRead(article, !article.isRead)
-                }
-            }
+    private func legacyQuickActionButton(
+        _ icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { Image(systemName: icon) }
+            .buttonStyle(.borderless)
+            .help(label)
+            .accessibilityLabel(label)
+    }
+
+    // Visual Compact retains the new overlay controls and 400 ms dwell.
+    @ViewBuilder
+    private var hoverActionControls: some View {
+        if !store.isSearchActive {
             iconButton(
-                article.isStarred ? "star.fill" : "star",
-                label: starActionLabel
+                article.isRead ? "circle.fill" : "checkmark.circle",
+                label: readActionLabel
             ) {
-                store.setStarred(article, !article.isStarred)
+                store.setRead(article, !article.isRead)
             }
-            Menu { actionMenu } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 22)
-            .help("More")
-            .accessibilityLabel("More")
+            .focused($focusedControl, equals: .read)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        iconButton(
+            article.isStarred ? "star.fill" : "star",
+            label: starActionLabel
+        ) {
+            store.setStarred(article, !article.isStarred)
+        }
+        .focused($focusedControl, equals: .star)
+        Menu { actionMenu } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
+        .focused($focusedControl, equals: .more)
+        .help("More")
+        .accessibilityLabel("More")
+    }
+
+    private var hoverActions: some View {
+        VStack(spacing: ArticleHoverActionsLayout.controlSpacing) {
+            hoverActionControls
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, ArticleHoverActionsLayout.verticalPadding)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
         .overlay {
             RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(.primary.opacity(0.08))
                 .allowsHitTesting(false)
         }
-        .opacity(hovered ? 1 : 0)
-        .allowsHitTesting(hovered)
-        .accessibilityHidden(!hovered)
+        .opacity(actionsVisible ? 1 : 0)
+        .allowsHitTesting(actionsVisible)
+        .accessibilityHidden(!actionsVisible)
     }
 
     private var interactionBackground: Color {
@@ -358,14 +468,37 @@ struct ArticleItem: View {
         label: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) { Image(systemName: icon) }
-            .buttonStyle(.borderless)
+        Button(action: action) {
+            Image(systemName: icon)
+                .frame(width: ArticleHoverActionsLayout.controlSize, height: ArticleHoverActionsLayout.controlSize)
+        }
+        .buttonStyle(.borderless)
             .help(label)
             .accessibilityLabel(label)
     }
 
     private func updateHover(_ hovering: Bool) {
+        // Visual and Compact use the original immediate hover behavior.
+        // Only Visual Compact delays revealing its overlay controls.
         hovered = hovering
+        if mode == .visualCompact {
+            hoverRevealTask?.cancel()
+            hoverRevealTask = nil
+            if hovering {
+                hoverActionsReady = false
+                hoverRevealTask = Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: ArticleHoverActionsLayout.hoverRevealDelayNanoseconds)
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled, hovered else { return }
+                    hoverActionsReady = true
+                }
+            } else {
+                hoverActionsReady = false
+            }
+        }
         onHoverChanged(hovering)
     }
 
@@ -494,6 +627,229 @@ private struct AudioActionsView: View {
     private func perform(title: String, enclosure: Enclosure, action: @escaping (Enclosure) -> Void) {
         if title == "Download", ArticleAudioActions.canDeleteDownload(state.downloads[enclosure.id]) { pendingDeletion = enclosure }
         else { action(enclosure) }
+    }
+}
+
+// A single TextKit layout lets the preview continue at full width once the
+// text reaches the bottom of the thumbnail. The image remains a SwiftUI view.
+enum VisualCompactFlowMetrics {
+    static let imageWidth: CGFloat = 112
+    static let imageHeight: CGFloat = ArticleHoverActionsLayout.minimumOverlayHeight
+    static let imageGap: CGFloat = 12
+
+    static func exclusionRect(width: CGFloat) -> CGRect {
+        CGRect(
+            x: max(0, width - imageWidth - imageGap),
+            y: 0,
+            width: imageWidth + imageGap,
+            height: imageHeight
+        )
+    }
+}
+
+// Use the same semantic styles as SwiftUI's .subheadline and .caption.
+enum VisualCompactFlowTypography {
+    static var previewFont: NSFont {
+        NSFont.preferredFont(forTextStyle: .subheadline)
+    }
+
+    static var dateFont: NSFont {
+        NSFont.preferredFont(forTextStyle: .caption1)
+    }
+}
+
+private struct VisualCompactFlowText: NSViewRepresentable {
+    let title: String
+    let date: String
+    let readingTime: String?
+    let preview: String
+    let isRead: Bool
+    let showRelativeTime: Bool
+    let hasAudio: Bool
+    let previewLines: Int
+
+    func makeNSView(context: Context) -> VisualCompactFlowNSView {
+        VisualCompactFlowNSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: VisualCompactFlowNSView, context: Context) {
+        view.setContent(
+            title: title, date: date, readingTime: readingTime,
+            preview: preview, isRead: isRead,
+            showRelativeTime: showRelativeTime, hasAudio: hasAudio,
+            previewLines: previewLines
+        )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: VisualCompactFlowNSView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        return CGSize(width: width, height: nsView.measure(width: width))
+    }
+}
+
+private final class VisualCompactFlowNSView: NSView {
+    override var isFlipped: Bool { true }
+
+    private let storage = NSTextStorage()
+    private let manager = NSLayoutManager()
+    private let container = NSTextContainer(size: .zero)
+    private var value: Values?
+    private var measuredWidth: CGFloat = 0
+    private var measuredHeight: CGFloat = VisualCompactFlowMetrics.imageHeight
+    private var needsLayoutUpdate = true
+
+    private struct Values: Equatable {
+        let title: String
+        let date: String
+        let readingTime: String?
+        let preview: String
+        let isRead: Bool
+        let showRelativeTime: Bool
+        let hasAudio: Bool
+        let previewLines: Int
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setContent(
+        title: String, date: String, readingTime: String?, preview: String,
+        isRead: Bool, showRelativeTime: Bool, hasAudio: Bool, previewLines: Int
+    ) {
+        let next = Values(
+            title: title, date: date, readingTime: readingTime, preview: preview,
+            isRead: isRead, showRelativeTime: showRelativeTime,
+            hasAudio: hasAudio, previewLines: previewLines
+        )
+        guard value != next else { return }
+        value = next
+        needsLayoutUpdate = true
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    func measure(width: CGFloat) -> CGFloat {
+        let width = max(1, width)
+        if !needsLayoutUpdate && measuredWidth == width { return measuredHeight }
+        measuredWidth = width
+        needsLayoutUpdate = false
+        let exclusion = VisualCompactFlowMetrics.exclusionRect(width: width)
+        container.size = CGSize(width: width, height: 100_000)
+        container.exclusionPaths = [NSBezierPath(rect: exclusion)]
+        guard let value else { return VisualCompactFlowMetrics.imageHeight }
+
+        let narrowWidth = max(1, exclusion.minX)
+        let titleFont = NSFont.systemFont(ofSize: 14, weight: value.isRead ? .regular : .semibold)
+        let title = Self.limit(value.title, font: titleFont, width: narrowWidth, lines: 3)
+        let dateFont = VisualCompactFlowTypography.dateFont
+        var date = (value.showRelativeTime ? "↻ " : "") + value.date
+        if let readingTime = value.readingTime {
+            date += " · " + (value.hasAudio ? "♫ " : "") + readingTime
+        }
+        date = Self.limit(date, font: dateFont, width: narrowWidth, lines: 1)
+
+        let text = NSMutableAttributedString(string: "")
+        let titleStyle = NSMutableParagraphStyle()
+        titleStyle.lineBreakMode = .byWordWrapping
+        titleStyle.paragraphSpacing = 5
+        text.append(NSAttributedString(string: title + "\n", attributes: [
+            .font: titleFont,
+            .foregroundColor: value.isRead ? NSColor.secondaryLabelColor : NSColor.labelColor,
+            .paragraphStyle: titleStyle
+        ]))
+        let dateStyle = NSMutableParagraphStyle()
+        dateStyle.lineBreakMode = .byWordWrapping
+        dateStyle.paragraphSpacing = value.preview.isEmpty ? 0 : 5
+        text.append(NSAttributedString(
+            string: date + (value.preview.isEmpty ? "" : "\n"),
+            attributes: [
+                .font: dateFont, .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: dateStyle
+            ]
+        ))
+        if !value.preview.isEmpty {
+            let style = NSMutableParagraphStyle()
+            style.lineBreakMode = .byWordWrapping
+            text.append(NSAttributedString(string: value.preview, attributes: [
+                .font: VisualCompactFlowTypography.previewFont,
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style
+            ]))
+        }
+
+        // The preview remains subject to the configured 2/3/5-line limit.
+        // Title and publication use their own bounded lines above it.
+        container.maximumNumberOfLines = Self.numberOfLines(
+            title, font: titleFont, width: narrowWidth
+        ) + 1 + (value.preview.isEmpty ? 0 : max(1, value.previewLines))
+        storage.setAttributedString(text)
+        manager.ensureLayout(for: container)
+        measuredHeight = max(
+            VisualCompactFlowMetrics.imageHeight,
+            ceil(manager.usedRect(for: container).height)
+        )
+        needsDisplay = true
+        return measuredHeight
+    }
+
+    override func layout() {
+        super.layout()
+        if bounds.width > 0 { _ = measure(width: bounds.width) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let glyphs = manager.glyphRange(for: container)
+        manager.drawGlyphs(forGlyphRange: glyphs, at: .zero)
+    }
+
+    private static func numberOfLines(
+        _ value: String, font: NSFont, width: CGFloat
+    ) -> Int {
+        let text = NSTextStorage(string: value, attributes: [.font: font])
+        let layout = NSLayoutManager()
+        let box = NSTextContainer(size: CGSize(width: width, height: 100_000))
+        box.lineFragmentPadding = 0
+        layout.addTextContainer(box)
+        text.addLayoutManager(layout)
+        layout.ensureLayout(for: box)
+        var count = 0
+        layout.enumerateLineFragments(
+            forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs)
+        ) { _, _, _, _, _ in count += 1 }
+        return max(1, count)
+    }
+
+    private static func limit(
+        _ value: String, font: NSFont, width: CGFloat, lines: Int
+    ) -> String {
+        guard numberOfLines(value, font: font, width: width) > lines else {
+            return value
+        }
+        let letters = Array(value)
+        var low = 0, high = letters.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            let sample = String(letters.prefix(mid))
+                .trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+            if numberOfLines(sample, font: font, width: width) <= lines {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+        return String(letters.prefix(low))
+            .trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 }
 

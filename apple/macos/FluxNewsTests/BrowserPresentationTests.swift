@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import FluxNews
 
@@ -79,6 +80,80 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(store.listeningListSort, .recentlyAdded)
         XCTAssertNil(store.listeningListFeedID)
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
+    }
+
+    func testVisualAndCompactActionsStartBelowFullWidthFeedRow() {
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .adjacentBelowMetadata)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visualCompact), .trailingThumbnail)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .adjacentBelowMetadata)
+    }
+
+    func testCompactPlacesFullWidthMetadataBeforeHoverActions() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/ArticleRowView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let compactStart = try XCTUnwrap(source.range(of: "    private var compact: some View {"))
+        let compactEnd = try XCTUnwrap(source.range(
+            of: "    private var articleTextBelowMetadata: some View {",
+            range: compactStart.upperBound..<source.endIndex
+        ))
+        let compact = String(source[compactStart.lowerBound..<compactEnd.lowerBound])
+        let feed = try XCTUnwrap(compact.range(of: "metadata"))
+        let actions = try XCTUnwrap(compact.range(of: "quickActions"))
+        XCTAssertLessThan(feed.lowerBound, actions.lowerBound)
+        XCTAssertTrue(compact.contains("metadata\n                        .frame(maxWidth: .infinity"))
+        XCTAssertTrue(compact.contains("HStack(alignment: .top, spacing: 10)"))
+        XCTAssertFalse(compact.contains("semanticTextComposition"))
+    }
+
+    func testHoverActionHeightFitsAllThreeFullSizeControls() {
+        XCTAssertEqual(ArticleHoverActionsLayout.controlSize, 28)
+        XCTAssertEqual(ArticleHoverActionsLayout.minimumOverlayHeight, 94)
+    }
+
+    func testVisualCompactHoverActionsRequireFourHundredMillisecondPointerDwell() {
+        XCTAssertEqual(ArticleHoverActionsLayout.hoverRevealDelayNanoseconds, 400_000_000)
+    }
+
+    func testVisualCompactPreviewFlowsAroundRightThumbnail() {
+        let exclusion = VisualCompactFlowMetrics.exclusionRect(width: 342)
+        XCTAssertEqual(exclusion.minX, 218)
+        XCTAssertEqual(exclusion.width, 124)
+        XCTAssertEqual(exclusion.minY, 0)
+        XCTAssertEqual(exclusion.height, 94)
+    }
+
+    func testVisualCompactWithoutImageDoesNotInsertGapBeforePreview() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/ArticleRowView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let noImageStart = try XCTUnwrap(source.range(of: "// No thumbnail: never reserve"))
+        let noImageEnd = try XCTUnwrap(source.range(
+            of: "            audioActions",
+            range: noImageStart.lowerBound..<source.endIndex
+        ))
+        let noImageLayout = String(source[noImageStart.lowerBound..<noImageEnd.lowerBound])
+        let preview = try XCTUnwrap(noImageLayout.range(of: "Text(article.preview)"))
+        let minimumHeight = try XCTUnwrap(noImageLayout.range(
+            of: ".frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight"
+        ))
+        XCTAssertLessThan(preview.lowerBound, minimumHeight.lowerBound)
+        XCTAssertFalse(noImageLayout.contains("ThumbnailSlot("))
+        XCTAssertTrue(noImageLayout.contains(".overlay(alignment: .topTrailing) { hoverActions }"))
+    }
+
+    func testVisualCompactTypographyUsesNativeSemanticTextStyles() {
+        let expectedPreview = NSFont.preferredFont(forTextStyle: .subheadline)
+        XCTAssertEqual(VisualCompactFlowTypography.previewFont.fontName, expectedPreview.fontName)
+        XCTAssertEqual(VisualCompactFlowTypography.previewFont.pointSize, expectedPreview.pointSize)
+
+        let expectedDate = NSFont.preferredFont(forTextStyle: .caption1)
+        XCTAssertEqual(VisualCompactFlowTypography.dateFont.fontName, expectedDate.fontName)
+        XCTAssertEqual(VisualCompactFlowTypography.dateFont.pointSize, expectedDate.pointSize)
     }
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
