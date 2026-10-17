@@ -76,8 +76,7 @@ pub(crate) fn probe_mp4_artwork(bytes: &[u8]) -> Option<Vec<u8>> {
 fn is_supported_artwork(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xFF, 0xD8, 0xFF])
         || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-        || bytes.starts_with(b"RIFF")
-            && bytes.get(8..12) == Some(&b"WEBP"[..])
+        || bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(&b"WEBP"[..])
 }
 
 pub(crate) fn resolve_media_reference(root: &Path, reference: &str) -> Option<PathBuf> {
@@ -145,7 +144,11 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
     } else {
         // Some old or truncated MP3s still contain a perfectly valid APIC
         // frame even if their audio stream cannot be parsed by lofty.
-        (None, bytes.as_deref().and_then(parse_id3_artwork), Vec::new())
+        (
+            None,
+            bytes.as_deref().and_then(parse_id3_artwork),
+            Vec::new(),
+        )
     };
     let mut embedded_chapters = if structured_chapters.is_empty() {
         text_chapters

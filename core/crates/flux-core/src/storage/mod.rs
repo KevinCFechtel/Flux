@@ -10,8 +10,8 @@ use crate::domain::{
     Article, ArticleAudioActionProjection, ArticlePage, ArticleQuery, ArticleScope, ArticleSort,
     ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
     DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
-    DownloadRetention, DownloadState, DownloadedMediaSummary, Enclosure, Feed, FeedPreferences, FeedPreferencesPatch,
-    FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
+    DownloadRetention, DownloadState, DownloadedMediaSummary, Enclosure, Feed, FeedPreferences,
+    FeedPreferencesPatch, FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
     MediaArtworkSource, MediaChapter, MediaChapterSource, MediaDownload, MediaMetadata,
@@ -1695,7 +1695,8 @@ impl Store {
         enclosure_id: i64,
         artwork: Vec<u8>,
     ) -> Result<bool, CoreError> {
-        let existing = self.media_metadata(enclosure_id)?
+        let existing = self
+            .media_metadata(enclosure_id)?
             .and_then(|metadata| metadata.embedded_artwork_reference);
         if existing.is_some() {
             return Ok(false);
@@ -2088,20 +2089,26 @@ impl Store {
         enclosures: &[Enclosure],
         expected_enclosure_id: i64,
     ) -> Result<bool, CoreError> {
-        if !enclosures.iter().any(|e| e.id == expected_enclosure_id
-            && e.article_id == article.id && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
-            || enclosures.iter().any(|e| e.article_id != article.id)
+        if !enclosures.iter().any(|e| {
+            e.id == expected_enclosure_id
+                && e.article_id == article.id
+                && e.mime_type.to_ascii_lowercase().starts_with("audio/")
+        }) || enclosures.iter().any(|e| e.article_id != article.id)
         {
             return Ok(false);
         }
-        let mut connection = self.connection.lock()
+        let mut connection = self
+            .connection
+            .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         let feed_is_current: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM feeds f JOIN categories c ON c.id=f.category_id WHERE f.id=?1)",
             [article.feed_id], |row| row.get(0),
         ).map_err(sql_error)?;
-        if !feed_is_current { return Ok(false); }
+        if !feed_is_current {
+            return Ok(false);
+        }
         tx.execute(
             "INSERT OR IGNORE INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13)",
             params![article.id,article.feed_id,article.title,article.url,article.comments_url,article.published_at,article.is_read,article.is_starred,article.raw_html_content,article.reading_time_minutes,article.preview,article.image_url,crate::article::PROCESSING_VERSION],
@@ -2172,8 +2179,7 @@ impl Store {
             .map_err(sql_error)?;
         if let Some((article_id, mime_type)) = existing_enclosure {
             return Ok(
-                article_id == article.id
-                    && mime_type.to_ascii_lowercase().starts_with("audio/"),
+                article_id == article.id && mime_type.to_ascii_lowercase().starts_with("audio/")
             );
         }
 
@@ -2231,8 +2237,7 @@ impl Store {
             .optional()
             .map_err(sql_error)?
             .is_some_and(|(article_id, mime_type)| {
-                article_id == article.id
-                    && mime_type.to_ascii_lowercase().starts_with("audio/")
+                article_id == article.id && mime_type.to_ascii_lowercase().starts_with("audio/")
             });
         tx.commit().map_err(sql_error)?;
         Ok(restored)
@@ -2243,14 +2248,18 @@ impl Store {
     /// A failed scan does not set the platform completion marker and can retry.
     pub fn repair_legacy_download_metadata(&self) -> Result<(u32, u32), CoreError> {
         let entries: Vec<(i64, String, String)> = {
-            let connection = self.connection.lock()
+            let connection = self
+                .connection
+                .lock()
                 .map_err(|_| CoreError::internal("database lock poisoned"))?;
             let mut statement = connection.prepare(
                 "SELECT d.enclosure_id,d.local_file,a.raw_html_content FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id JOIN articles a ON a.id=e.article_id WHERE d.state='downloaded' AND d.local_file LIKE 'downloads/legacy/%'"
             ).map_err(sql_error)?;
-            statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .map_err(sql_error)?
-                .collect::<Result<Vec<_>, _>>().map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
         };
         let mut scanned = 0u32;
         let mut recovered = 0u32;
@@ -2258,22 +2267,37 @@ impl Store {
             let path = resolve_media_reference(&self.media_root, &reference)
                 .ok_or_else(|| CoreError::data("invalid legacy media path"))?;
             if !path.is_file() {
-                return Err(CoreError::persistence("legacy media file missing during metadata repair"));
+                return Err(CoreError::persistence(
+                    "legacy media file missing during metadata repair",
+                ));
             }
             let analyzed = analyze_file(&path);
             let prior = self.media_metadata(enclosure_id)?;
-            let has_artwork = prior.as_ref()
-                .and_then(|m| m.embedded_artwork_reference.as_ref()).is_some();
-            let artwork_reference = if has_artwork { None }
-                else { self.persist_artwork(&analyzed.artwork)? };
-            let mut connection = self.connection.lock()
+            let has_artwork = prior
+                .as_ref()
+                .and_then(|m| m.embedded_artwork_reference.as_ref())
+                .is_some();
+            let artwork_reference = if has_artwork {
+                None
+            } else {
+                self.persist_artwork(&analyzed.artwork)?
+            };
+            let mut connection = self
+                .connection
+                .lock()
                 .map_err(|_| CoreError::internal("database lock poisoned"))?;
             let tx = connection.transaction().map_err(sql_error)?;
-            let had_chapters: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1)",
-                [enclosure_id], |row| row.get(0),
-            ).map_err(sql_error)?;
-            let duration = analyzed.duration_ms.map(i64::try_from).transpose()
+            let had_chapters: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1)",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            let duration = analyzed
+                .duration_ms
+                .map(i64::try_from)
+                .transpose()
                 .map_err(|_| CoreError::data("legacy duration exceeds SQLite range"))?;
             tx.execute(
                 "INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=COALESCE(media_metadata.duration_ms,excluded.duration_ms),embedded_artwork_reference=COALESCE(media_metadata.embedded_artwork_reference,excluded.embedded_artwork_reference)",
@@ -2282,15 +2306,25 @@ impl Store {
             if !had_chapters {
                 let chapters = if analyzed.embedded_chapters.is_empty() {
                     article_chapters(&article_html, analyzed.duration_ms)
-                } else { analyzed.embedded_chapters.clone() };
+                } else {
+                    analyzed.embedded_chapters.clone()
+                };
                 let source = if analyzed.embedded_chapters.is_empty() {
                     MediaChapterSource::ArticleContent
-                } else { MediaChapterSource::Embedded };
-                persist_chapters(&tx, enclosure_id, &to_domain_chapters(enclosure_id, source, &chapters))?;
+                } else {
+                    MediaChapterSource::Embedded
+                };
+                persist_chapters(
+                    &tx,
+                    enclosure_id,
+                    &to_domain_chapters(enclosure_id, source, &chapters),
+                )?;
             }
             tx.commit().map_err(sql_error)?;
             scanned += 1;
-            if artwork_reference.is_some() { recovered += 1; }
+            if artwork_reference.is_some() {
+                recovered += 1;
+            }
         }
         Ok((scanned, recovered))
     }
@@ -2965,7 +2999,10 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
-    pub fn feed_preferences_bulk(&self, feed_ids: &[i64]) -> Result<Vec<FeedPreferences>, CoreError> {
+    pub fn feed_preferences_bulk(
+        &self,
+        feed_ids: &[i64],
+    ) -> Result<Vec<FeedPreferences>, CoreError> {
         let connection = self
             .connection
             .lock()
@@ -5844,10 +5881,21 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        let categories = [Category { id: 1, title: "Category".into() }];
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
         let feeds = [
-            Feed { id: 10, category_id: 1, title: "One".into() },
-            Feed { id: 20, category_id: 1, title: "Two".into() },
+            Feed {
+                id: 10,
+                category_id: 1,
+                title: "One".into(),
+            },
+            Feed {
+                id: 20,
+                category_id: 1,
+                title: "Two".into(),
+            },
         ];
         store.reconcile(&categories, &feeds, &[]).unwrap();
         store.set_feed_truncate_detail(10, true).unwrap();
@@ -5873,15 +5921,17 @@ mod tests {
         assert!(values[1].open_in_miniflux);
 
         let before = store.feed_preferences(10).unwrap();
-        assert!(store
-            .patch_feed_preferences_bulk(
-                &[10, 999],
-                FeedPreferencesPatch {
-                    truncate_detail: Some(false),
-                    ..FeedPreferencesPatch::default()
-                },
-            )
-            .is_err());
+        assert!(
+            store
+                .patch_feed_preferences_bulk(
+                    &[10, 999],
+                    FeedPreferencesPatch {
+                        truncate_detail: Some(false),
+                        ..FeedPreferencesPatch::default()
+                    },
+                )
+                .is_err()
+        );
         assert_eq!(store.feed_preferences(10).unwrap(), before);
     }
 
@@ -5890,8 +5940,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        let categories = [Category { id: 1, title: "Category".into() }];
-        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
         let article = |id| Article {
             id,
             feed_id: 2,
@@ -5908,10 +5965,12 @@ mod tests {
         };
 
         let before_enable = store.reconcile(&categories, &feeds, &[article(1)]).unwrap();
-        assert!(store
-            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+                .unwrap()
+                .is_empty()
+        );
 
         store
             .patch_feed_preferences_bulk(
@@ -5923,10 +5982,12 @@ mod tests {
             )
             .unwrap();
 
-        assert!(store
-            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+                .unwrap()
+                .is_empty()
+        );
 
         let after_enable = store
             .reconcile(&categories, &feeds, &[article(1), article(2)])
@@ -5943,8 +6004,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        let categories = [Category { id: 1, title: "Category".into() }];
-        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
         let article = |id| Article {
             id,
             feed_id: 2,
@@ -5961,7 +6029,9 @@ mod tests {
         };
 
         store.reconcile(&categories, &feeds, &[article(1)]).unwrap();
-        store.set_feed_system_notifications_enabled(2, true).unwrap();
+        store
+            .set_feed_system_notifications_enabled(2, true)
+            .unwrap();
 
         let first_stats = store
             .reconcile(&categories, &feeds, &[article(1), article(2)])
@@ -5972,7 +6042,9 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        store.acknowledge_system_notification(first.candidate_id).unwrap();
+        store
+            .acknowledge_system_notification(first.candidate_id)
+            .unwrap();
 
         let second_stats = store
             .reconcile(&categories, &feeds, &[article(1), article(2), article(3)])
@@ -5992,8 +6064,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        let categories = [Category { id: 1, title: "Category".into() }];
-        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
         let article = |id| Article {
             id,
             feed_id: 2,
@@ -6009,23 +6088,25 @@ mod tests {
             image_url: None,
         };
 
-        let before_enable = store
-            .reconcile(&categories, &feeds, &[article(1)])
-            .unwrap();
-        assert!(store
-            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
-            .unwrap()
-            .is_empty());
+        let before_enable = store.reconcile(&categories, &feeds, &[article(1)]).unwrap();
+        assert!(
+            store
+                .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+                .unwrap()
+                .is_empty()
+        );
 
         store
             .set_feed_system_notifications_enabled(2, true)
             .unwrap();
 
         // Replaying pre-enable IDs must not create a notification backlog.
-        assert!(store
-            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+                .unwrap()
+                .is_empty()
+        );
 
         let after_enable = store
             .reconcile(&categories, &feeds, &[article(1), article(2)])
@@ -6043,13 +6124,21 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
-                .query_row("SELECT COUNT(*) FROM pending_system_notifications", [], |row| row.get::<_, i64>(0))
+                .query_row(
+                    "SELECT COUNT(*) FROM pending_system_notifications",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
                 .unwrap(),
             0
         );
         assert_eq!(
             connection
-                .query_row("SELECT COUNT(*) FROM system_notification_candidates", [], |row| row.get::<_, i64>(0))
+                .query_row(
+                    "SELECT COUNT(*) FROM system_notification_candidates",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
                 .unwrap(),
             0
         );
@@ -7414,10 +7503,12 @@ mod tests {
             .unwrap();
         // An older sync result must not notify articles that already existed
         // when notifications were enabled.
-        assert!(store
-            .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
+                .unwrap()
+                .is_empty()
+        );
 
         // Create a genuine post-enable notification candidate for the feed
         // that will subsequently be removed. This exercises the cascade cleanup.
@@ -7427,7 +7518,9 @@ mod tests {
         new_article.url = "https://example.test/4".into();
         let mut refreshed_articles = articles.to_vec();
         refreshed_articles.push(new_article);
-        let after_enable = store.reconcile(&categories, &feeds, &refreshed_articles).unwrap();
+        let after_enable = store
+            .reconcile(&categories, &feeds, &refreshed_articles)
+            .unwrap();
         let candidates = store
             .prepare_system_notification_candidates(&after_enable.new_article_ids_by_feed)
             .unwrap();
@@ -8246,9 +8339,11 @@ mod tests {
         let (article, enclosure) = media_article_enclosure_pair();
 
         // Local legacy rows are accepted only into the current navigation catalog.
-        assert!(!store
-            .restore_legacy_local_playback_article(&article, &enclosure)
-            .unwrap());
+        assert!(
+            !store
+                .restore_legacy_local_playback_article(&article, &enclosure)
+                .unwrap()
+        );
         store
             .reconcile_with_enclosures(
                 &[Category {
@@ -8265,9 +8360,11 @@ mod tests {
             )
             .unwrap();
 
-        assert!(store
-            .restore_legacy_local_playback_article(&article, &enclosure)
-            .unwrap());
+        assert!(
+            store
+                .restore_legacy_local_playback_article(&article, &enclosure)
+                .unwrap()
+        );
         let restored = store.enclosure(enclosure.id).unwrap().unwrap();
         assert_eq!(restored.enclosure.article_id, article.id);
         assert!(!restored.remote_present);
@@ -8281,7 +8378,11 @@ mod tests {
             .unwrap();
         assert_eq!(result.imported, 1);
         assert_eq!(
-            store.playback_state(enclosure.id).unwrap().unwrap().position_ms,
+            store
+                .playback_state(enclosure.id)
+                .unwrap()
+                .unwrap()
+                .position_ms,
             42_000
         );
 
@@ -8291,21 +8392,28 @@ mod tests {
             title: "Legacy title must not replace native".into(),
             ..article.clone()
         };
-        assert!(store
-            .restore_legacy_local_playback_article(&changed, &enclosure)
-            .unwrap());
+        assert!(
+            store
+                .restore_legacy_local_playback_article(&changed, &enclosure)
+                .unwrap()
+        );
         assert_eq!(
-            store.import_legacy_playback(&[LegacyPlaybackImport {
-                article_id: article.id,
-                position_ms: 99_000,
-                updated_at: None,
-            }])
-            .unwrap()
-            .already_present,
+            store
+                .import_legacy_playback(&[LegacyPlaybackImport {
+                    article_id: article.id,
+                    position_ms: 99_000,
+                    updated_at: None,
+                }])
+                .unwrap()
+                .already_present,
             1
         );
         assert_eq!(
-            store.playback_state(enclosure.id).unwrap().unwrap().position_ms,
+            store
+                .playback_state(enclosure.id)
+                .unwrap()
+                .unwrap()
+                .position_ms,
             42_000
         );
     }
@@ -8318,26 +8426,69 @@ mod tests {
         let (article, enclosure) = media_article_enclosure_pair();
 
         // No remotely synced feed/category: do not create orphan articles.
-        assert!(!store.restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id).unwrap());
+        assert!(
+            !store
+                .restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id)
+                .unwrap()
+        );
         assert!(store.enclosure(enclosure.id).unwrap().is_none());
 
-        store.reconcile_with_enclosures(
-            &[Category { id: 1, title: "Category".into() }],
-            &[Feed { id: 10, category_id: 1, title: "Feed".into() }],
-            &[], &[],
-        ).unwrap();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[],
+                &[],
+            )
+            .unwrap();
 
         // Wrong or non-audio enclosures may never count as verified.
-        assert!(!store.restore_legacy_media_article(&article, &[enclosure.clone()], 9999).unwrap());
-        assert!(!store.restore_legacy_media_article(
-            &article, &[Enclosure { mime_type: "video/mp4".into(), ..enclosure.clone() }], enclosure.id,
-        ).unwrap());
+        assert!(
+            !store
+                .restore_legacy_media_article(&article, &[enclosure.clone()], 9999)
+                .unwrap()
+        );
+        assert!(
+            !store
+                .restore_legacy_media_article(
+                    &article,
+                    &[Enclosure {
+                        mime_type: "video/mp4".into(),
+                        ..enclosure.clone()
+                    }],
+                    enclosure.id,
+                )
+                .unwrap()
+        );
         assert!(store.enclosure(enclosure.id).unwrap().is_none());
 
-        assert!(store.restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id).unwrap());
-        assert_eq!(store.enclosure(enclosure.id).unwrap().unwrap().enclosure.article_id, article.id);
+        assert!(
+            store
+                .restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id)
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .enclosure(enclosure.id)
+                .unwrap()
+                .unwrap()
+                .enclosure
+                .article_id,
+            article.id
+        );
         // A retry must be harmless.
-        assert!(store.restore_legacy_media_article(&article, &[enclosure], 1000).unwrap());
+        assert!(
+            store
+                .restore_legacy_media_article(&article, &[enclosure], 1000)
+                .unwrap()
+        );
     }
 
     #[test]

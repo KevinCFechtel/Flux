@@ -27,19 +27,14 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
-use media_metadata::{
-    REMOTE_MEDIA_INITIAL_PROBE_BYTES, REMOTE_MEDIA_MAX_ID3_BYTES,
-    REMOTE_MEDIA_MP4_PREFIX_BYTES, REMOTE_MEDIA_MP4_TAIL_BYTES,
-    id3_probe_total_bytes, probe_id3_artwork, probe_mp4_artwork,
-};
 use domain::{
     ArticleAudioActionProjection, ArticleQuery, ArticleSummary, ArticleThumbnailResult,
     ContinueListeningItem, CoreError, CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult,
     CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
-    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences, FeedPreferencesPatch,
-    FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
+    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences,
+    FeedPreferencesPatch, FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListFeed, ListeningListItem, ListeningListSort, MediaChapter, MediaDownload,
     MediaMetadata, MediaTransferWork, MutationField, MutationResult, NavigationCatalog,
@@ -48,6 +43,10 @@ use domain::{
     SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
     SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
     SyncFailure, SyncReason, WidgetData,
+};
+use media_metadata::{
+    REMOTE_MEDIA_INITIAL_PROBE_BYTES, REMOTE_MEDIA_MAX_ID3_BYTES, REMOTE_MEDIA_MP4_PREFIX_BYTES,
+    REMOTE_MEDIA_MP4_TAIL_BYTES, id3_probe_total_bytes, probe_id3_artwork, probe_mp4_artwork,
 };
 use miniflux::{
     AccountValidationAttempt, AccountValidationError, AccountValidationResult, HttpHeader,
@@ -926,17 +925,17 @@ impl FluxCore {
         }
 
         let url = enclosure.enclosure.url.trim();
-        let mime = enclosure.enclosure.mime_type
+        let mime = enclosure
+            .enclosure
+            .mime_type
             .split(';')
             .next()
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase();
         let lower_url = url.to_ascii_lowercase();
-        let mp4_like = matches!(
-            mime.as_str(),
-            "audio/mp4" | "audio/x-m4a" | "video/mp4"
-        ) || lower_url.ends_with(".m4a")
+        let mp4_like = matches!(mime.as_str(), "audio/mp4" | "audio/x-m4a" | "video/mp4")
+            || lower_url.ends_with(".m4a")
             || lower_url.ends_with(".mp4")
             || lower_url.ends_with(".m4v");
 
@@ -992,7 +991,8 @@ impl FluxCore {
         let Some(artwork) = artwork else {
             return Ok(false);
         };
-        self.store.persist_probed_media_artwork(enclosure_id, artwork)
+        self.store
+            .persist_probed_media_artwork(enclosure_id, artwork)
     }
 
     pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
@@ -1058,13 +1058,26 @@ impl FluxCore {
     /// platform migration can distinguish stale progress from unresolved data.
     pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, CoreError> {
         if article_id <= 0 {
-            return Err(CoreError::data("legacy playback article ID must be positive"));
+            return Err(CoreError::data(
+                "legacy playback article ID must be positive",
+            ));
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
-            let _sync = self.sync_gate.lock()
+            let _sync = self
+                .sync_gate
+                .lock()
                 .map_err(|_| CoreError::internal("sync gate poisoned"))?;
-            if self.store.enclosures_for_article(article_id)?.iter()
-                .any(|e| e.enclosure.mime_type.to_ascii_lowercase().starts_with("audio/")) {
+            if self
+                .store
+                .enclosures_for_article(article_id)?
+                .iter()
+                .any(|e| {
+                    e.enclosure
+                        .mime_type
+                        .to_ascii_lowercase()
+                        .starts_with("audio/")
+                })
+            {
                 return Ok(true);
             }
             let remote = match self.remote.fetch_article_by_id(article_id) {
@@ -1075,9 +1088,13 @@ impl FluxCore {
             if remote.article.id != article_id {
                 return Err(CoreError::data("legacy playback article identity mismatch"));
             }
-            let audios = remote.enclosures.iter()
-                .filter(|e| e.article_id == article_id
-                    && e.mime_type.to_ascii_lowercase().starts_with("audio/"))
+            let audios = remote
+                .enclosures
+                .iter()
+                .filter(|e| {
+                    e.article_id == article_id
+                        && e.mime_type.to_ascii_lowercase().starts_with("audio/")
+                })
                 .collect::<Vec<_>>();
             if audios.len() != 1 {
                 return Err(CoreError::data(
@@ -1085,7 +1102,9 @@ impl FluxCore {
                 ));
             }
             self.store.restore_legacy_media_article(
-                &remote.article, &remote.enclosures, audios[0].id,
+                &remote.article,
+                &remote.enclosures,
+                audios[0].id,
             )
         });
         self.diagnostics.flush();
@@ -1123,7 +1142,9 @@ impl FluxCore {
             return Err(CoreError::data("legacy media IDs must be positive"));
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
-            let _sync = self.sync_gate.lock()
+            let _sync = self
+                .sync_gate
+                .lock()
                 .map_err(|_| CoreError::internal("sync gate poisoned"))?;
             if let Some(existing) = self.store.enclosure(enclosure_id)? {
                 return Ok(existing.enclosure.article_id == article_id);
@@ -1155,7 +1176,9 @@ impl FluxCore {
     }
 
     pub fn repair_legacy_download_metadata(&self) -> Result<(u32, u32), CoreError> {
-        let _sync = self.sync_gate.lock()
+        let _sync = self
+            .sync_gate
+            .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         self.store.repair_legacy_download_metadata()
     }
@@ -1288,7 +1311,10 @@ impl FluxCore {
     pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
         self.store.feed_preferences(feed_id)
     }
-    pub fn feed_preferences_bulk(&self, feed_ids: &[i64]) -> Result<Vec<FeedPreferences>, CoreError> {
+    pub fn feed_preferences_bulk(
+        &self,
+        feed_ids: &[i64],
+    ) -> Result<Vec<FeedPreferences>, CoreError> {
         self.store.feed_preferences_bulk(feed_ids)
     }
     pub fn patch_feed_preferences_bulk(
