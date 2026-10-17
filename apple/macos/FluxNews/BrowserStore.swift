@@ -1270,7 +1270,7 @@ final class BrowserStore: ObservableObject {
         }
         let coordinator = coreSessionExecutionCoordinator
         Task { [weak self, core, coordinator] in
-            let result = await coordinator.blockingResult(
+            let result = await coordinator.responsiveResult(
                 for: core, { try core.readerDocument(articleId: articleID) }
             )
             guard let self, self.core === core else {
