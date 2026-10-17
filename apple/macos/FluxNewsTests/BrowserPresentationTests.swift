@@ -87,6 +87,11 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .articleText)
     }
 
+    func testHoverActionHeightFitsAllThreeFullSizeControls() {
+        XCTAssertEqual(ArticleHoverActionsLayout.controlSize, 28)
+        XCTAssertEqual(ArticleHoverActionsLayout.minimumOverlayHeight, 94)
+    }
+
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
         // macOS now renders `visualCompact` as its own side-thumbnail layout,
