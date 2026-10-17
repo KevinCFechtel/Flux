@@ -9,6 +9,7 @@ Usage: bash Build/release.sh <android|ios|macos> [--debug] [--version-code N] [-
        bash Build/release.sh android --target play --version-code N --version-name V
        bash Build/release.sh ios --target appstore --version-code N --version-name V
        bash Build/release.sh macos --target appstore --version-code N --version-name V
+       bash Build/release.sh macos --target developer-id [--version-code N --version-name V]
 
 Defaults to production RELEASE builds (never publishes).
   android: productionRelease APK
@@ -16,7 +17,8 @@ Defaults to production RELEASE builds (never publishes).
   macos:   Release app
 --debug opts into a development/debug build.
 --target play creates a signed production AAB; requires signing properties.
---target appstore (iOS) archives and exports a production IPA for manual upload.
+--target appstore archives and exports an Apple Store artifact for manual upload.
+--target developer-id (macOS) signs and notarizes an outside-store release ZIP.
 --version-code is the Android versionCode or Apple CFBundleVersion.
 Normal builds use project versions when version parameters are omitted. Store targets require both.
 HELP
@@ -67,7 +69,13 @@ case "$platform:$target" in
     [[ -n "$version_code" ]] || die "App Store export requires explicit version"
     bash "$ROOT/apple/ios/Build/archive.sh" productionRelease "${args[@]}"
     export EXPORT_PATH="$ROOT/dist/ios/appstore"
-    exec bash "$ROOT/apple/ios/Build/export-testflight.sh" productionRelease
+    exec bash "$ROOT/apple/ios/Build/export-appstore.sh" productionRelease
+    ;;
+  macos:developer-id)
+    (( !debug )) || die "--debug cannot be combined with --target developer-id"
+    mac_args=()
+    if [[ -n "$version_code" ]]; then mac_args+=(--build-number "$version_code" --version-name "$version_name"); fi
+    exec bash "$ROOT/apple/macos/Build/release-developer-id.sh" "${mac_args[@]}"
     ;;
   macos:appstore)
     (( !debug )) || die "--debug cannot be combined with --target appstore"
