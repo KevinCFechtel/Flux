@@ -365,11 +365,11 @@ private struct ArticlePane: View {
               store.markReadOnScrolloverEnabled,
               ProcessInfo.processInfo.systemUptime >= suppressUntil,
               trackerRevision == store.listPresentationRevision,
-              let last = store.articles.last,
-              visibleArticleIDs.contains(last.id) else { return }
-        let remaining = store.articles
-            .filter { visibleArticleIDs.contains($0.id) && !$0.isRead }
-            .map(\.id)
+              !store.articles.isEmpty else { return }
+        let remaining = MacScrolloverEndPolicy.remainingUnreadIDs(
+            articles: store.articles, visibleIDs: visibleArticleIDs,
+            atBottom: reachedListBottom, forwardScrollArmed: bottomScrolloverArmed
+        )
         bottomScrolloverArmed = false
         if !remaining.isEmpty { store.flushScrollover(remaining) }
     }
