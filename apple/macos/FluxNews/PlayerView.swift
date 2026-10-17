@@ -69,6 +69,7 @@ struct PlayerView: View {
     @State private var showNotesExpanded = false
     @State private var artworkImage: NSImage?
     @State private var artworkLoading = false
+    @State private var previewChapters: [MediaChapter] = []
 
     init(store: BrowserStore, state: MediaPlaybackPresentationState, coordinator: MediaPlaybackCoordinator?,
          previewArticleID: Int64? = nil, onPlayEnclosure: @escaping (Enclosure) -> Void = { _ in },
@@ -109,6 +110,7 @@ struct PlayerView: View {
         .onAppear { resetShowNotes() }
         .onChange(of: displayedArticleID) { _, _ in resetShowNotes() }
         .task(id: artworkKey) { await loadArtwork() }
+        .task(id: chapterPreviewKey) { await loadPreviewChapters() }
     }
 
     private var previewItem: ListeningListItem? {
@@ -125,6 +127,23 @@ struct PlayerView: View {
         guard let item = previewItem else { return nil }
         return item.audioEnclosures.first(where: { $0.enclosure.id == item.activeEnclosureId })
             ?? item.audioEnclosures.first
+    }
+    private var chapterPreviewKey: String {
+        previewing ? "preview:\(previewEnclosure?.enclosure.id ?? -1)" : "active"
+    }
+    private var displayedChapters: [MediaChapter] {
+        previewing ? previewChapters : state.chapters
+    }
+    private func loadPreviewChapters() async {
+        previewChapters = []
+        guard previewing, let id = previewEnclosure?.enclosure.id else { return }
+        let chapters: [MediaChapter] = await withCheckedContinuation { continuation in
+            store.loadPlayerPreviewChapters(enclosureID: id) {
+                continuation.resume(returning: $0)
+            }
+        }
+        guard !Task.isCancelled, previewing, previewEnclosure?.enclosure.id == id else { return }
+        previewChapters = chapters
     }
     private var artworkEnclosureID: Int64? {
         previewing ? previewEnclosure?.enclosure.id : state.loadedEnclosure?.id
@@ -253,13 +272,13 @@ struct PlayerView: View {
     }
 
     @ViewBuilder private var chapters: some View {
-        if !state.chapters.isEmpty {
+        if !displayedChapters.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Chapters").font(.headline)
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 2) {
-                            ForEach(Array(state.chapters.enumerated()), id: \.offset) { index, chapter in
+                            ForEach(Array(displayedChapters.enumerated()), id: \.offset) { index, chapter in
                                 chapterRow(chapter, index: index)
                             }
                         }
@@ -277,7 +296,7 @@ struct PlayerView: View {
     private func chapterRow(_ chapter: MediaChapter, index: Int) -> some View {
         let active = activeChapterIndex == index
         return Button {
-            guard let coordinator, let enclosure = state.loadedEnclosure else { return }
+            guard !previewing, let coordinator, let enclosure = state.loadedEnclosure else { return }
             coordinator.seek(toMs: chapter.startMs)
             if state.status != .playing { try? coordinator.play(enclosureID: enclosure.id) }
         } label: {
@@ -291,6 +310,7 @@ struct PlayerView: View {
             .background(active ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
+        .disabled(previewing)
         .accessibilityLabel(chapter.title.isEmpty ? String(localized: "Untitled Chapter") : chapter.title)
         .accessibilityValue(String(localized: "Starts at \(PlayerPresentation.formatDuration(chapter.startMs))") + (active ? String(localized: ", current chapter") : ""))
         .id(index)
@@ -421,7 +441,7 @@ struct PlayerView: View {
     }
 
     private var activeChapterIndex: Int? {
-        PlayerPresentation.activeChapterIndex(positionMs: state.positionMs, chapters: state.chapters)
+        previewing ? nil : PlayerPresentation.activeChapterIndex(positionMs: state.positionMs, chapters: displayedChapters)
     }
 
     private func sleepTimerDescription(_ seconds: Int) -> String {
@@ -461,9 +481,8 @@ struct PlayerView: View {
     }
 
     private func openOriginal() {
-        guard let articleID = state.loadedEnclosure?.articleId,
-              let article = store.articles.first(where: { $0.id == articleID }) else { return }
-        store.openOriginal(article)
+        guard let articleID = displayedArticleID else { return }
+        store.openOriginalArticle(articleID: articleID)
     }
 
     private func finishScrubbing(_ editing: Bool) {
