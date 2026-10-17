@@ -197,6 +197,14 @@ struct MacCompactPlayerBar: View {
                 .help("Show Player")
                 .accessibilityLabel("Show Player")
                 Button {
+                    coordinator?.skip(bySeconds: -15)
+                } label: {
+                    Image(systemName: "gobackward.15").frame(width: 23, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .help("Back 15 seconds")
+                .accessibilityLabel("Back 15 seconds")
+                Button {
                     guard let coordinator else { return }
                     if playbackState.status == .playing {
                         coordinator.pause()
@@ -211,6 +219,14 @@ struct MacCompactPlayerBar: View {
                 .disabled(playbackState.isLoading)
                 .help(playbackState.status == .playing ? "Pause" : "Play")
                 .accessibilityLabel(playbackState.status == .playing ? "Pause" : "Play")
+                Button {
+                    coordinator?.skip(bySeconds: 30)
+                } label: {
+                    Image(systemName: "goforward.30").frame(width: 23, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .help("Forward 30 seconds")
+                .accessibilityLabel("Forward 30 seconds")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
