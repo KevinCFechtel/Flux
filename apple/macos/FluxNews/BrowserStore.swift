@@ -58,6 +58,7 @@ final class BrowserStore: ObservableObject {
     @Published var actionConfirmation: String?
     @Published var scope: BrowserScope = .all
     @Published private(set) var listeningListItems: [ListeningListItem] = []
+    @Published private(set) var artworkProbeRevisions: [Int64: UInt64] = [:]
     @Published private(set) var listeningListFeeds: [ListeningListFeed] = []
     @Published var listeningListSort: ListeningListSort = .recentlyAdded
     @Published var listeningListFeedID: Int64?
@@ -137,6 +138,9 @@ final class BrowserStore: ObservableObject {
     private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
     private var articleAudioRequestGeneration: UInt64 = 0
+    private var artworkProbeRequestedIDs = Set<Int64>()
+    private var artworkProbeQueue: [Int64] = []
+    private var artworkProbeInFlight = false
     var onMediaTransferRequested: (() -> Void)?
     var onCancelMediaTransferRequested: ((Int64) -> Void)?
     var onReleaseMediaForDownloadDeletion: ((Int64) -> Void)?
@@ -245,6 +249,11 @@ final class BrowserStore: ObservableObject {
             endEventSubscription()
             listener.generation = eventSessionGeneration
             core = configuredCore
+            // Account-scoped probe bookkeeping must never survive Core replacement.
+            artworkProbeRequestedIDs.removeAll()
+            artworkProbeQueue.removeAll()
+            artworkProbeInFlight = false
+            artworkProbeRevisions = [:]
             onCoreConfigured?(configuredCore)
             configuredServer = server
             coreSettings = settings
@@ -1158,7 +1167,59 @@ final class BrowserStore: ObservableObject {
                 for: core, { try core.mediaArtworkSource(enclosureId: enclosureID) }
             )
             guard let self, self.core === core else { completion(nil); return }
-            completion(result.flatMap { try? $0.get() } ?? nil)
+            let source = result.flatMap { try? $0.get() } ?? nil
+            completion(source)
+            // Older Listening List items were added before macOS supported
+            // Range probing. Probe on demand, once per enclosure/session, only
+            // when neither embedded nor remote artwork is currently known.
+            if source == nil { self.enqueueMediaArtworkProbes([enclosureID]) }
+        }
+    }
+
+    private func enqueueMediaArtworkProbes(_ enclosureIDs: [Int64]) {
+        guard core != nil else { return }
+        for id in enclosureIDs where id > 0 {
+            if artworkProbeRequestedIDs.insert(id).inserted {
+                artworkProbeQueue.append(id)
+            }
+        }
+        startNextMediaArtworkProbe()
+    }
+
+    private func startNextMediaArtworkProbe() {
+        guard !artworkProbeInFlight, !artworkProbeQueue.isEmpty, let core else { return }
+        let enclosureID = artworkProbeQueue.removeFirst()
+        artworkProbeInFlight = true
+        let coordinator = coreSessionExecutionCoordinator
+        // Range probing includes network IO: never execute this on MainActor,
+        // and admit at most one probe at a time to protect UI/Core responsiveness.
+        Task { [weak self, core, coordinator] in
+            let result = await coordinator.blockingResult(
+                for: core, { try core.probeMediaArtwork(enclosureId: enclosureID) }
+            )
+            guard let self, self.core === core else { return }
+            self.artworkProbeInFlight = false
+            if case .success(true) = result {
+                self.artworkProbeRevisions[enclosureID, default: 0] &+= 1
+            }
+            self.startNextMediaArtworkProbe()
+        }
+    }
+
+    private func requestMediaArtworkProbe(articleID: Int64) {
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.articleEnclosures(articleId: articleID)
+                    .filter { $0.mediaKind == .audio }
+                    .map(\.id) }
+            ) else { return }
+            guard let self, self.core === core else { return }
+            if case let .success(ids) = result {
+                self.enqueueMediaArtworkProbes(ids)
+            }
         }
     }
 
@@ -1288,6 +1349,7 @@ final class BrowserStore: ObservableObject {
                 self.showActionConfirmation(String(localized: "Added to Listening List"))
                 self.onMediaTransferRequested?()
                 self.refreshListeningListIfVisible()
+                self.requestMediaArtworkProbe(articleID: articleID)
                 guard self.articleAudioRequestGeneration == generation else { return }
                 self.loadArticleAudioActions(for: articleID)
             }
