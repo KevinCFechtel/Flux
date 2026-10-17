@@ -221,7 +221,9 @@ private struct ArticlePane: View {
             .disabled(store.isLoading)
             .help("Refresh Miniflux now")
             .accessibilityLabel("Refresh")
-            PlayerNavigationButton(playbackState: playbackState, showingPlayer: $showingPlayer)
+            if showingPlayer {
+                PlayerNavigationButton(playbackState: playbackState, showingPlayer: $showingPlayer)
+            }
             moreMenu
         }
         .padding(.horizontal, 12)
