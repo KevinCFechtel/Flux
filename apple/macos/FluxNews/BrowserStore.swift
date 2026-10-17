@@ -1149,6 +1149,18 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+    func loadPlayerArtworkSource(enclosureID: Int64, completion: @escaping (MediaArtworkSource?) -> Void) {
+        guard let core else { completion(nil); return }
+        let coordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, coordinator] in
+            let result = await coordinator.responsiveResult(
+                for: core, { try core.mediaArtworkSource(enclosureId: enclosureID) }
+            )
+            guard let self, self.core === core else { completion(nil); return }
+            completion(result.flatMap { try? $0.get() } ?? nil)
+        }
+    }
+
     /// Player show notes must not use the global Reader request generation:
     /// opening a separate Reader must never silently discard this callback.
     func loadPlayerShowNotes(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
