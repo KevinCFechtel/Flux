@@ -68,6 +68,7 @@ struct PlayerView: View {
     @State private var readerError: String?
     @State private var readerRequest = 0
     @State private var showNotesExpanded = false
+    @State private var advancedSettingsExpanded = false
     @State private var artworkImage: NSImage?
     @State private var artworkLoading = false
     @State private var previewChapters: [MediaChapter] = []
@@ -376,8 +377,23 @@ struct PlayerView: View {
     }
 
     private var showNotes: some View {
-        DisclosureGroup(isExpanded: $showNotesExpanded) {
-            VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                showNotesExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showNotesExpanded ? 90 : 0))
+                    Label("Show Notes", systemImage: "doc.text")
+                        .font(.headline)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityExpanded(showNotesExpanded)
+            if showNotesExpanded {
+                VStack(alignment: .leading, spacing: 10) {
                 if isLoadingReaderDocument {
                     ProgressView("Loading Show Notes...").controlSize(.small)
                 } else if let readerError {
@@ -391,9 +407,9 @@ struct PlayerView: View {
                     Text("Show Notes unavailable").font(.caption).foregroundStyle(.secondary)
                     Button("Retry") { loadReaderDocument() }.buttonStyle(.bordered)
                 }
-            }.padding(.top, 8)
-        } label: {
-            Label("Show Notes", systemImage: "doc.text").font(.headline)
+                }
+                .padding(.top, 8)
+            }
         }
         .onChange(of: showNotesExpanded) { _, expanded in
             if expanded && readerDocument == nil && !isLoadingReaderDocument { loadReaderDocument() }
@@ -401,8 +417,22 @@ struct PlayerView: View {
     }
 
     private var advancedSettings: some View {
-        DisclosureGroup("Advanced Settings") {
-            VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                advancedSettingsExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(advancedSettingsExpanded ? 90 : 0))
+                    Text("Advanced Settings")
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityExpanded(advancedSettingsExpanded)
+            if advancedSettingsExpanded {
+                VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Playback Speed")
@@ -426,8 +456,9 @@ struct PlayerView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
         }
     }
 
