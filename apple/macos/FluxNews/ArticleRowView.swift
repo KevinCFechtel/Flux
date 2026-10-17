@@ -167,28 +167,33 @@ struct ArticleItem: View {
                 }
                 .frame(minHeight: VisualCompactFlowMetrics.imageHeight, alignment: .top)
             } else {
-                // Without a thumbnail, retain the established SwiftUI layout.
-                Button { onSelect(); store.open(article) } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        headline(lineLimit: 3)
-                        publicationRow
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focused($focusedControl, equals: .headline)
-                .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .top)
-                .overlay(alignment: .topTrailing) { hoverActions }
-
-                if !article.preview.isEmpty {
-                    Text(article.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(store.articlePreviewLines.rawValue)
-                        .multilineTextAlignment(.leading)
+                // No thumbnail: never reserve an image-sized gap between the
+                // publication row and preview. Keep the action stack inside
+                // the complete text block instead of sizing the headline only.
+                VStack(alignment: .leading, spacing: 5) {
+                    Button { onSelect(); store.open(article) } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            headline(lineLimit: 3)
+                            publicationRow
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .headline)
+
+                    if !article.preview.isEmpty {
+                        Text(article.preview)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(store.articlePreviewLines.rawValue)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .topLeading)
+                .overlay(alignment: .topTrailing) { hoverActions }
             }
 
             audioActions
