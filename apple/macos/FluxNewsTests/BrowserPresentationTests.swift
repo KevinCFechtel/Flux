@@ -81,8 +81,8 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
-    func testHoverActionsUseDistinctAnchorsWithOneVerticalStack() {
-        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .previewText)
+    func testHoverActionsAnchorOnHeadlineInVisualAndCompact() {
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .articleText)
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visualCompact), .trailingThumbnail)
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .articleText)
     }
