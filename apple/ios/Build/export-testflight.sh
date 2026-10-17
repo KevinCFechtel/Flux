@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-VARIANT="developmentRelease"
+VARIANT="productionRelease"
 ARCHIVE_PATH="${ARCHIVE_PATH:-}"
 EXPORT_PATH="${EXPORT_PATH:-}"
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-8X9VDP43J9}"
@@ -14,8 +14,8 @@ Usage: export-testflight.sh [developmentRelease|productionRelease]
        export-testflight.sh [developmentRelease|productionRelease] [--archive ARCHIVE_PATH] [--export-path EXPORT_PATH]
 
 Variants:
-  developmentRelease  NativeDev identity (default; backward compatible).
-  productionRelease   Existing Flutter production identity, for TestFlight migration testing.
+  developmentRelease  NativeDev identity (explicit opt-in).
+  productionRelease   Production identity (default), for App Store Connect export.
 
 Examples:
   ./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
