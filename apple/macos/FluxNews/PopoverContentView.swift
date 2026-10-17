@@ -127,7 +127,11 @@ private struct ArticlePane: View {
                     previewArticleID: previewArticleID, onPlayEnclosure: playAudio,
                     onDownload: { store.requestManualDownload(articleID: $0, enclosureID: $1) },
                     onDelete: { store.deleteDownload(articleID: $0, enclosureID: $1) },
-                    onCancel: { store.cancelDownload(articleID: $0, enclosureID: $1) }
+                    onCancel: { store.cancelDownload(articleID: $0, enclosureID: $1) },
+                    onStop: {
+                        previewArticleID = nil
+                        showingPlayer = false
+                    }
                 )
             } else {
                 content
