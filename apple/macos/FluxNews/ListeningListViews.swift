@@ -4,6 +4,7 @@ struct ListeningListView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     @ObservedObject var transferState: MediaTransferPresentationState
+    let onOpenPlayer: (Int64) -> Void
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
@@ -21,7 +22,7 @@ struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onCancel: onCancel, onRemove: onRemove)
+                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onOpenPlayer: onOpenPlayer, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onCancel: onCancel, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -35,6 +36,7 @@ private struct ListeningListRow: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     @ObservedObject var transferState: MediaTransferPresentationState
+    let onOpenPlayer: (Int64) -> Void
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
@@ -67,7 +69,7 @@ private struct ListeningListRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
-        .onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item) { onPlay(enclosure) } }
+        .onTapGesture { onOpenPlayer(item.articleId) }
         .contextMenuIf(item.audioEnclosures.count > 1 && item.activeEnclosureId == nil) {
             ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
                 Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
