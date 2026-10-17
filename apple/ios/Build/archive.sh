@@ -6,7 +6,7 @@ REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 PROJECT="${REPOSITORY_DIR}/apple/ios/FluxNews.xcodeproj"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-8X9VDP43J9}"
-CONFIGURATION="Release"
+CONFIGURATION="Upgrade Test"
 BUILD_NUMBER=""
 VERSION_NAME=""
 
@@ -18,7 +18,7 @@ Usage: archive.sh [developmentRelease|productionRelease] [buildNumber versionNam
 Examples:
   archive.sh
   archive.sh --build-number 115
-  archive.sh productionRelease 3001 3.0.0
+  archive.sh developmentRelease 3001 3.0.0\n  archive.sh productionRelease 3001 3.0.0
   archive.sh developmentRelease 3001 3.0.0
   archive.sh --configuration "Upgrade Test" --build-number 3001 --version-name 3.0.0
 
