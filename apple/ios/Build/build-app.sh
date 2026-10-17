@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 PROJECT="${REPOSITORY_DIR}/apple/ios/FluxNews.xcodeproj"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
-CONFIGURATION="${CONFIGURATION:-Debug}"
+CONFIGURATION="${CONFIGURATION:-Upgrade Test}"
 PERFORMANCE_DIAGNOSTICS=0
 DESTINATION="${DESTINATION:-platform=iOS Simulator,name=iPhone 11 Pro Max}"
 BUILD_NUMBER=""
@@ -18,7 +18,7 @@ Usage: build-app.sh [developmentDebug|developmentRelease|productionRelease] [bui
 
 Examples:
   build-app.sh
-  build-app.sh productionRelease 3001 3.0.0
+  build-app.sh developmentDebug  # explicit debug\n  build-app.sh productionRelease 3001 3.0.0
   build-app.sh developmentRelease 3001 3.0.0
   build-app.sh --configuration "Upgrade Test" --build-number 3001 --version-name 3.0.0
   build-app.sh --configuration Release --performance-diagnostics --destination 'generic/platform=iOS'
