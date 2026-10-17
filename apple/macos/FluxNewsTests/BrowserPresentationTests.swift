@@ -260,6 +260,71 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ListeningListPresentation.progress(item)?.durationMs, 8_000)
     }
 
+    func testM2ArtworkPrefersLoadedThenActiveThenFirstEnclosure() {
+        let first = listeningEnclosure(id: 1, positionMs: 0, durationMs: nil, status: .notStarted)
+        let second = listeningEnclosure(id: 2, positionMs: 0, durationMs: nil, status: .notStarted)
+        let selected = listeningItem(enclosures: [first, second], activeID: 2)
+
+        XCTAssertEqual(ListeningListPresentation.artworkEnclosure(selected, loadedEnclosureID: 1)?.enclosure.id, 1)
+        XCTAssertEqual(ListeningListPresentation.artworkEnclosure(selected, loadedEnclosureID: nil)?.enclosure.id, 2)
+        XCTAssertEqual(
+            ListeningListPresentation.artworkEnclosure(
+                listeningItem(enclosures: [first, second], activeID: nil),
+                loadedEnclosureID: nil
+            )?.enclosure.id,
+            1
+        )
+        XCTAssertNil(ListeningListPresentation.artworkEnclosure(
+            listeningItem(enclosures: [], activeID: nil),
+            loadedEnclosureID: nil
+        ))
+    }
+
+    func testM2ArtworkRefreshTokenTracksEnclosureAndDownloadChanges() {
+        let first = listeningEnclosure(id: 1, positionMs: 0, durationMs: nil, status: .notStarted)
+        let next = listeningEnclosure(id: 2, positionMs: 0, durationMs: nil, status: .notStarted)
+        let downloaded = listeningEnclosure(
+            id: 1, positionMs: 0, durationMs: nil, status: .notStarted,
+            downloadState: .downloaded
+        )
+        XCTAssertNotEqual(
+            ListeningListPresentation.artworkRefreshToken(first),
+            ListeningListPresentation.artworkRefreshToken(next)
+        )
+        XCTAssertNotEqual(
+            ListeningListPresentation.artworkRefreshToken(first),
+            ListeningListPresentation.artworkRefreshToken(downloaded)
+        )
+        XCTAssertEqual(ListeningListPresentation.artworkRefreshToken(nil), "none")
+    }
+
+    func testM2PlaybackActionOnlyPausesCurrentPlayingEnclosure() {
+        XCTAssertTrue(ListeningListPresentation.shouldPause(
+            enclosureID: 5, loadedEnclosureID: 5, isPlaying: true
+        ))
+        XCTAssertFalse(ListeningListPresentation.shouldPause(
+            enclosureID: 5, loadedEnclosureID: 5, isPlaying: false
+        ))
+        XCTAssertFalse(ListeningListPresentation.shouldPause(
+            enclosureID: 5, loadedEnclosureID: 6, isPlaying: true
+        ))
+    }
+
+    func testM2ArtworkViewRetainsAsyncScrollCancellationAndDownsampling() throws {
+        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("FluxNews")
+        let source = try String(
+            contentsOf: folder.appendingPathComponent("ListeningListViews.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("MacListeningListArtworkView("))
+        XCTAssertTrue(source.contains(".task(id: refreshToken"))
+        XCTAssertTrue(source.contains("guard !Task.isCancelled"))
+        XCTAssertTrue(source.contains("CGImageSourceCreateThumbnailAtIndex"))
+        XCTAssertTrue(source.contains("NSCache<NSString, NSImage>()"))
+        XCTAssertTrue(source.contains("onOpenPlayer(item.articleId)"))
+    }
+
     func testListeningListProgressStatesAvoidMisleadingNotStartedAndUnknownDuration() {
         let notStarted = listeningItem(enclosures: [listeningEnclosure(id: 1, positionMs: 0, durationMs: 42_000, status: .notStarted)], activeID: 1)
         XCTAssertNil(ListeningListPresentation.progress(notStarted))
