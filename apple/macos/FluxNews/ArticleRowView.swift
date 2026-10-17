@@ -641,6 +641,17 @@ enum VisualCompactFlowMetrics {
     }
 }
 
+// Use the same semantic styles as SwiftUI's .subheadline and .caption.
+enum VisualCompactFlowTypography {
+    static var previewFont: NSFont {
+        NSFont.preferredFont(forTextStyle: .subheadline)
+    }
+
+    static var dateFont: NSFont {
+        NSFont.preferredFont(forTextStyle: .caption1)
+    }
+}
+
 private struct VisualCompactFlowText: NSViewRepresentable {
     let title: String
     let date: String
@@ -734,7 +745,7 @@ private final class VisualCompactFlowNSView: NSView {
         let narrowWidth = max(1, exclusion.minX)
         let titleFont = NSFont.systemFont(ofSize: 14, weight: value.isRead ? .regular : .semibold)
         let title = Self.limit(value.title, font: titleFont, width: narrowWidth, lines: 3)
-        let dateFont = NSFont.systemFont(ofSize: 11)
+        let dateFont = VisualCompactFlowTypography.dateFont
         var date = (value.showRelativeTime ? "↻ " : "") + value.date
         if let readingTime = value.readingTime {
             date += " · " + (value.hasAudio ? "♫ " : "") + readingTime
@@ -764,7 +775,7 @@ private final class VisualCompactFlowNSView: NSView {
             let style = NSMutableParagraphStyle()
             style.lineBreakMode = .byWordWrapping
             text.append(NSAttributedString(string: value.preview, attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
+                .font: VisualCompactFlowTypography.previewFont,
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: style
             ]))
