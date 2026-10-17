@@ -5,9 +5,10 @@ import XCTest
 @MainActor
 final class MacScrolloverEndPolicyTests: XCTestCase {
     private func article(_ id: Int64, read: Bool = false) -> ArticleSummary {
-        ArticleSummary(id: id, feedId: 1, title: "Article", url: "https://example.test",
+        ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed",
+            title: "Article", url: "https://example.test", commentsUrl: "",
             publishedAt: "2026-10-17T10:00:00Z", isRead: read, isStarred: false,
-            preview: "", imageUrl: nil, readingTimeMinutes: nil)
+            readingTimeMinutes: 0, preview: "", imageUrl: nil)
     }
 
     func testEndMarksOnlyVisibleUnreadTailInListOrder() {
