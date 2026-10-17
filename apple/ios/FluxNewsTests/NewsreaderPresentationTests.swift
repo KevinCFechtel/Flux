@@ -3352,6 +3352,102 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// the cell never resolves its own size. What must still hold is that the
     /// cell's own constraints agree with the engine — otherwise rows would be
     /// laid out at a height their content does not fit.
+    func testVisualCompactPreviewFlowsBesideThenBelowImage() {
+        let font = UIFont.preferredFont(forTextStyle: .subheadline)
+        let preview = String(repeating: "A readable preview sentence continues into more words. ", count: 7)
+        let lineHeight = font.lineHeight + font.leading
+        let flow = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 160,
+            fullWidth: 340,
+            heightBesideImage: lineHeight * 2 + 1,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        XCTAssertFalse(flow.beside.isEmpty)
+        XCTAssertFalse(flow.below.isEmpty)
+        XCTAssertLessThanOrEqual(
+            abs((flow.beside as NSString).length + (flow.below as NSString).length
+                - (preview as NSString).length),
+            3, "Only whitespace at the boundary may be discarded"
+        )
+        XCTAssertGreaterThan(flow.besideHeight, 0)
+        XCTAssertGreaterThan(flow.belowHeight, 0)
+
+        let noRoom = IOSVisualCompactPreviewFlow.prepare(
+            text: preview, narrowWidth: 160, fullWidth: 340,
+            heightBesideImage: 0, maxLines: 3, font: font, displayScale: 3
+        )
+        XCTAssertTrue(noRoom.beside.isEmpty)
+        XCTAssertEqual(noRoom.below, preview.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        let short = IOSVisualCompactPreviewFlow.prepare(
+            text: "Short preview", narrowWidth: 160, fullWidth: 340,
+            heightBesideImage: lineHeight * 3, maxLines: 3, font: font, displayScale: 3
+        )
+        XCTAssertTrue(short.below.isEmpty)
+    }
+
+    func testVisualCompactPreviewUsesLastLineStartingAboveImageBottom() {
+        let font = UIFont.preferredFont(forTextStyle: .subheadline)
+        let step = font.lineHeight + font.leading
+        let preview = String(repeating: "A longer sentence fills the narrow image-side column. ", count: 10)
+        let first = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 165, fullWidth: 330,
+            heightBesideImage: step * 1.5,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        let second = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 165, fullWidth: 330,
+            heightBesideImage: step * 2,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        // The last side line can start before the image ends. This avoids
+        // discarding the remaining partial line-height of usable side space.
+        XCTAssertEqual(first.beside, second.beside)
+        XCTAssertEqual(first.besideHeight, second.besideHeight)
+        XCTAssertFalse(first.below.isEmpty)
+    }
+
+    func testVisualCompactContinuationFollowsSidePreviewWithoutParagraphGap() {
+        let metrics = layoutMetrics(mode: .visualCompact, width: 414, hasImage: true)
+        guard let continuation = metrics.previewContinuationFrame,
+              let beside = metrics.previewFrame else { return }
+        XCTAssertLessThanOrEqual(beside.maxY, continuation.minY + 0.5)
+        XCTAssertLessThanOrEqual(
+            continuation.minY - beside.maxY,
+            IOSUIKitArticleGeometry.textSpacing + 0.5,
+            "No artificial image-sized gap between preview segments"
+        )
+    }
+
+    func testVisualCompactFlowPreparedMetricsAvoidAnImageSizedPreviewGap() {
+        let withImage = layoutMetrics(mode: .visualCompact, width: 414, hasImage: true)
+        XCTAssertEqual(withImage.variant, .visualSideTitle)
+        guard let image = withImage.imageFrame else {
+            return XCTFail("Expected side thumbnail")
+        }
+        if let side = withImage.previewFrame {
+            XCTAssertEqual(
+                side.minY, withImage.dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing,
+                accuracy: 0.5
+            )
+            XCTAssertLessThan(side.minX, image.minX)
+            XCTAssertLessThanOrEqual(side.maxX, image.minX)
+        }
+        if let continuation = withImage.previewContinuationFrame {
+            XCTAssertEqual(continuation.width, withImage.metadataFrame.width)
+            XCTAssertGreaterThanOrEqual(continuation.minY, image.maxY)
+        }
+
+        let noImage = layoutMetrics(mode: .visualCompact, width: 414, hasImage: false)
+        XCTAssertEqual(noImage.variant, .visualSideTitleTextOnly)
+        XCTAssertNil(noImage.imageFrame)
+        XCTAssertNil(noImage.previewContinuationFrame)
+        XCTAssertFalse(noImage.previewSideText.isEmpty)
+    }
+
     @MainActor
     func testVisualCompactVariantFramesMatchTheEngine() {
         assertSideTitleFramesMatchTheEngine(width: 414, expecting: .visualSideTitle)
@@ -3398,6 +3494,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
         if let previewActual = actual.previewFrame, let previewExpected = expected.previewFrame {
             XCTAssertEqual(previewActual.origin.y, previewExpected.origin.y, accuracy: 0.5, "preview y", line: line)
+        } else {
+            XCTAssertNil(actual.previewFrame, "no narrow preview frame", line: line)
+            XCTAssertNil(expected.previewFrame, "no measured narrow preview", line: line)
+        }
+        if let continuation = expected.previewContinuationFrame {
+            let actualContinuation = actual.previewContinuationFrame
+            XCTAssertNotNil(actualContinuation, "expected full-width continuation", line: line)
+            XCTAssertEqual(actualContinuation?.origin.y ?? -1, continuation.minY, accuracy: 0.5, "continuation y", line: line)
+            XCTAssertEqual(actualContinuation?.width ?? -1, continuation.width, accuracy: 0.5, "continuation width", line: line)
+        } else {
+            XCTAssertNil(actual.previewContinuationFrame, "no extra continuation view", line: line)
         }
     }
 

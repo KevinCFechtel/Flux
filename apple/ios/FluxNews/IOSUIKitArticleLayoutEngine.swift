@@ -143,6 +143,9 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let landscapeReadingTimeIconFrame: CGRect?
     let landscapeReadingTimeFrame: CGRect?
     let previewFrame: CGRect?
+    let previewContinuationFrame: CGRect?
+    let previewSideText: String
+    let previewContinuationText: String
     let horizontalInset: CGFloat
     let verticalInset: CGFloat
     let titleHeight: CGFloat
@@ -566,6 +569,91 @@ struct IOSUIKitArticleGeometry: Equatable {
     }
 }
 
+/// A Core Text break plan shared by the background sizing engine and the cell.
+/// The preview has a fixed total line budget. Only the lines fitting between
+/// the date and the thumbnail bottom use the narrow column; the rest use full
+/// width below it. No main-thread text measurement is performed during reuse.
+struct IOSVisualCompactPreviewFlow: Equatable {
+    let beside: String
+    let below: String
+    let besideHeight: CGFloat
+    let belowHeight: CGFloat
+
+    static func prepare(
+        text: String, narrowWidth: CGFloat, fullWidth: CGFloat,
+        heightBesideImage: CGFloat, maxLines: Int, font: UIFont,
+        displayScale: CGFloat
+    ) -> Self {
+        guard !text.isEmpty, maxLines > 0, fullWidth > 0 else {
+            return .init(beside: "", below: "", besideHeight: 0, belowHeight: 0)
+        }
+        let scale = max(1, displayScale)
+        let lineStep = font.lineHeight + font.leading
+        // A side-column line only needs to START above the image bottom.
+        // It can extend below that edge without ever crossing the image:
+        // the whole line remains in the narrow column. Requiring the entire
+        // glyph height to fit leaves a visible empty strip before the first
+        // full-width continuation line.
+        let sideLines = narrowWidth > 0 && heightBesideImage > 0
+            ? min(maxLines, max(0, Int(ceil(
+                heightBesideImage / max(1, lineStep)
+            )))) : 0
+
+        let content = text as NSString
+        let attributed = NSAttributedString(
+            string: text, attributes: [kCTFontAttributeName as NSAttributedString.Key: font as CTFont]
+        )
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+        var consumed = 0
+        var visibleSideLines = 0
+        while consumed < content.length && visibleSideLines < sideLines {
+            var length = CTTypesetterSuggestLineBreak(typesetter, consumed, Double(narrowWidth))
+            if length == 0 {
+                length = CTTypesetterSuggestClusterBreak(typesetter, consumed, Double(narrowWidth))
+            }
+            guard length > 0 else { break }
+            consumed += length
+            visibleSideLines += 1
+        }
+
+        let side = content.substring(to: consumed).trimmingCharacters(in: .newlines)
+        let rest = content.substring(from: consumed)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let belowLines = max(0, maxLines - visibleSideLines)
+        let besideHeight = visibleSideLines > 0
+            ? ceil((CGFloat(visibleSideLines) * font.lineHeight
+                + CGFloat(visibleSideLines - 1) * font.leading) * scale) / scale
+            : 0
+        let belowHeight: CGFloat
+        if rest.isEmpty || belowLines == 0 {
+            belowHeight = 0
+        } else {
+            // Equivalent to the existing Core Text row measurement.
+            let restText = NSAttributedString(
+                string: rest, attributes: [kCTFontAttributeName as NSAttributedString.Key: font as CTFont]
+            )
+            let restTypesetter = CTTypesetterCreateWithAttributedString(restText)
+            var index = 0
+            var lines = 0
+            while index < restText.length && lines < belowLines {
+                var length = CTTypesetterSuggestLineBreak(restTypesetter, index, Double(fullWidth))
+                if length == 0 {
+                    length = CTTypesetterSuggestClusterBreak(restTypesetter, index, Double(fullWidth))
+                }
+                guard length > 0 else { break }
+                index += length
+                lines += 1
+            }
+            belowHeight = ceil((CGFloat(lines) * font.lineHeight
+                + CGFloat(max(0, lines - 1)) * font.leading) * scale) / scale
+        }
+        return .init(
+            beside: side, below: belowLines > 0 ? rest : "",
+            besideHeight: besideHeight, belowHeight: belowHeight
+        )
+    }
+}
+
 /// Deterministic, cell-free counterpart to the current UIKit constraint geometry.
 /// Core Text typesetting is immutable and does not require main-actor view ownership.
 enum IOSUIKitArticleLayoutEngine {
@@ -623,7 +711,31 @@ enum IOSUIKitArticleLayoutEngine {
         let publicationTimeLeadingWidth = input.showsRelativePublicationTime
             ? publicationTimeIconSize + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
             : 0
-        let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
+        let previewFont = font(.subheadline, category: input.contentSizeCategory, bold: false)
+        let sidePreviewFlow: IOSVisualCompactPreviewFlow?
+        if isSideTitleVariant {
+            let topOfPreview = titleHeight + IOSUIKitArticleGeometry.textSpacing
+                + dateHeight + IOSUIKitArticleGeometry.textSpacing
+            sidePreviewFlow = IOSVisualCompactPreviewFlow.prepare(
+                text: input.preview,
+                narrowWidth: titleWidth,
+                fullWidth: infoWidth,
+                heightBesideImage: max(0, imageSize.height - topOfPreview),
+                maxLines: input.previewLines.rawValue,
+                font: previewFont, displayScale: scale
+            )
+        } else {
+            sidePreviewFlow = nil
+        }
+        let previewHeight = sidePreviewFlow?.besideHeight
+            ?? coreTextHeight(input.preview, font: previewFont, width: previewWidth,
+                maximumLines: input.previewLines.rawValue, displayScale: scale)
+        let continuationHeight = sidePreviewFlow?.belowHeight ?? 0
+        // This is one continuous paragraph, not two independently spaced
+        // paragraphs. Only keep the normal text spacing if there was no line
+        // beside the image at all.
+        let continuationSpacing = (sidePreviewFlow?.besideHeight ?? 0) > 0
+            ? CGFloat.zero : IOSUIKitArticleGeometry.textSpacing
 
         let dateRowReadingTimeTextWidth = usesDateRowReadingTime
             ? coreTextWidth(input.readingTime ?? "", font: dateFont, displayScale: scale)
@@ -642,14 +754,18 @@ enum IOSUIKitArticleLayoutEngine {
         // preview belongs to it, so it is part of the height the image competes
         // with; otherwise the preview follows below the whole row.
         let sideTitleColumnHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + dateHeight
-            + (variant == .visualSideTitleWide && previewHeight > 0
+            + (isSideTitleVariant && previewHeight > 0
                 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
-        // What that row occupies: the taller of the column and the image.
+        // A side preview may end before the thumbnail bottom. Continuation
+        // starts beneath the taller of the image and text column.
         let sideTitleRowHeight = max(sideTitleColumnHeight, imageSize.height)
-        if variant == .visualSideTitleWide {
-            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
-        } else if variant == .visualSideTitle || variant == .visualSideTitleTextOnly {
-            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
+        if isSideTitleVariant {
+            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing
+                + sideTitleRowHeight
+                + (continuationHeight > 0 ? continuationSpacing + continuationHeight : 0)
+        } else if variant == .visualSideTitleTextOnly {
+            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing
+                + sideTitleRowHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         } else {
             textBlockHeight = metadataHeight
@@ -815,19 +931,26 @@ enum IOSUIKitArticleLayoutEngine {
             landscapeReadingTimeIconFrame = nil
             landscapeReadingTimeFrame = nil
         }
-        // Wide side-title keeps the preview in the column, so it follows the date
-        // directly. Narrow side-title puts it under the whole row, which means it
-        // has to clear the image as well as the date.
         let previewTop: CGFloat
-        switch variant {
-        case .visualSideTitleWide:
-            previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-        case .visualSideTitle, .visualSideTitleTextOnly:
+        if variant == .visualSideTitleTextOnly {
             previewTop = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
-        default:
+        } else {
             previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
-        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
+        let actualPreviewWidth = isSideTitleVariant ? titleWidth : previewWidth
+        let previewFrame = previewHeight == 0 ? nil : CGRect(
+            x: textOrigin.x, y: previewTop, width: actualPreviewWidth, height: previewHeight
+        )
+        let previewContinuationFrame: CGRect?
+        if continuationHeight > 0 && isSideTitleVariant {
+            let nextY = titleTop + sideTitleRowHeight + continuationSpacing
+            previewContinuationFrame = CGRect(
+                x: textOrigin.x, y: nextY,
+                width: infoWidth, height: continuationHeight
+            )
+        } else {
+            previewContinuationFrame = nil
+        }
         return .init(
             variant: variant,
             cellSize: .init(width: input.containerWidth, height: totalHeight),
@@ -847,6 +970,9 @@ enum IOSUIKitArticleLayoutEngine {
             landscapeReadingTimeIconFrame: landscapeReadingTimeIconFrame,
             landscapeReadingTimeFrame: landscapeReadingTimeFrame,
             previewFrame: previewFrame,
+            previewContinuationFrame: previewContinuationFrame,
+            previewSideText: sidePreviewFlow?.beside ?? input.preview,
+            previewContinuationText: sidePreviewFlow?.below ?? "",
             horizontalInset: geometry.horizontalInset,
             verticalInset: geometry.verticalPadding,
             titleHeight: titleHeight,

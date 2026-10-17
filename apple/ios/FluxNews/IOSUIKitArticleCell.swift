@@ -36,6 +36,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let commentsContainer = UIView()
     private let commentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
     private let previewLabel = UILabel()
+    private let previewContinuationLabel = UILabel()
+    private var sidePreviewHeightConstraint: NSLayoutConstraint!
+    private var sideContinuationHeightConstraint: NSLayoutConstraint!
+    private var sideContinuationTopConstraint: NSLayoutConstraint!
     private let articleImageView = UIImageView()
     private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
 
@@ -327,6 +331,17 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewLabel.adjustsFontForContentSizeCategory = true
         previewLabel.textColor = Self.supportingTextColor
         previewLabel.numberOfLines = 3
+        previewLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
+        previewContinuationLabel.font = .preferredFont(forTextStyle: .subheadline)
+        previewContinuationLabel.adjustsFontForContentSizeCategory = true
+        previewContinuationLabel.textColor = Self.supportingTextColor
+        previewContinuationLabel.numberOfLines = 3
+        previewContinuationLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewContinuationLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
+        sidePreviewHeightConstraint = previewLabel.heightAnchor.constraint(equalToConstant: 0)
+        sidePreviewHeightConstraint.priority = UILayoutPriority(999)
+        sideContinuationHeightConstraint = previewContinuationLabel.heightAnchor.constraint(equalToConstant: 0)
+        sideContinuationHeightConstraint.priority = UILayoutPriority(999)
 
         for label in [titleLabel, dateLabel, previewLabel] {
             label.translatesAutoresizingMaskIntoConstraints = false
@@ -335,6 +350,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         textContainer.addSubview(metadataRow)
         textContainer.addSubview(publicationTimeIconView)
         textContainer.addSubview(landscapeReadingTimeContainer)
+        textContainer.addSubview(previewContinuationLabel)
+        previewContinuationLabel.isHidden = true
         previewTopConstraint = previewLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing)
         // Collapsing by priority keeps the constraint graph untouched. Removing
         // or deactivating it instead would mutate the graph on every reuse
@@ -520,44 +537,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
         ]
 
-        // Order, top to bottom:
-        //
-        //   ● icon  Feed name              ★ 💬     full width
-        //   Headline …                    ┌─────┐
-        //   Date · ▤ 4 min               │ IMG │
-        //                                 └─────┘
-        //   Preview …                               full width
-        //
-        // The metadata bar keeps the full width because the feed name is the
-        // element that suffers first: in the narrow column it would fall from
-        // 275 pt to 147 pt, and the accessories around it grow with Dynamic Type
-        // while the column does not.
-        //
-        // The image is trailing so every headline starts at the same edge,
-        // including rows that have no image at all (`visualTextOnly`).
-        //
-        // The image reuses the landscape size constraints; only one variant
-        // group is ever active, so they cannot collide.
-        sideTitlePreviewBelowDateConstraint = previewLabel.topAnchor.constraint(
-            greaterThanOrEqualTo: dateLabel.bottomAnchor,
-            constant: IOSUIKitArticleGeometry.textSpacing
-        )
-        sideTitlePreviewBelowImageConstraint = previewLabel.topAnchor.constraint(
-            greaterThanOrEqualTo: articleImageView.bottomAnchor,
-            constant: IOSUIKitArticleGeometry.textSpacing
-        )
-        // Pulls the preview up to the date when the text column is the taller of
-        // the two. Together with the two required constraints above this is the
-        // max() the engine computes.
-        let previewPrefersDate = previewLabel.topAnchor.constraint(
-            equalTo: dateLabel.bottomAnchor,
-            constant: IOSUIKitArticleGeometry.textSpacing
-        )
-        previewPrefersDate.priority = .defaultLow
-        let titleTrailingToImage = titleLabel.trailingAnchor.constraint(
-            equalTo: articleImageView.leadingAnchor,
-            constant: -IOSUIKitArticleGeometry.sideTitleSpacing
-        )
+        // Image-bearing Visual Compact: preview begins below publication
+        // beside the thumbnail, with a full-width continuation underneath.
         sideTitleDateTrailingConstraint = dateLabel.trailingAnchor.constraint(
             equalTo: landscapeReadingTimeContainer.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
@@ -566,45 +547,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
             lessThanOrEqualTo: articleImageView.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.sideTitleSpacing
         )
-        sideTitleConstraints = [
-            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
-            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
-
-            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
-            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-
-            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
-            titleTrailingToImage,
-            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
-            sideTitleDateTrailingConstraint,
-            sideTitleReadingContainerTrailingConstraint,
-            landscapeReadingTimeContainer.topAnchor.constraint(equalTo: dateLabel.topAnchor),
-            landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
-
-            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
-            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-            landscapeImageWidthConstraint,
-            landscapeImageHeightConstraint,
-
-            sideTitlePreviewBelowDateConstraint,
-            sideTitlePreviewBelowImageConstraint,
-            previewPrefersDate,
-            previewBottomDefaultConstraint,
-            previewTrailingDefaultConstraint,
-        ]
-
-        // Wide container: the
-        // preview joins the column beside the image rather than running under it.
-        //
-        //   ● icon  Feed name              ★ 💬     full width
-        //   Headline …                    ┌─────┐
-        //   Date                          │ IMG │
-        //   Preview …                     └─────┘
-        //
-        // The image can now be the lowest element in the row, so the container's
-        // bottom is only an upper bound for both — the engine fixes the height.
         sideTitleWideDateTrailingConstraint = dateLabel.trailingAnchor.constraint(
             equalTo: landscapeReadingTimeContainer.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
@@ -613,38 +555,64 @@ final class IOSUIKitArticleCell: UITableViewCell {
             lessThanOrEqualTo: articleImageView.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.sideTitleSpacing
         )
-        sideTitleWideConstraints = [
+        sideTitlePreviewBelowDateConstraint = previewLabel.topAnchor.constraint(
+            equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        sideTitlePreviewBelowImageConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: articleImageView.bottomAnchor
+        )
+        sideContinuationTopConstraint = previewContinuationLabel.topAnchor.constraint(
+            equalTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        let sideFlowConstraints: [NSLayoutConstraint] = [
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
-
             metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-
-            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.topAnchor.constraint(
+                equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing
+            ),
             titleLabel.trailingAnchor.constraint(
                 equalTo: articleImageView.leadingAnchor,
                 constant: -IOSUIKitArticleGeometry.sideTitleSpacing
             ),
-            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
-            sideTitleWideDateTrailingConstraint,
-            sideTitleWideReadingContainerTrailingConstraint,
+            dateLabel.topAnchor.constraint(
+                equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing
+            ),
             landscapeReadingTimeContainer.topAnchor.constraint(equalTo: dateLabel.topAnchor),
             landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
-            previewTopConstraint,
+            articleImageView.topAnchor.constraint(
+                equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing
+            ),
+            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+            sideTitlePreviewBelowDateConstraint,
             previewLabel.trailingAnchor.constraint(
                 equalTo: articleImageView.leadingAnchor,
                 constant: -IOSUIKitArticleGeometry.sideTitleSpacing
             ),
-            previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
-
-            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
-            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            sidePreviewHeightConstraint,
+            previewContinuationLabel.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor),
+            previewContinuationLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            sideContinuationTopConstraint,
+            sideContinuationHeightConstraint,
+            // Restore the vertical content chain used by UIKit compressed-size
+            // tests. Without these bounds, Auto Layout can collapse an
+            // image-bearing row to the metadata height (~30 pt), even though
+            // the precomputed row height correctly includes its thumbnail.
             articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
-            landscapeImageWidthConstraint,
-            landscapeImageHeightConstraint,
+            dateLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            previewContinuationLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
         ]
+        sideTitleConstraints = sideFlowConstraints + [
+            sideTitleDateTrailingConstraint, sideTitleReadingContainerTrailingConstraint,
+        ]
+        sideTitleWideConstraints = sideTitleConstraints
 
         // `Visual compact` without an image: the same order — metadata bar,
         // then title, date, preview — at full width, with no image slot.
@@ -685,6 +653,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         representedImageRequest = nil
         representedArticleID = nil
         preparedLayoutMetrics = nil
+        previewContinuationLabel.text = nil
+        previewContinuationLabel.isHidden = true
         clearArticleImagePresentation()
     }
 
@@ -718,9 +688,27 @@ final class IOSUIKitArticleCell: UITableViewCell {
             : "\(currentPublishedDate) ·"
         landscapeReadingTimeLabel.text = item.content.readingTime
         let hasPreview = !item.content.article.preview.isEmpty
-        previewLabel.text = item.content.article.preview
+        let imageSideFlow = preparedLayoutMetrics.variant == .visualSideTitle
+            || preparedLayoutMetrics.variant == .visualSideTitleWide
+        previewLabel.text = imageSideFlow
+            ? preparedLayoutMetrics.previewSideText : item.content.article.preview
         previewLabel.isHidden = !hasPreview
+            || (imageSideFlow && preparedLayoutMetrics.previewFrame == nil)
         previewLabel.numberOfLines = previewLines.rawValue
+        previewContinuationLabel.text = imageSideFlow
+            ? preparedLayoutMetrics.previewContinuationText : nil
+        previewContinuationLabel.isHidden = !imageSideFlow
+            || preparedLayoutMetrics.previewContinuationFrame == nil
+        previewContinuationLabel.numberOfLines = previewLines.rawValue
+        sidePreviewHeightConstraint.constant = imageSideFlow
+            ? (preparedLayoutMetrics.previewFrame?.height ?? 0) : 0
+        sideContinuationHeightConstraint.constant =
+            preparedLayoutMetrics.previewContinuationFrame?.height ?? 0
+        sideContinuationTopConstraint.constant = {
+            guard let continuation = preparedLayoutMetrics.previewContinuationFrame,
+                  let image = preparedLayoutMetrics.imageFrame else { return 0 }
+            return continuation.minY - image.maxY
+        }()
         // Constants and priorities only — the constraint graph stays identical
         // across every reuse, whatever the article contains.
         previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
@@ -888,6 +876,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         landscapeReadingTimeIconView.tintColor = supporting
         landscapeReadingTimeLabel.textColor = supporting
         previewLabel.textColor = supporting
+        previewContinuationLabel.textColor = supporting
         commentsImageView.tintColor = supporting
         audioImageView.tintColor = supporting
         let unreadOpacity = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
@@ -979,6 +968,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let landscapeReadingTimeIconFrame: CGRect?
         let landscapeReadingTimeFrame: CGRect?
         let previewFrame: CGRect?
+        let previewContinuationFrame: CGRect?
     }
 
     var layoutDiagnosticsForTesting: LayoutDiagnostics {
@@ -1007,7 +997,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             landscapeReadingTimeFrame: currentReadingTime != nil
                 ? frame(landscapeReadingTimeLabel)
                 : nil,
-            previewFrame: previewLabel.isHidden ? nil : frame(previewLabel)
+            previewFrame: previewLabel.isHidden ? nil : frame(previewLabel),
+            previewContinuationFrame: previewContinuationLabel.isHidden
+                ? nil : frame(previewContinuationLabel)
         )
     }
 
