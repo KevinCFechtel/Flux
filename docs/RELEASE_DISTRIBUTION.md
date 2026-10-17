@@ -46,11 +46,12 @@ bash Build/release.sh ios
 bash Build/release.sh ios --target appstore --version-code 3002 --version-name 3.0.0
 bash Build/release.sh macos
 bash Build/release.sh macos --debug
+bash Build/release.sh macos --target appstore --version-code 3002 --version-name 3.0.0
 ```
 
-The entry point delegates to the existing platform scripts. Apple App Store export creates an IPA for **manual** Transporter upload only. Play produces an AAB without uploading. Version inputs are mandatory for store targets. macOS App Store export and F-Droid targets intentionally fail until implemented.
+The entry point delegates to the existing platform scripts. Apple App Store export creates an IPA for **manual** Transporter upload only. Play produces an AAB without uploading. Version inputs are mandatory for store targets. F-Droid targets intentionally fail until implemented. macOS App Store archive/export is now implemented provisionally and requires real signing/export validation on a Mac.
 
-**R1 is partial:** full output normalization (Play AAB and iOS IPA now use stable `dist/android/play/` and `dist/ios/appstore/` paths), comprehensive signed distribution validation, macOS App Store export, and CI orchestration are still to be implemented. `bash Build/test-release-cli.sh` checks argument validation without invoking Gradle or Xcode. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
+**R1 is partial:** full output normalization (Play AAB and iOS IPA now use stable `dist/android/play/` and `dist/ios/appstore/` paths), comprehensive signed distribution validation, macOS App Store signing/export validation on a real Mac, and CI orchestration are still to be implemented. `bash Build/test-release-cli.sh` checks argument validation without invoking Gradle or Xcode. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
 
 ## 2. Target command model
 
@@ -404,3 +405,9 @@ This follow-up does not:
 - move production secrets into the repository;
 - make CI-produced artifacts the authoritative release source when the canonical
   local script produced and validated the final signed store artifact.
+
+## R2 macOS App Store export implementation (17 October 2026)
+
+`bash Build/release.sh macos --target appstore --version-code N --version-name V` invokes `apple/macos/Build/archive.sh` and `export-appstore.sh`. The archive uses the Release configuration, explicit host/widget version settings, automatic provisioning and Apple Distribution signing; `verify-sandbox.sh ... distribution` checks the signed host/widget bundle IDs, version parity, Sandbox and App Group entitlements, signature chain and Apple Distribution team. Export uses Xcode's App Store Connect export method, expects a non-empty `.pkg` in `dist/macos/appstore/`, and never uploads automatically.
+
+**Not yet accepted:** This flow has not been exercised with the owner's Apple Distribution certificates/profiles or Transporter. Xcode/macOS export compatibility, provisioning, App Group and embedded Rust library signing must be validated on the owner's Mac before calling R2 complete. Store signing credentials must remain outside Git.
