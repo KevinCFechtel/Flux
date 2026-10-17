@@ -96,6 +96,14 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleHoverActionsLayout.hoverRevealDelayNanoseconds, 400_000_000)
     }
 
+    func testVisualCompactPreviewFlowsAroundRightThumbnail() {
+        let exclusion = VisualCompactFlowMetrics.exclusionRect(width: 342)
+        XCTAssertEqual(exclusion.minX, 218)
+        XCTAssertEqual(exclusion.width, 124)
+        XCTAssertEqual(exclusion.minY, 0)
+        XCTAssertEqual(exclusion.height, 94)
+    }
+
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
         // macOS now renders `visualCompact` as its own side-thumbnail layout,
