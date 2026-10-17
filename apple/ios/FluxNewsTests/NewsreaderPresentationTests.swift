@@ -3352,6 +3352,67 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// the cell never resolves its own size. What must still hold is that the
     /// cell's own constraints agree with the engine — otherwise rows would be
     /// laid out at a height their content does not fit.
+    func testVisualCompactPreviewFlowsBesideThenBelowImage() {
+        let font = UIFont.preferredFont(forTextStyle: .subheadline)
+        let preview = String(repeating: "A readable preview sentence continues into more words. ", count: 7)
+        let lineHeight = font.lineHeight + font.leading
+        let flow = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 160,
+            fullWidth: 340,
+            heightBesideImage: lineHeight * 2 + 1,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        XCTAssertFalse(flow.beside.isEmpty)
+        XCTAssertFalse(flow.below.isEmpty)
+        XCTAssertLessThanOrEqual(
+            abs((flow.beside as NSString).length + (flow.below as NSString).length
+                - (preview as NSString).length),
+            3, "Only whitespace at the boundary may be discarded"
+        )
+        XCTAssertGreaterThan(flow.besideHeight, 0)
+        XCTAssertGreaterThan(flow.belowHeight, 0)
+
+        let noRoom = IOSVisualCompactPreviewFlow.prepare(
+            text: preview, narrowWidth: 160, fullWidth: 340,
+            heightBesideImage: 0, maxLines: 3, font: font, displayScale: 3
+        )
+        XCTAssertTrue(noRoom.beside.isEmpty)
+        XCTAssertEqual(noRoom.below, preview.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        let short = IOSVisualCompactPreviewFlow.prepare(
+            text: "Short preview", narrowWidth: 160, fullWidth: 340,
+            heightBesideImage: lineHeight * 3, maxLines: 3, font: font, displayScale: 3
+        )
+        XCTAssertTrue(short.below.isEmpty)
+    }
+
+    func testVisualCompactFlowPreparedMetricsAvoidAnImageSizedPreviewGap() {
+        let withImage = layoutMetrics(mode: .visualCompact, width: 414, hasImage: true)
+        XCTAssertEqual(withImage.variant, .visualSideTitle)
+        guard let image = withImage.imageFrame else {
+            return XCTFail("Expected side thumbnail")
+        }
+        if let side = withImage.previewFrame {
+            XCTAssertEqual(
+                side.minY, withImage.dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing,
+                accuracy: 0.5
+            )
+            XCTAssertLessThan(side.minX, image.minX)
+            XCTAssertLessThanOrEqual(side.maxX, image.minX)
+        }
+        if let continuation = withImage.previewContinuationFrame {
+            XCTAssertEqual(continuation.width, withImage.metadataFrame.width)
+            XCTAssertGreaterThanOrEqual(continuation.minY, image.maxY)
+        }
+
+        let noImage = layoutMetrics(mode: .visualCompact, width: 414, hasImage: false)
+        XCTAssertEqual(noImage.variant, .visualSideTitleTextOnly)
+        XCTAssertNil(noImage.imageFrame)
+        XCTAssertNil(noImage.previewContinuationFrame)
+        XCTAssertFalse(noImage.previewSideText.isEmpty)
+    }
+
     @MainActor
     func testVisualCompactVariantFramesMatchTheEngine() {
         assertSideTitleFramesMatchTheEngine(width: 414, expecting: .visualSideTitle)
