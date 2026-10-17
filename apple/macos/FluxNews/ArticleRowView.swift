@@ -125,7 +125,49 @@ struct ArticleItem: View {
         VStack(alignment: .leading, spacing: 8) {
             metadata
 
-            HStack(alignment: .top, spacing: 12) {
+            if hasAvailableThumbnail {
+                // One TextKit block flows the preview beside, then underneath,
+                // the image. The full-width feed metadata stays above it.
+                ZStack(alignment: .topTrailing) {
+                    Button { onSelect(); store.open(article) } label: {
+                        VisualCompactFlowText(
+                            title: ListeningListPresentation.textOrFallback(
+                                article.title, fallback: String(localized: "Untitled News")
+                            ),
+                            date: publicationValue,
+                            readingTime: readingTime,
+                            preview: article.preview,
+                            isRead: article.isRead,
+                            showRelativeTime: store.showRelativePublicationTime,
+                            hasAudio: hasAudio,
+                            previewLines: store.articlePreviewLines.rawValue
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(
+                            [article.title, publicationValue, article.preview]
+                                .filter { !$0.isEmpty }.joined(separator: ". ")
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .headline)
+
+                    Button { onSelect(); store.open(article) } label: {
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: VisualCompactFlowMetrics.imageWidth,
+                            height: VisualCompactFlowMetrics.imageHeight,
+                            cornerRadius: 9
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedControl, equals: .thumbnail)
+                    .overlay(alignment: .topTrailing) { hoverActions }
+                }
+                .frame(minHeight: VisualCompactFlowMetrics.imageHeight, alignment: .top)
+            } else {
+                // Without a thumbnail, retain the established SwiftUI layout.
                 Button { onSelect(); store.open(article) } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         headline(lineLimit: 3)
@@ -136,38 +178,17 @@ struct ArticleItem: View {
                 }
                 .buttonStyle(.plain)
                 .focused($focusedControl, equals: .headline)
+                .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .top)
+                .overlay(alignment: .topTrailing) { hoverActions }
 
-                if hasAvailableThumbnail {
-                    Button { onSelect(); store.open(article) } label: {
-                        ThumbnailSlot(
-                            article: article,
-                            store: store,
-                            width: 112,
-                            height: ArticleHoverActionsLayout.minimumOverlayHeight,
-                            cornerRadius: 9
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .focused($focusedControl, equals: .thumbnail)
+                if !article.preview.isEmpty {
+                    Text(article.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(store.articlePreviewLines.rawValue)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            // Give text-only items the same minimum height; the hover overlay
-            // must never spill into the preview or adjacent article.
-            .frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight, alignment: .top)
-            // The right-hand image sits immediately below the metadata/read
-            // indicator. Anchor to it, never to the preview's variable height.
-            // Without a thumbnail, the controls overlap the trailing headline.
-            .overlay(alignment: .topTrailing) {
-                hoverActions
-            }
-
-            if !article.preview.isEmpty {
-                Text(article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(store.articlePreviewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             audioActions
