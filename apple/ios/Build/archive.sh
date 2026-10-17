@@ -18,7 +18,7 @@ Usage: archive.sh [developmentRelease|productionRelease] [buildNumber versionNam
 Examples:
   archive.sh
   archive.sh --build-number 115
-  archive.sh developmentRelease 3001 3.0.0\n  archive.sh productionRelease 3001 3.0.0
+  archive.sh productionRelease 3001 3.0.0
   archive.sh developmentRelease 3001 3.0.0
   archive.sh --configuration "Upgrade Test" --build-number 3001 --version-name 3.0.0
 
