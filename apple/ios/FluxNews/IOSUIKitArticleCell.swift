@@ -600,6 +600,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
             previewContinuationLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             sideContinuationTopConstraint,
             sideContinuationHeightConstraint,
+            // Restore the vertical content chain used by UIKit compressed-size
+            // tests. Without these bounds, Auto Layout can collapse an
+            // image-bearing row to the metadata height (~30 pt), even though
+            // the precomputed row height correctly includes its thumbnail.
+            articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            dateLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            previewContinuationLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
         ]
         sideTitleConstraints = sideFlowConstraints + [
             sideTitleDateTrailingConstraint, sideTitleReadingContainerTrailingConstraint,
