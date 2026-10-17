@@ -420,3 +420,9 @@ The central `Build/release.sh` accepts `--version-code` and `--version-name` for
 ## macOS local installation default
 
 `apple/macos/Build/install-local.sh` now defaults to strict `developer-id` verification, requiring a Developer ID Application signed host, widget and embedded Rust library with matching team, Sandbox and App Group entitlements. Set `SOURCE_APP=/path/to/FluxNews.app` to select the built artifact. For deliberate development-only installs, `INSTALL_MODE=development` opts into the prior Apple Development/provisioning verification. Note that the ordinary `macos` build and App Store archive do **not** produce a Developer ID signed app: use `apple/macos/Build/release-developer-id.sh` (Developer ID signing/notarization pipeline) before the default local installation. The Developer ID release pipeline still has its own environment/signing prerequisites.
+
+## R cleanup: distribution entry points
+
+The former iOS `export-testflight.sh` has been replaced by `apple/ios/Build/export-appstore.sh`; the former macOS `release.sh` is now `apple/macos/Build/release-developer-id.sh`. Both former files have been deleted. The central `Build/release.sh` delegates to these named distribution scripts; for a notarized Developer ID ZIP run `bash Build/release.sh macos --target developer-id [--version-code N --version-name V]`. The Developer ID script accepts explicit version overrides, and its output remains `dist/release/`; the notarized `dist/FluxNews.app` is the default source for `install-local.sh`. App Store and Developer ID are distinct signing/distribution channels. External automation using the old paths must be updated.
+
+The cleanup is not a claim of release acceptance: validate CI and run the Apple signing/notarization/export workflows on the owner's Mac before merging.
