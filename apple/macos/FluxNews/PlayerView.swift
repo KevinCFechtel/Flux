@@ -182,11 +182,19 @@ struct PlayerView: View {
     private var fixedPlayback: some View {
         VStack(alignment: .leading, spacing: 14) {
             if previewing {
-                Text("Episode preview").font(.caption).foregroundStyle(.secondary)
-                if let enclosure = previewEnclosure {
-                    Button("Play Episode") { onPlayEnclosure(enclosure.enclosure) }
-                        .buttonStyle(.borderedProminent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Slider(value: .constant(0), in: 0...1)
+                        .disabled(true)
+                        .accessibilityLabel("Playback timeline unavailable")
+                    HStack {
+                        Text("0:00")
+                        Spacer()
+                        Text("--:--")
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
                 }
+                controls
             } else {
                 timeline
                 controls
@@ -264,15 +272,24 @@ struct PlayerView: View {
     private var controls: some View {
         HStack(spacing: 18) {
             controlButton("gobackward.15", label: "Back 15 seconds") { seek(by: -Int64(AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds * 1_000)) }
-            controlButton(state.status == .playing ? "pause.fill" : "play.fill", label: state.status == .playing ? "Pause" : "Play") { togglePlayback() }
-                .disabled(state.isLoading || state.loadedEnclosure == nil)
+                .disabled(previewing || state.loadedEnclosure == nil)
+            controlButton(!previewing && state.status == .playing ? "pause.fill" : "play.fill", label: !previewing && state.status == .playing ? "Pause" : "Play") {
+                if previewing {
+                    if let enclosure = previewEnclosure { onPlayEnclosure(enclosure.enclosure) }
+                } else {
+                    togglePlayback()
+                }
+            }
+                .disabled(state.isLoading || (previewing ? previewEnclosure == nil : state.loadedEnclosure == nil))
             controlButton("stop.fill", label: "Stop") {
                 coordinator?.stop()
                 onStop()
             }
-                .disabled(state.loadedEnclosure == nil)
+                .disabled(previewing || state.loadedEnclosure == nil)
             controlButton("goforward.30", label: "Forward 30 seconds") { seek(by: Int64(AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds * 1_000)) }
+                .disabled(previewing || state.loadedEnclosure == nil)
             controlButton("arrow.counterclockwise", label: "Restart") { restart() }
+                .disabled(previewing || state.loadedEnclosure == nil)
         }
         .frame(maxWidth: .infinity)
     }
