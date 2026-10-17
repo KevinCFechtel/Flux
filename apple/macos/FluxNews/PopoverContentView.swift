@@ -131,6 +131,17 @@ private struct ArticlePane: View {
                 )
             } else {
                 content
+                if playbackState.loadedEnclosure != nil {
+                    Divider()
+                    MacCompactPlayerBar(
+                        playbackState: playbackState,
+                        coordinator: playbackCoordinator,
+                        openPlayer: {
+                            previewArticleID = nil
+                            showingPlayer = true
+                        }
+                    )
+                }
             }
         }
         .background {
