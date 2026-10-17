@@ -175,7 +175,6 @@ private struct ListeningListRow: View {
                 Text("\(downloads.downloaded)/\(downloads.total)")
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
             Button {
                 if ArticleAudioActions.hasLocalDownload(item) { confirmingRemoval = true }
                 else { onRemove(item.articleId) }
