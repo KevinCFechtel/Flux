@@ -250,7 +250,7 @@ internal fun NewsNavigationContent(
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Start,
         ) {
             androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
             androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
