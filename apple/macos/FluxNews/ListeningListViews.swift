@@ -195,12 +195,17 @@ private struct ListeningListRow: View {
 /// Per-row artwork uses a bounded decoded-pixel cache. The row's task is
 /// cancelled as soon as its LazyVStack view leaves the viewport.
 private struct MacListeningListArtworkView: View {
-    private struct PreparedImage: @unchecked Sendable {
-        let image: NSImage
+    private struct PreparedThumbnail: @unchecked Sendable {
+        let cgImage: CGImage
         let pixelCost: Int
     }
 
-    nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 16 * 1_024 * 1_024
+        cache.countLimit = 160
+        return cache
+    }
     private static let fallback = AppleFallbackArtwork.data().flatMap(NSImage.init(data:))
 
     let enclosureID: Int64?
@@ -248,12 +253,17 @@ private struct MacListeningListArtworkView: View {
             guard let data = await coordinator.artwork(source: source),
                   !Task.isCancelled else { return }
             guard let prepared = await Self.prepareThumbnail(data), !Task.isCancelled else { return }
-            Self.cache.setObject(prepared.image, forKey: cacheKey, cost: prepared.pixelCost)
-            image = prepared.image
+            // AppKit image creation stays on the main actor; only ImageIO decode runs detached.
+            let image = NSImage(
+                cgImage: prepared.cgImage,
+                size: NSSize(width: prepared.cgImage.width, height: prepared.cgImage.height)
+            )
+            Self.cache.setObject(image, forKey: cacheKey, cost: prepared.pixelCost)
+            self.image = image
         }
     }
 
-    private static func prepareThumbnail(_ data: Data) async -> PreparedImage? {
+    private static func prepareThumbnail(_ data: Data) async -> PreparedThumbnail? {
         await Task.detached(priority: .utility) {
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: CFDictionary = [
@@ -265,9 +275,8 @@ private struct MacListeningListArtworkView: View {
             guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
                 return nil
             }
-            return PreparedImage(
-                image: NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height)),
-                pixelCost: thumbnail.bytesPerRow * thumbnail.height
+            return PreparedThumbnail(
+                cgImage: thumbnail, pixelCost: thumbnail.bytesPerRow * thumbnail.height
             )
         }.value
     }
