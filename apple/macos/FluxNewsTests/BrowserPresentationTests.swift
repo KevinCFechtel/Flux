@@ -409,19 +409,23 @@ final class BrowserPresentationTests: XCTestCase {
     }
 
 
-    func testC31UnreadScopeQueryPreservesStarredFilter() {
+    func testC31StarredScopeAlwaysIncludesReadAndUnreadArticles() {
         let store = BrowserStore()
         store.scope = .starred
         store.unreadOnly = true
-        let unread = store.query()
-        XCTAssertEqual(unread?.readFilter, .unread)
-        XCTAssertEqual(unread?.starredFilter, .starred)
+        let unreadOnlyEnabled = store.query()
+        XCTAssertEqual(unreadOnlyEnabled?.readFilter, .all)
+        XCTAssertEqual(unreadOnlyEnabled?.starredFilter, .starred)
 
         store.unreadOnly = false
-        let all = store.query()
-        XCTAssertEqual(all?.readFilter, .all)
-        XCTAssertEqual(all?.starredFilter, .starred)
-        XCTAssertEqual(ScopeReadActionPolicy.unreadQuery(from: try! XCTUnwrap(all)).readFilter, .unread)
+        let unreadOnlyDisabled = store.query()
+        XCTAssertEqual(unreadOnlyDisabled?.readFilter, .all)
+        XCTAssertEqual(unreadOnlyDisabled?.starredFilter, .starred)
+        XCTAssertEqual(ScopeReadActionPolicy.unreadQuery(from: try! XCTUnwrap(unreadOnlyDisabled)).readFilter, .unread)
+
+        store.scope = .all
+        store.unreadOnly = true
+        XCTAssertEqual(store.query()?.readFilter, .unread)
     }
 
     func testC31MarkAllAndNextVisibilityAndLastSibling() {
