@@ -399,7 +399,6 @@ private struct ArticlePane: View {
             .sorted { (order[$0] ?? .max) < (order[$1] ?? .max) }
 
         if !ids.isEmpty { store.flushScrollover(ids) }
-        if reachedListBottom { finishLastScrolloverItems() }
     }
 
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
