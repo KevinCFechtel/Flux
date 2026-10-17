@@ -34,7 +34,7 @@ The existing platform build scripts now default to production **release build co
 
 - Android: `android/Build/build-app.sh` defaults to `productionRelease` (APK). Use `developmentDebug` explicitly for debug and `productionBundle <versionCode> <versionName>` for a signed Play AAB.
 - iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-testflight.sh` default to the production identity; `developmentRelease` remains explicit.
-- macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged: this is not yet a Mac App Store archive/export.
+- macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. `--build-number N --version-name V` overrides the version for normal builds. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged; store-signed distribution uses the separate archive/export scripts.
 
 The shared entry point is now `bash Build/release.sh`. Examples:
 
@@ -46,6 +46,7 @@ bash Build/release.sh ios
 bash Build/release.sh ios --target appstore --version-code 3002 --version-name 3.0.0
 bash Build/release.sh macos
 bash Build/release.sh macos --debug
+bash Build/release.sh macos --version-code 3002 --version-name 3.0.0
 bash Build/release.sh macos --target appstore --version-code 3002 --version-name 3.0.0
 ```
 
@@ -411,3 +412,7 @@ This follow-up does not:
 `bash Build/release.sh macos --target appstore --version-code N --version-name V` invokes `apple/macos/Build/archive.sh` and `export-appstore.sh`. The archive uses the Release configuration, explicit host/widget version settings, automatic provisioning and Apple Distribution signing; `verify-sandbox.sh ... distribution` checks the signed host/widget bundle IDs, version parity, Sandbox and App Group entitlements, signature chain and Apple Distribution team. Export uses Xcode's App Store Connect export method, expects a non-empty `.pkg` in `dist/macos/appstore/`, and never uploads automatically.
 
 **Not yet accepted:** This flow has not been exercised with the owner's Apple Distribution certificates/profiles or Transporter. Xcode/macOS export compatibility, provisioning, App Group and embedded Rust library signing must be validated on the owner's Mac before calling R2 complete. Store signing credentials must remain outside Git.
+
+## R1 version argument parity
+
+The central `Build/release.sh` accepts `--version-code` and `--version-name` for normal and store builds on Android, iOS and macOS. For Apple, `--version-code` maps to `CFBundleVersion` / `CURRENT_PROJECT_VERSION` and `--version-name` to `CFBundleShortVersionString` / `MARKETING_VERSION`. Normal builds may omit both and use the project values; store release targets require both. The macOS direct build script accepts `--build-number N --version-name V` and passes both to Xcode, affecting app and widget targets. The iOS direct build and archive scripts already support equivalent version inputs; export scripts inherit the archived version. This is a CLI contract change, not a claim of device/store acceptance.
