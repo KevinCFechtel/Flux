@@ -246,7 +246,7 @@ private struct ArticlePane: View {
                 onOpenPlayer: { articleID in
                     previewArticleID = articleID
                     showingPlayer = true
-                }, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onCancel: { articleID, enclosureID in store.cancelDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
+                }, onPlay: playAudio, onPause: { playbackCoordinator?.pause() }, coordinator: playbackCoordinator, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onCancel: { articleID, enclosureID in store.cancelDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
         } else if store.isSearchActive {
              SearchResultsView(store: store, transferState: transferState, onPlay: playAudio, onDownload: { enclosure in store.requestManualDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onDelete: { enclosure in store.deleteDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onAdd: { articleID in store.addToListeningList(articleID: articleID) })
         } else if let error = store.errorMessage, store.articles.isEmpty {
