@@ -298,7 +298,7 @@ struct PlayerView: View {
         }), !item.audioEnclosures.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio").font(.headline)
-                ForEach(Array(item.audioEnclosures.enumerated()), id: \.element.enclosure.id) { index, audio in
+                ForEach(Array(item.audioEnclosures.enumerated()), id: \.offset) { index, audio in
                     HStack(spacing: 8) {
                         Text(ArticleAudioActions.enclosureLabel(audio.enclosure, index: index))
                             .font(.caption).lineLimit(2)
