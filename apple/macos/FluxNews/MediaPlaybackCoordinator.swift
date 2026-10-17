@@ -359,6 +359,34 @@ final class MediaPlaybackCoordinator {
             }
         }
     }
+    /// Explicit user deletion releases a locally loaded file before transfer
+    /// reconciliation. Pause/Stop deliberately retain their current media item.
+    /// The playback checkpoint is persisted before AVPlayer releases the file.
+    func releaseForDownloadDeletion(enclosureID: Int64) {
+        guard activeEnclosureID == enclosureID else { return }
+        engine.pause()
+        checkpoint()
+        stopCheckpointTimer()
+        engine.unload()
+        activeEnclosureID = nil
+        completionSent = false
+        preparedDurationMs = nil
+        lastObservedDurationMs = nil
+        preparedStatus = .notStarted
+        presentationState.loadedEnclosure = nil
+        presentationState.feedTitle = ""
+        presentationState.mediaTitle = ""
+        presentationState.artworkSource = nil
+        presentationState.chapters = []
+        presentationState.positionMs = 0
+        presentationState.durationMs = nil
+        presentationState.status = .stopped
+        presentationState.errorMessage = nil
+        presentationState.isLoading = false
+        presentationState.isBuffering = false
+        onPlaybackUseChanged?()
+    }
+
     func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
 
     func setPlaybackRate(_ rate: Double) {
