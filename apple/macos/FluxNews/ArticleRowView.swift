@@ -13,13 +13,15 @@ enum ArticleHoverActionsLayout {
     static let hoverRevealDelayNanoseconds: UInt64 = 400_000_000
 
     enum Anchor: Equatable {
+        case adjacentBelowMetadata
         case adjacentText
         case trailingThumbnail
     }
 
     static func anchor(for mode: ArticlePresentationMode) -> Anchor {
         switch mode {
-        case .visual, .compact: .adjacentText
+        case .visual: .adjacentBelowMetadata
+        case .compact: .adjacentText
         case .visualCompact: .trailingThumbnail
         }
     }
@@ -82,15 +84,27 @@ struct ArticleItem: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    // Keep the entire feed/status row full width. The adjacent
+                    // vertical hover buttons start only below this row.
                     Button { onSelect(); store.open(article) } label: {
-                        semanticTextComposition
+                        metadata
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    quickActions
-                        .opacity(hovered ? 1 : 0)
-                        .allowsHitTesting(hovered)
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Button { onSelect(); store.open(article) } label: {
+                            articleTextBelowMetadata
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        quickActions
+                            .opacity(hovered ? 1 : 0)
+                            .allowsHitTesting(hovered)
+                    }
                 }
                 audioActions
             }
@@ -200,6 +214,13 @@ struct ArticleItem: View {
     private var semanticTextComposition: some View {
         VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
             metadata
+            articleTextBelowMetadata
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var articleTextBelowMetadata: some View {
+        VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
             headline(lineLimit: mode == .compact ? 2 : 3)
             publicationRow
             if !article.preview.isEmpty {
