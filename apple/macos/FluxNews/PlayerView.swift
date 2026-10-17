@@ -59,6 +59,7 @@ struct PlayerView: View {
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
     let onCancel: (Int64, Int64) -> Void
+    let onStop: () -> Void
     @ObservedObject private var sleepTimer: MediaSleepTimer
     @State private var isScrubbing = false
     @State private var scrubPositionMs = 0.0
@@ -75,7 +76,8 @@ struct PlayerView: View {
          previewArticleID: Int64? = nil, onPlayEnclosure: @escaping (Enclosure) -> Void = { _ in },
          onDownload: @escaping (Int64, Int64) -> Void = { _, _ in },
          onDelete: @escaping (Int64, Int64) -> Void = { _, _ in },
-         onCancel: @escaping (Int64, Int64) -> Void = { _, _ in }) {
+         onCancel: @escaping (Int64, Int64) -> Void = { _, _ in },
+         onStop: @escaping () -> Void = {}) {
         self.store = store
         self.state = state
         self.coordinator = coordinator
@@ -84,6 +86,7 @@ struct PlayerView: View {
         self.onDownload = onDownload
         self.onDelete = onDelete
         self.onCancel = onCancel
+        self.onStop = onStop
         _sleepTimer = ObservedObject(wrappedValue: coordinator?.sleepTimer ?? MediaSleepTimer())
     }
 
@@ -263,7 +266,10 @@ struct PlayerView: View {
             controlButton("gobackward.15", label: "Back 15 seconds") { seek(by: -Int64(AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds * 1_000)) }
             controlButton(state.status == .playing ? "pause.fill" : "play.fill", label: state.status == .playing ? "Pause" : "Play") { togglePlayback() }
                 .disabled(state.isLoading || state.loadedEnclosure == nil)
-            controlButton("stop.fill", label: "Stop") { coordinator?.stop() }
+            controlButton("stop.fill", label: "Stop") {
+                coordinator?.stop()
+                onStop()
+            }
                 .disabled(state.loadedEnclosure == nil)
             controlButton("goforward.30", label: "Forward 30 seconds") { seek(by: Int64(AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds * 1_000)) }
             controlButton("arrow.counterclockwise", label: "Restart") { restart() }
@@ -319,7 +325,7 @@ struct PlayerView: View {
     @ViewBuilder private var audioSelection: some View {
         if let item = previewItem ?? displayedArticleID.flatMap({ id in
             store.listeningListItems.first(where: { $0.articleId == id })
-        }), !item.audioEnclosures.isEmpty {
+        }), item.audioEnclosures.count > 1 {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio").font(.headline)
                 ForEach(Array(item.audioEnclosures.enumerated()), id: \.offset) { index, audio in
