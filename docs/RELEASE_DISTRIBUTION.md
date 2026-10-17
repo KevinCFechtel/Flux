@@ -50,7 +50,7 @@ bash Build/release.sh macos --debug
 
 The entry point delegates to the existing platform scripts. Apple App Store export creates an IPA for **manual** Transporter upload only. Play produces an AAB without uploading. Version inputs are mandatory for store targets. macOS App Store export and F-Droid targets intentionally fail until implemented.
 
-**R1 is partial:** output normalization, comprehensive signed distribution validation, macOS App Store export, and CI orchestration are still to be implemented. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
+**R1 is partial:** full output normalization (Play AAB and iOS IPA now use stable `dist/android/play/` and `dist/ios/appstore/` paths), comprehensive signed distribution validation, macOS App Store export, and CI orchestration are still to be implemented. `bash Build/test-release-cli.sh` checks argument validation without invoking Gradle or Xcode. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
 
 ## 2. Target command model
 
