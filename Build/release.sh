@@ -8,6 +8,7 @@ usage() {
 Usage: bash Build/release.sh <android|ios|macos> [--debug] [--version-code N] [--version-name V]
        bash Build/release.sh android --target play --version-code N --version-name V
        bash Build/release.sh ios --target appstore --version-code N --version-name V
+       bash Build/release.sh macos --target appstore --version-code N --version-name V
 
 Defaults to production RELEASE builds (never publishes).
   android: productionRelease APK
@@ -17,7 +18,7 @@ Defaults to production RELEASE builds (never publishes).
 --target play creates a signed production AAB; requires signing properties.
 --target appstore (iOS) archives and exports a production IPA for manual upload.
 --version-code is the Android versionCode or Apple CFBundleVersion.
-For macOS, version overrides and App Store archive/export are not yet implemented.
+For macOS, version overrides are supported on the appstore target only.
 HELP
 }
 
@@ -68,10 +69,16 @@ case "$platform:$target" in
     export EXPORT_PATH="$ROOT/dist/ios/appstore"
     exec bash "$ROOT/apple/ios/Build/export-testflight.sh" productionRelease
     ;;
+  macos:appstore)
+    (( !debug )) || die "--debug cannot be combined with --target appstore"
+    [[ -n "$version_code" ]] || die "App Store export requires explicit version"
+    bash "$ROOT/apple/macos/Build/archive.sh" "${args[@]}"
+    exec bash "$ROOT/apple/macos/Build/export-appstore.sh"
+    ;;
   macos:build)
     [[ -z "$version_code" ]] || die "macOS build does not yet accept version overrides"
     if ((debug)); then export CONFIGURATION=Debug; else export CONFIGURATION=Release; fi
     exec bash "$ROOT/apple/macos/Build/build-app.sh"
     ;;
-  *) die "Unsupported target '$target' for $platform (F-Droid and macOS App Store are pending)";;
+  *) die "Unsupported target '$target' for $platform (F-Droid is pending)";;
 esac
