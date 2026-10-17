@@ -51,10 +51,10 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 
 | ID | Priority | Target | Status on `main` (16 Oct) | Required remaining gate | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| A1 | P0 | iOS + macOS | ATS host policies and structural tests implemented | Actual HTTP/HTTPS media, redirect and playback tests per platform | — |
-| A2 | P0 | Rust + Apple | Rust `EventSubscription` Drop fallback implemented | Apple listener lifecycle/retention and regression evidence | — |
-| A3 | P0 | Android | WorkManager policy-tagged `updateWork()` and unit tests implemented | Runtime network-policy transitions | — |
-| A4 | P0 | CI | `.github/workflows/rust.yml` implemented | Make `cargo fmt --check` blocking after baseline formatting cleanup; confirm required-check policy separately | — |
+| A1 | P0 | iOS + macOS | **Owner-accepted 17 Oct 2026**; ATS implemented; future failures tracked as bugs | Closed by owner decision | — |
+| A2 | P0 | Rust + Apple | **Owner-accepted 17 Oct 2026**; subscription cleanup implemented; future failures tracked as bugs | Closed by owner decision | — |
+| A3 | P0 | Android | **Owner-accepted 17 Oct 2026**; WorkManager policy handling implemented; future failures tracked as bugs | Closed by owner decision | — |
+| A4 | P0 | CI | Blocking Rust formatting gate proposed in dedicated PR (17 Oct 2026) | Verify CI green; required-check branch protection remains repository setting | — |
 | B1 | P0 before Mac App Store release | macOS | Entitlements, storage and signed verifier/installer implemented (#38, #53) | Signed fresh-container runtime acceptance | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
 | C1 | P1 | Android | Resource extraction and 500 German translations implemented | Residual runtime-string audit, locale/device review, Weblate for five target languages | A3/A4 as relevant |
@@ -382,3 +382,9 @@ feasibility is demonstrated, and the accepted C1/C2/C3 items are either
 implemented with tests or explicitly deferred as separate decisions.
 The separate release/distribution acceptance criteria still live in
 `RELEASE_DISTRIBUTION.md`.
+
+## 17 October 2026 — A-track owner decision
+
+The project owner accepted A1, A2 and A3 based on existing implementation and practical testing. They are closed by owner sign-off; no individual protocol/retention/network transition test report was supplied. Any subsequent issue is handled as a regression bug, not a reopening of these roadmap gates.
+
+A4: make `cargo fmt --manifest-path core/Cargo.toml --all --check` blocking in the Rust workflow. The historical formatting debt may require a mechanical rustfmt-only follow-up if the CI check fails. Verify the resulting CI before closing A4. GitHub branch protection / required-check settings cannot be inferred from the workflow alone.

@@ -28,10 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt,clippy
-      # Existing workspace formatting predates this gate. Report it without
-      # blocking the new test gate until the mechanical formatting PR lands.
-      - name: Audit existing Rust formatting
-        continue-on-error: true
+      - name: Check Rust formatting
         run: cargo fmt --manifest-path core/Cargo.toml --all --check
       - name: Run Rust workspace tests
         if: success() || failure()

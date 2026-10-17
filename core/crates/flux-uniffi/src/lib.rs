@@ -1289,12 +1289,19 @@ impl Flux {
             .map_err(map_error)
     }
     pub fn repair_legacy_download_metadata(&self) -> Result<LegacyMediaRepairResult, FluxError> {
-        let (scanned, recovered_artworks) = self.core.repair_legacy_download_metadata()
+        let (scanned, recovered_artworks) = self
+            .core
+            .repair_legacy_download_metadata()
             .map_err(map_error)?;
-        Ok(LegacyMediaRepairResult { scanned, recovered_artworks })
+        Ok(LegacyMediaRepairResult {
+            scanned,
+            recovered_artworks,
+        })
     }
     pub fn restore_legacy_playback_article(&self, article_id: i64) -> Result<bool, FluxError> {
-        self.core.restore_legacy_playback_article(article_id).map_err(map_error)
+        self.core
+            .restore_legacy_playback_article(article_id)
+            .map_err(map_error)
     }
     pub fn restore_legacy_local_playback_article(
         &self,
@@ -1331,7 +1338,8 @@ impl Flux {
         article_id: i64,
         enclosure_id: i64,
     ) -> Result<bool, FluxError> {
-        self.core.restore_legacy_media_article(article_id, enclosure_id)
+        self.core
+            .restore_legacy_media_article(article_id, enclosure_id)
             .map_err(map_error)
     }
     pub fn import_legacy_download(
@@ -1538,7 +1546,10 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
-    pub fn feed_preferences_bulk(&self, feed_ids: Vec<i64>) -> Result<Vec<FeedPreferences>, FluxError> {
+    pub fn feed_preferences_bulk(
+        &self,
+        feed_ids: Vec<i64>,
+    ) -> Result<Vec<FeedPreferences>, FluxError> {
         self.core
             .feed_preferences_bulk(&feed_ids)
             .map(|values| values.into_iter().map(Into::into).collect())
