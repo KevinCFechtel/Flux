@@ -391,7 +391,7 @@ struct PlayerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityExpanded(showNotesExpanded)
+
             if showNotesExpanded {
                 VStack(alignment: .leading, spacing: 10) {
                 if isLoadingReaderDocument {
@@ -430,7 +430,7 @@ struct PlayerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityExpanded(advancedSettingsExpanded)
+
             if advancedSettingsExpanded {
                 VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
