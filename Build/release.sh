@@ -50,7 +50,12 @@ case "$platform:$target" in
   android:play)
     (( !debug )) || die "--debug cannot be combined with --target play"
     [[ -n "$version_code" ]] || die "Play bundle requires explicit version"
-    exec bash "$ROOT/android/Build/build-app.sh" productionBundle "${args[@]}"
+    bash "$ROOT/android/Build/build-app.sh" productionBundle "${args[@]}"
+    artifact="$ROOT/android/app/build/outputs/bundle/productionRelease/app-production-release.aab"
+    [[ -s "$artifact" ]] || die "Production AAB missing or empty: $artifact"
+    mkdir -p "$ROOT/dist/android/play"
+    cp "$artifact" "$ROOT/dist/android/play/FluxNews-${version_name}-${version_code}.aab"
+    echo "Play artifact: $ROOT/dist/android/play/FluxNews-${version_name}-${version_code}.aab (not uploaded)"
     ;;
   ios:build)
     if ((debug)); then variant=developmentDebug; else variant=productionRelease; fi
@@ -60,6 +65,7 @@ case "$platform:$target" in
     (( !debug )) || die "--debug cannot be combined with --target appstore"
     [[ -n "$version_code" ]] || die "App Store export requires explicit version"
     bash "$ROOT/apple/ios/Build/archive.sh" productionRelease "${args[@]}"
+    export EXPORT_PATH="$ROOT/dist/ios/appstore"
     exec bash "$ROOT/apple/ios/Build/export-testflight.sh" productionRelease
     ;;
   macos:build)
