@@ -82,10 +82,30 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
-    func testVisualActionsStartBelowFullWidthFeedRow() {
+    func testVisualAndCompactActionsStartBelowFullWidthFeedRow() {
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .adjacentBelowMetadata)
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visualCompact), .trailingThumbnail)
-        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .adjacentText)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .adjacentBelowMetadata)
+    }
+
+    func testCompactPlacesFullWidthMetadataBeforeHoverActions() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/ArticleRowView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let compactStart = try XCTUnwrap(source.range(of: "    private var compact: some View {"))
+        let compactEnd = try XCTUnwrap(source.range(
+            of: "    private var articleTextBelowMetadata: some View {",
+            range: compactStart.upperBound..<source.endIndex
+        ))
+        let compact = String(source[compactStart.lowerBound..<compactEnd.lowerBound])
+        let feed = try XCTUnwrap(compact.range(of: "metadata"))
+        let actions = try XCTUnwrap(compact.range(of: "quickActions"))
+        XCTAssertLessThan(feed.lowerBound, actions.lowerBound)
+        XCTAssertTrue(compact.contains("metadata\n                        .frame(maxWidth: .infinity"))
+        XCTAssertTrue(compact.contains("HStack(alignment: .top, spacing: 10)"))
+        XCTAssertFalse(compact.contains("semanticTextComposition"))
     }
 
     func testHoverActionHeightFitsAllThreeFullSizeControls() {
