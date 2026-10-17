@@ -10,6 +10,8 @@ enum ArticleHoverActionsLayout {
     static let controlSpacing: CGFloat = 2
     static let verticalPadding: CGFloat = 3
     static let minimumOverlayHeight = 3 * controlSize + 2 * controlSpacing + 2 * verticalPadding
+    // Avoid revealing actions on rows briefly crossed while scrolling.
+    static let hoverRevealDelayNanoseconds: UInt64 = 250_000_000
 
     enum Anchor: Equatable {
         case trailingThumbnail
@@ -40,15 +42,17 @@ struct ArticleItem: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @FocusState private var focusedControl: FocusedControl?
     @State private var hovered = false
+    @State private var hoverActionsReady = false
+    @State private var hoverRevealTask: Task<Void, Never>?
     @State private var temporalReferenceDate = Date()
 
     private enum FocusedControl: Hashable {
         case thumbnail, metadata, headline, preview, read, star, more
     }
 
-    // Mouse, keyboard and VoiceOver all reveal the same controls.
+    // Pointer dwell is delayed; keyboard focus and VoiceOver stay immediate.
     private var actionsVisible: Bool {
-        hovered || focusedControl != nil || voiceOverEnabled
+        hoverActionsReady || focusedControl != nil || voiceOverEnabled
     }
 
     @ViewBuilder
@@ -93,7 +97,10 @@ struct ArticleItem: View {
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+        .onDisappear {
+            updateHover(false)
+            store.retryUnavailableArticleThumbnail(article)
+        }
     }
 
     private var visualCompact: some View {
@@ -156,7 +163,10 @@ struct ArticleItem: View {
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+        .onDisappear {
+            updateHover(false)
+            store.retryUnavailableArticleThumbnail(article)
+        }
     }
 
     private var compact: some View {
@@ -170,6 +180,7 @@ struct ArticleItem: View {
         .contentShape(Rectangle())
         .background(interactionBackground)
         .onHover(perform: updateHover)
+        .onDisappear { updateHover(false) }
         .contextMenu { actionMenu }
     }
 
@@ -405,7 +416,26 @@ struct ArticleItem: View {
     }
 
     private func updateHover(_ hovering: Bool) {
+        // The row highlight and keyboard context follow the pointer
+        // immediately, but hovering briefly while scrolling does not reveal
+        // the actions.
         hovered = hovering
+        hoverRevealTask?.cancel()
+        hoverRevealTask = nil
+        if hovering {
+            hoverActionsReady = false
+            hoverRevealTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: ArticleHoverActionsLayout.hoverRevealDelayNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, hovered else { return }
+                hoverActionsReady = true
+            }
+        } else {
+            hoverActionsReady = false
+        }
         onHoverChanged(hovering)
     }
 
