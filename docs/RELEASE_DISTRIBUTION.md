@@ -28,6 +28,16 @@ Platform-specific store requirements remain explicit. "Unified" means a common
 interface and ownership model, not one generic script that hides important
 differences between Gradle, Xcode, Play, F-Droid and App Store Connect.
 
+## R1 implementation — production-first defaults (17 October 2026)
+
+The existing platform build scripts now default to production **release build configurations**, not debug configurations. Debug/development identities require explicit arguments. This does **not** mean that a normal build publishes to a store, nor that every release-configured artifact is store-signed.
+
+- Android: `android/Build/build-app.sh` defaults to `productionRelease` (APK). Use `developmentDebug` explicitly for debug and `productionBundle <versionCode> <versionName>` for a signed Play AAB.
+- iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-testflight.sh` default to the production identity; `developmentRelease` remains explicit.
+- macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged: this is not yet a Mac App Store archive/export.
+
+**R1 is partial:** common root CLI, consistent explicit version requirements, output normalization, signed distribution validation, and CI orchestration are still to be implemented. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
+
 ## 2. Target command model
 
 Prefer a small repository-level release entry point, for example:
