@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+// Keep actions attached to the row metadata's trailing edge. Visual layouts
+// stack beneath the read indicator; Compact keeps a horizontal action strip.
+enum ArticleHoverActionsLayout {
+    enum Orientation: Equatable { case vertical, horizontal }
+
+    static func orientation(for mode: ArticlePresentationMode) -> Orientation {
+        mode == .compact ? .horizontal : .vertical
+    }
+}
+
 struct ArticleItem: View {
     let article: ArticleSummary
     let mode: ArticlePresentationMode
@@ -45,16 +55,7 @@ struct ArticleItem: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 10) {
-                    Button { onSelect(); store.open(article) } label: {
-                        semanticTextComposition
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    quickActions
-                        .opacity(hovered ? 1 : 0)
-                        .allowsHitTesting(hovered)
-                }
+                semanticTextComposition
                 audioActions
             }
             .padding(12)
@@ -74,48 +75,47 @@ struct ArticleItem: View {
         VStack(alignment: .leading, spacing: 8) {
             metadata
 
-            HStack(alignment: .top, spacing: 12) {
-                Button { onSelect(); store.open(article) } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        headline(lineLimit: 3)
-                        publicationRow
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if hasAvailableThumbnail {
+            // Anchor directly below the metadata/read-indicator row. The
+            // vertical controls cover the trailing thumbnail instead of
+            // floating at the end of the (variable-height) preview.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 12) {
                     Button { onSelect(); store.open(article) } label: {
-                        ThumbnailSlot(
-                            article: article,
-                            store: store,
-                            width: 112,
-                            height: 84,
-                            cornerRadius: 9
-                        )
+                        VStack(alignment: .leading, spacing: 5) {
+                            headline(lineLimit: 3)
+                            publicationRow
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if article.preview.isEmpty {
-                    visualCompactHoverActions
-                }
-            }
 
-            // The preview retains its full width and the overlay never
-            // changes the row height or compresses text.
-            if !article.preview.isEmpty {
-                Text(article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(store.articlePreviewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .bottomTrailing) {
-                        visualCompactHoverActions
+                    if hasAvailableThumbnail {
+                        Button { onSelect(); store.open(article) } label: {
+                            ThumbnailSlot(
+                                article: article,
+                                store: store,
+                                width: 112,
+                                height: 84,
+                                cornerRadius: 9
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
+                }
+
+                if !article.preview.isEmpty {
+                    Text(article.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(store.articlePreviewLines.rawValue)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topTrailing) {
+                hoverActions
             }
 
             audioActions
@@ -134,17 +134,7 @@ struct ArticleItem: View {
 
     private var compact: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
-                Button { onSelect(); store.open(article) } label: {
-                    semanticTextComposition
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                quickActions
-                    .opacity(hovered ? 1 : 0)
-                    .allowsHitTesting(hovered)
-            }
+            semanticTextComposition
             audioActions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,15 +148,36 @@ struct ArticleItem: View {
 
     private var semanticTextComposition: some View {
         VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-            metadata
-            headline(lineLimit: mode == .compact ? 2 : 3)
-            publicationRow
-            if !article.preview.isEmpty {
-                Text(article.preview)
-                    .font(mode == .compact ? .caption : .subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(store.articlePreviewLines.rawValue)
-                    .multilineTextAlignment(.leading)
+            Button { onSelect(); store.open(article) } label: {
+                metadata
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // A separate full-width article button keeps the metadata
+            // clickable while the overlay remains outside the button label.
+            Button { onSelect(); store.open(article) } label: {
+                VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
+                    headline(lineLimit: mode == .compact ? 2 : 3)
+                    publicationRow
+                    if !article.preview.isEmpty {
+                        Text(article.preview)
+                            .font(mode == .compact ? .caption : .subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(store.articlePreviewLines.rawValue)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            // Both orientations begin immediately below the read indicator,
+            // overlap the text rather than consume any of its width, and do
+            // not affect the article row's intrinsic height.
+            .overlay(alignment: .topTrailing) {
+                hoverActions
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,62 +265,48 @@ struct ArticleItem: View {
         }
     }
 
-    private var quickActions: some View {
-        VStack(spacing: 8) {
-            if !store.isSearchActive {
-                iconButton(
-                    article.isRead ? "circle.fill" : "checkmark.circle",
-                    label: readActionLabel
-                ) {
-                    store.setRead(article, !article.isRead)
-                }
-            }
+    // Reuse the exact same read/star/more controls across all three modes.
+    @ViewBuilder
+    private var hoverActionControls: some View {
+        if !store.isSearchActive {
             iconButton(
-                article.isStarred ? "star.fill" : "star",
-                label: starActionLabel
+                article.isRead ? "circle.fill" : "checkmark.circle",
+                label: readActionLabel
             ) {
-                store.setStarred(article, !article.isStarred)
+                store.setRead(article, !article.isRead)
             }
-            Menu { actionMenu } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 22)
-            .help("More")
-            .accessibilityLabel("More")
         }
+        iconButton(
+            article.isStarred ? "star.fill" : "star",
+            label: starActionLabel
+        ) {
+            store.setStarred(article, !article.isStarred)
+        }
+        Menu { actionMenu } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 22, height: 22)
+        .help("More")
+        .accessibilityLabel("More")
     }
 
-    // A translucent surface hides the text behind the icons while hovered;
-    // the preview never reserves horizontal space for the action controls.
-    private var visualCompactHoverActions: some View {
-        HStack(spacing: 10) {
-            if !store.isSearchActive {
-                iconButton(
-                    article.isRead ? "circle.fill" : "checkmark.circle",
-                    label: readActionLabel
-                ) {
-                    store.setRead(article, !article.isRead)
+    private var hoverActions: some View {
+        Group {
+            if ArticleHoverActionsLayout.orientation(for: mode) == .vertical {
+                VStack(spacing: 4) {
+                    hoverActionControls
+                }
+            } else {
+                HStack(spacing: 8) {
+                    hoverActionControls
                 }
             }
-            iconButton(
-                article.isStarred ? "star.fill" : "star",
-                label: starActionLabel
-            ) {
-                store.setStarred(article, !article.isStarred)
-            }
-            Menu { actionMenu } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 22)
-            .help("More")
-            .accessibilityLabel("More")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
         .overlay {
             RoundedRectangle(cornerRadius: 9)
@@ -358,7 +355,10 @@ struct ArticleItem: View {
         label: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) { Image(systemName: icon) }
+        Button(action: action) {
+            Image(systemName: icon)
+                .frame(width: 22, height: 22)
+        }
             .buttonStyle(.borderless)
             .help(label)
             .accessibilityLabel(label)
