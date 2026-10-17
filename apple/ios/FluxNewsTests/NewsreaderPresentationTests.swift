@@ -3387,6 +3387,41 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(short.below.isEmpty)
     }
 
+    func testVisualCompactPreviewUsesLastLineStartingAboveImageBottom() {
+        let font = UIFont.preferredFont(forTextStyle: .subheadline)
+        let step = font.lineHeight + font.leading
+        let preview = String(repeating: "A longer sentence fills the narrow image-side column. ", count: 10)
+        let first = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 165, fullWidth: 330,
+            heightBesideImage: step * 1.5,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        let second = IOSVisualCompactPreviewFlow.prepare(
+            text: preview,
+            narrowWidth: 165, fullWidth: 330,
+            heightBesideImage: step * 2,
+            maxLines: 5, font: font, displayScale: 3
+        )
+        // The last side line can start before the image ends. This avoids
+        // discarding the remaining partial line-height of usable side space.
+        XCTAssertEqual(first.beside, second.beside)
+        XCTAssertEqual(first.besideHeight, second.besideHeight)
+        XCTAssertFalse(first.below.isEmpty)
+    }
+
+    func testVisualCompactContinuationFollowsSidePreviewWithoutParagraphGap() {
+        let metrics = layoutMetrics(mode: .visualCompact, width: 414, hasImage: true)
+        guard let continuation = metrics.previewContinuationFrame,
+              let beside = metrics.previewFrame else { return }
+        XCTAssertLessThanOrEqual(beside.maxY, continuation.minY + 0.5)
+        XCTAssertLessThanOrEqual(
+            continuation.minY - beside.maxY,
+            IOSUIKitArticleGeometry.textSpacing + 0.5,
+            "No artificial image-sized gap between preview segments"
+        )
+    }
+
     func testVisualCompactFlowPreparedMetricsAvoidAnImageSizedPreviewGap() {
         let withImage = layoutMetrics(mode: .visualCompact, width: 414, hasImage: true)
         XCTAssertEqual(withImage.variant, .visualSideTitle)
