@@ -18,7 +18,7 @@ Defaults to production RELEASE builds (never publishes).
 --target play creates a signed production AAB; requires signing properties.
 --target appstore (iOS) archives and exports a production IPA for manual upload.
 --version-code is the Android versionCode or Apple CFBundleVersion.
-For macOS, version overrides are supported on the appstore target only.
+Normal builds use project versions when version parameters are omitted. Store targets require both.
 HELP
 }
 
@@ -76,9 +76,10 @@ case "$platform:$target" in
     exec bash "$ROOT/apple/macos/Build/export-appstore.sh"
     ;;
   macos:build)
-    [[ -z "$version_code" ]] || die "macOS build does not yet accept version overrides"
     if ((debug)); then export CONFIGURATION=Debug; else export CONFIGURATION=Release; fi
-    exec bash "$ROOT/apple/macos/Build/build-app.sh"
+    mac_args=()
+    if [[ -n "$version_code" ]]; then mac_args+=(--build-number "$version_code" --version-name "$version_name"); fi
+    exec bash "$ROOT/apple/macos/Build/build-app.sh" "${mac_args[@]}"
     ;;
   *) die "Unsupported target '$target' for $platform (F-Droid is pending)";;
 esac
