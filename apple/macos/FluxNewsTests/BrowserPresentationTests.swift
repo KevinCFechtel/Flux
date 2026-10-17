@@ -81,10 +81,10 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
-    func testHoverActionsAnchorOnHeadlineInVisualAndCompact() {
-        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .articleText)
+    func testVisualAndCompactRestoreAdjacentActions() {
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visual), .adjacentText)
         XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .visualCompact), .trailingThumbnail)
-        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .articleText)
+        XCTAssertEqual(ArticleHoverActionsLayout.anchor(for: .compact), .adjacentText)
     }
 
     func testHoverActionHeightFitsAllThreeFullSizeControls() {
@@ -92,7 +92,7 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleHoverActionsLayout.minimumOverlayHeight, 94)
     }
 
-    func testHoverActionsRequireFourHundredMillisecondPointerDwell() {
+    func testVisualCompactHoverActionsRequireFourHundredMillisecondPointerDwell() {
         XCTAssertEqual(ArticleHoverActionsLayout.hoverRevealDelayNanoseconds, 400_000_000)
     }
 
