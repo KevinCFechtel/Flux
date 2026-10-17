@@ -11,7 +11,7 @@ enum ArticleHoverActionsLayout {
     static let verticalPadding: CGFloat = 3
     static let minimumOverlayHeight = 3 * controlSize + 2 * controlSpacing + 2 * verticalPadding
     // Avoid revealing actions on rows briefly crossed while scrolling.
-    static let hoverRevealDelayNanoseconds: UInt64 = 250_000_000
+    static let hoverRevealDelayNanoseconds: UInt64 = 400_000_000
 
     enum Anchor: Equatable {
         case trailingThumbnail
