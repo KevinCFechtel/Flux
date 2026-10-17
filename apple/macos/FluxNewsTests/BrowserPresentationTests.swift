@@ -105,6 +105,27 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(exclusion.height, 94)
     }
 
+    func testVisualCompactWithoutImageDoesNotInsertGapBeforePreview() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/ArticleRowView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let noImageStart = try XCTUnwrap(source.range(of: "// No thumbnail: never reserve"))
+        let noImageEnd = try XCTUnwrap(source.range(
+            of: "            audioActions",
+            range: noImageStart.lowerBound..<source.endIndex
+        ))
+        let noImageLayout = String(source[noImageStart.lowerBound..<noImageEnd.lowerBound])
+        let preview = try XCTUnwrap(noImageLayout.range(of: "Text(article.preview)"))
+        let minimumHeight = try XCTUnwrap(noImageLayout.range(
+            of: ".frame(minHeight: ArticleHoverActionsLayout.minimumOverlayHeight"
+        ))
+        XCTAssertLessThan(preview.lowerBound, minimumHeight.lowerBound)
+        XCTAssertFalse(noImageLayout.contains("ThumbnailSlot("))
+        XCTAssertTrue(noImageLayout.contains(".overlay(alignment: .topTrailing) { hoverActions }"))
+    }
+
     func testVisualCompactTypographyUsesNativeSemanticTextStyles() {
         let expectedPreview = NSFont.preferredFont(forTextStyle: .subheadline)
         XCTAssertEqual(VisualCompactFlowTypography.previewFont.fontName, expectedPreview.fontName)
