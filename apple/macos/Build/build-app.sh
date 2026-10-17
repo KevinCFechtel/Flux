@@ -14,6 +14,26 @@ WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 APP_GROUP_IDENTIFIER="group.dev.kevincfechtel.fluxNews"
 DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-1}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
+BUILD_NUMBER=""
+VERSION_NAME=""
+
+usage() {
+  echo "Usage: bash apple/macos/Build/build-app.sh [--build-number N --version-name V]"
+  echo "Default: Release configuration. Set CONFIGURATION=Debug for debug."
+}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build-number) [[ $# -ge 2 ]] || { echo "Missing build number" >&2; exit 2; }; BUILD_NUMBER="$2"; shift 2 ;;
+    --version-name) [[ $# -ge 2 ]] || { echo "Missing version name" >&2; exit 2; }; VERSION_NAME="$2"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[[ -z "$BUILD_NUMBER" && -z "$VERSION_NAME" || -n "$BUILD_NUMBER" && -n "$VERSION_NAME" ]] || { echo "Build number and version name must be supplied together" >&2; exit 2; }
+if [[ -n "$BUILD_NUMBER" ]]; then
+  [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid build number" >&2; exit 2; }
+  [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || { echo "Invalid version name" >&2; exit 2; }
+fi
 
 for command_name in codesign ditto plutil /usr/libexec/PlistBuddy xcodebuild; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Required command missing: ${command_name}" >&2; exit 1; }
@@ -46,6 +66,9 @@ xcodebuild_args=(
   ARCHS="arm64 x86_64"
   ONLY_ACTIVE_ARCH=NO
 )
+if [[ -n "$BUILD_NUMBER" ]]; then
+  xcodebuild_args+=(CURRENT_PROJECT_VERSION="$BUILD_NUMBER" MARKETING_VERSION="$VERSION_NAME")
+fi
 
 if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
   xcodebuild_args+=(
