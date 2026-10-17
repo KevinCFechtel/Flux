@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import FluxNews
 
@@ -102,6 +103,16 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(exclusion.width, 124)
         XCTAssertEqual(exclusion.minY, 0)
         XCTAssertEqual(exclusion.height, 94)
+    }
+
+    func testVisualCompactTypographyUsesNativeSemanticTextStyles() {
+        let expectedPreview = NSFont.preferredFont(forTextStyle: .subheadline)
+        XCTAssertEqual(VisualCompactFlowTypography.previewFont.fontName, expectedPreview.fontName)
+        XCTAssertEqual(VisualCompactFlowTypography.previewFont.pointSize, expectedPreview.pointSize)
+
+        let expectedDate = NSFont.preferredFont(forTextStyle: .caption1)
+        XCTAssertEqual(VisualCompactFlowTypography.dateFont.fontName, expectedDate.fontName)
+        XCTAssertEqual(VisualCompactFlowTypography.dateFont.pointSize, expectedDate.pointSize)
     }
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
