@@ -91,7 +91,7 @@ A release uses a Developer ID signing identity and a `notarytool` Keychain profi
 ```bash
 xcrun notarytool store-credentials FluxNews-notary
 cp apple/macos/Build/.env.example apple/macos/Build/.env
-bash apple/macos/Build/release.sh
+bash apple/macos/Build/release-developer-id.sh
 ```
 
 `apple/macos/Build/.env` is ignored by Git. `release.sh` builds the Rust/UniFFI-backed app, signs it with hardened runtime, notarizes and staples it, then creates and validates `dist/release/FluxNews-<version>-macos-<architecture>.zip`.
