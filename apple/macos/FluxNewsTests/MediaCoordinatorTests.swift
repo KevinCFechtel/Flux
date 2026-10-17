@@ -342,6 +342,66 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.presentationState.status, .stopped)
     }
 
+    func testExplicitDownloadDeletionUnloadsPlayingMediaAndCheckpoints() throws {
+        let core = FakePlaybackCore(status: .inProgress, positionMs: 13_000)
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        var released = false
+        playback.onPlaybackUseChanged = { released = true }
+        try playback.play(enclosureID: 7)
+        engine.currentPositionMs = 22_000
+
+        playback.releaseForDownloadDeletion(enclosureID: 7)
+
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(playback.isUsing(enclosureID: 7))
+        XCTAssertNil(playback.presentationState.loadedEnclosure)
+        XCTAssertEqual(playback.presentationState.status, .stopped)
+        XCTAssertEqual(core.checkpoints.last?.1, 22_000)
+        XCTAssertTrue(released)
+    }
+
+    func testExplicitDeletionDoesNotInterruptDifferentLoadedMedia() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        try playback.play(enclosureID: 7)
+
+        playback.releaseForDownloadDeletion(enclosureID: 8)
+
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(engine.unloadCount, 0)
+        XCTAssertTrue(playback.isUsing(enclosureID: 7))
+        XCTAssertTrue(core.checkpoints.isEmpty)
+    }
+
+    func testExplicitDeletionAllowsDeferredFileRemovalOnNextReconcile() throws {
+        let root = temporaryMediaRoot()
+        let local = root.appendingPathComponent("downloads/enclosure-7.media")
+        try FileManager.default.createDirectory(
+            at: local.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data("media".utf8).write(to: local)
+        let playback = MediaPlaybackCoordinator(core: FakePlaybackCore(), engine: FakePlaybackEngine())
+        _ = try playback.prepare(enclosureID: 7)
+        let core = FakeTransferCore()
+        core.deletions = [transferWork(localFile: "downloads/enclosure-7.media")]
+        core.states[7] = .deleteRequested
+        let transfer = MediaTransferCoordinator(
+            core: core, mediaRoot: root,
+            isMediaInUse: { playback.isUsing(enclosureID: $0) }
+        )
+        transfer.reconcile()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertTrue(core.deleted.isEmpty)
+
+        playback.releaseForDownloadDeletion(enclosureID: 7)
+        transfer.reconcile()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertEqual(core.deleted, [7])
+    }
+
     func testPlaybackRateIsClampedToContractAndAppliedToEngine() throws {
         let core = FakePlaybackCore()
         let engine = FakePlaybackEngine()
