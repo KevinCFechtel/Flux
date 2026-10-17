@@ -1,11 +1,10 @@
 import AppKit
 import SwiftUI
 
-// All modes use the same vertical hover controls. Only the surface directly
-// below the metadata/read-indicator row changes with the presentation style.
+// Visual/Compact use the original adjacent hover buttons. Visual Compact
+// keeps its trailing-thumbnail overlay and pointer dwell behavior.
 enum ArticleHoverActionsLayout {
-    // Three full-size controls plus the gaps/padding; fixed at all times so
-    // hovering or moving keyboard focus never changes the row height.
+    // Only Visual Compact uses these overlay sizes and the dwell delay.
     static let controlSize: CGFloat = 28
     static let controlSpacing: CGFloat = 2
     static let verticalPadding: CGFloat = 3
@@ -14,13 +13,13 @@ enum ArticleHoverActionsLayout {
     static let hoverRevealDelayNanoseconds: UInt64 = 400_000_000
 
     enum Anchor: Equatable {
+        case adjacentText
         case trailingThumbnail
-        case articleText
     }
 
     static func anchor(for mode: ArticlePresentationMode) -> Anchor {
         switch mode {
-        case .visual, .compact: .articleText
+        case .visual, .compact: .adjacentText
         case .visualCompact: .trailingThumbnail
         }
     }
@@ -80,11 +79,19 @@ struct ArticleItem: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .focused($focusedControl, equals: .thumbnail)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                semanticTextComposition
+                HStack(alignment: .top, spacing: 10) {
+                    Button { onSelect(); store.open(article) } label: {
+                        semanticTextComposition
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
+                }
                 audioActions
             }
             .padding(12)
@@ -97,10 +104,7 @@ struct ArticleItem: View {
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onDisappear {
-            updateHover(false)
-            store.retryUnavailableArticleThumbnail(article)
-        }
+        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
 
     private var visualCompact: some View {
@@ -171,7 +175,17 @@ struct ArticleItem: View {
 
     private var compact: some View {
         VStack(alignment: .leading, spacing: 7) {
-            semanticTextComposition
+            HStack(alignment: .top, spacing: 10) {
+                Button { onSelect(); store.open(article) } label: {
+                    semanticTextComposition
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+            }
             audioActions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -180,60 +194,20 @@ struct ArticleItem: View {
         .contentShape(Rectangle())
         .background(interactionBackground)
         .onHover(perform: updateHover)
-        .onDisappear { updateHover(false) }
         .contextMenu { actionMenu }
     }
 
     private var semanticTextComposition: some View {
         VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-            Button { onSelect(); store.open(article) } label: {
-                metadata
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($focusedControl, equals: .metadata)
-
-            // The whole article-text region is measured in Compact, not just
-            // the headline. A long preview naturally supplies enough height;
-            // a short one gets only the missing space below the read indicator.
-            VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-                Button { onSelect(); store.open(article) } label: {
-                    VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-                        headline(lineLimit: mode == .compact ? 2 : 3)
-                        publicationRow
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focused($focusedControl, equals: .headline)
-
-                if !article.preview.isEmpty {
-                    Button { onSelect(); store.open(article) } label: {
-                        Text(article.preview)
-                            .font(mode == .compact ? .caption : .subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(store.articlePreviewLines.rawValue)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focused($focusedControl, equals: .preview)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // Visual and Compact both attach the actions to the right of
-            // the headline, immediately below the metadata/read indicator.
-            // Measure the complete text block to avoid overlap with the next
-            // article while preserving the text's full available width.
-            .frame(
-                minHeight: ArticleHoverActionsLayout.minimumOverlayHeight,
-                alignment: .topLeading
-            )
-            .overlay(alignment: .topTrailing) {
-                hoverActions
+            metadata
+            headline(lineLimit: mode == .compact ? 2 : 3)
+            publicationRow
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(mode == .compact ? .caption : .subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -321,7 +295,47 @@ struct ArticleItem: View {
         }
     }
 
-    // Reuse the exact same read/star/more controls across all three modes.
+    // Original adjacent vertical actions for Visual and Compact; these
+    // reserve their width and appear immediately on row hover.
+    private var quickActions: some View {
+        VStack(spacing: 8) {
+            if !store.isSearchActive {
+                legacyQuickActionButton(
+                    article.isRead ? "circle.fill" : "checkmark.circle",
+                    label: readActionLabel
+                ) {
+                    store.setRead(article, !article.isRead)
+                }
+            }
+            legacyQuickActionButton(
+                article.isStarred ? "star.fill" : "star",
+                label: starActionLabel
+            ) {
+                store.setStarred(article, !article.isStarred)
+            }
+            Menu { actionMenu } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .help("More")
+            .accessibilityLabel("More")
+        }
+    }
+
+    private func legacyQuickActionButton(
+        _ icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { Image(systemName: icon) }
+            .buttonStyle(.borderless)
+            .help(label)
+            .accessibilityLabel(label)
+    }
+
+    // Visual Compact retains the new overlay controls and 400 ms dwell.
     @ViewBuilder
     private var hoverActionControls: some View {
         if !store.isSearchActive {
@@ -416,25 +430,26 @@ struct ArticleItem: View {
     }
 
     private func updateHover(_ hovering: Bool) {
-        // The row highlight and keyboard context follow the pointer
-        // immediately, but hovering briefly while scrolling does not reveal
-        // the actions.
+        // Visual and Compact use the original immediate hover behavior.
+        // Only Visual Compact delays revealing its overlay controls.
         hovered = hovering
-        hoverRevealTask?.cancel()
-        hoverRevealTask = nil
-        if hovering {
-            hoverActionsReady = false
-            hoverRevealTask = Task { @MainActor in
-                do {
-                    try await Task.sleep(nanoseconds: ArticleHoverActionsLayout.hoverRevealDelayNanoseconds)
-                } catch {
-                    return
+        if mode == .visualCompact {
+            hoverRevealTask?.cancel()
+            hoverRevealTask = nil
+            if hovering {
+                hoverActionsReady = false
+                hoverRevealTask = Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: ArticleHoverActionsLayout.hoverRevealDelayNanoseconds)
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled, hovered else { return }
+                    hoverActionsReady = true
                 }
-                guard !Task.isCancelled, hovered else { return }
-                hoverActionsReady = true
+            } else {
+                hoverActionsReady = false
             }
-        } else {
-            hoverActionsReady = false
         }
         onHoverChanged(hovering)
     }
