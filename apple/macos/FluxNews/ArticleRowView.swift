@@ -14,14 +14,12 @@ enum ArticleHoverActionsLayout {
 
     enum Anchor: Equatable {
         case adjacentBelowMetadata
-        case adjacentText
         case trailingThumbnail
     }
 
     static func anchor(for mode: ArticlePresentationMode) -> Anchor {
         switch mode {
-        case .visual: .adjacentBelowMetadata
-        case .compact: .adjacentText
+        case .visual, .compact: .adjacentBelowMetadata
         case .visualCompact: .trailingThumbnail
         }
     }
@@ -215,16 +213,27 @@ struct ArticleItem: View {
 
     private var compact: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                // Like Visual, the feed title and status indicators occupy
+                // the complete row; hover controls start underneath them.
                 Button { onSelect(); store.open(article) } label: {
-                    semanticTextComposition
+                    metadata
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                quickActions
-                    .opacity(hovered ? 1 : 0)
-                    .allowsHitTesting(hovered)
+                HStack(alignment: .top, spacing: 10) {
+                    Button { onSelect(); store.open(article) } label: {
+                        articleTextBelowMetadata
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
+                }
             }
             audioActions
         }
@@ -235,14 +244,6 @@ struct ArticleItem: View {
         .background(interactionBackground)
         .onHover(perform: updateHover)
         .contextMenu { actionMenu }
-    }
-
-    private var semanticTextComposition: some View {
-        VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
-            metadata
-            articleTextBelowMetadata
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var articleTextBelowMetadata: some View {
