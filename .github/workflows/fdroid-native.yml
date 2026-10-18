@@ -11,6 +11,10 @@ on:
       - "fdroid/**"
   workflow_dispatch:
 
+concurrency:
+  group: fdroid-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -130,7 +134,7 @@ jobs:
         run: |
           python3 -m venv "${RUNNER_TEMP}/fdroid-venv"
           "${RUNNER_TEMP}/fdroid-venv/bin/pip" install --upgrade pip
-          "${RUNNER_TEMP}/fdroid-venv/bin/pip" install fdroidserver
+          "${RUNNER_TEMP}/fdroid-venv/bin/pip" install "fdroidserver==2.4.5"
           echo "${RUNNER_TEMP}/fdroid-venv/bin" >> "${GITHUB_PATH}"
       - name: Prepare isolated F-Droid metadata workspace
         env:
@@ -148,9 +152,10 @@ jobs:
           p.write_text(text)
           PY
           echo "F-Droid source commit: ${PR_HEAD_SHA:-$GITHUB_SHA}"
+          # fdroidserver 2.4.5 reads SOURCE_DATE_EPOCH before it checks out sources.
           git clone --no-checkout https://github.com/KevinCFechtel/Flux.git fdroid-ci/build/de.circle_dev.flux_news
           git -C fdroid-ci/build/de.circle_dev.flux_news checkout --detach "${PR_HEAD_SHA:-$GITHUB_SHA}"
-          git -C fdroid-ci/build/de.circle_dev.flux_news log -1 --format=%ct | grep -Eq '^[0-9]+
+          git -C fdroid-ci/build/de.circle_dev.flux_news log -1 --format=%ct | grep -Eq '^[0-9]+$'
           printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
           cat >> fdroid-ci/config.yml <<'YAML'
           categories:
@@ -184,67 +189,34 @@ jobs:
             echo "::error::fdroidserver reported a build failure despite its exit status"
             exit 1
           fi
-          find . -type f -name '*.apk' -print
-          if ! find unsigned -maxdepth 1 -type f -name '*.apk' -size +0c | grep -q .; then
-            echo "::error::fdroidserver did not produce a nonempty APK"
+          # fdroidserver --test outputs are in tmp/, not unsigned/.
+          apk="tmp/de.circle_dev.flux_news_2026101801.apk"
+          if [[ ! -s "${apk}" ]]; then
+            echo "::error::Missing or empty F-Droid test APK: ${apk}"
+            find tmp -maxdepth 1 -type f -name '*.apk' -print || true
             exit 1
           fi
+          package_line="$("${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep '^package:')"
+          if [[ "${package_line}" != *"name='de.circle_dev.flux_news'"* || "${package_line}" != *"versionCode='2026101801'"* || "${package_line}" != *"versionName='3.0.0'"* ]]; then
+            echo "::error::Unexpected F-Droid APK identity: ${package_line}"
+            exit 1
+          fi
+          for abi in arm64-v8a x86_64 armeabi-v7a; do
+            if ! unzip -Z1 "${apk}" | grep -Fx "lib/${abi}/libflux_uniffi.so" >/dev/null; then
+              echo "::error::Missing libflux_uniffi.so for ${abi}"
+              exit 1
+            fi
+          done
+          sha256sum "${apk}"
+          echo "Validated F-Droid test APK: ${package_line}"
       - name: Upload F-Droid diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: fdroid-native-recipe-diagnostics
           path: |
-            fdroid-ci/fdroid-build.log\n            fdroid-ci/logs/
-            fdroid-ci/unsigned/
-          if-no-files-found: ignore
-          retention-days: 7
-
-          printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
-          cat >> fdroid-ci/config.yml <<'YAML'
-          categories:
-            - Internet
-            - News
-            - Reading
-          YAML
-      - name: Validate F-Droid YAML and native build selection
-        working-directory: fdroid-ci
-        run: |
-          python3 - <<'PY'
-          import yaml
-          from pathlib import Path
-          data = yaml.safe_load(Path("metadata/de.circle_dev.flux_news.yml").read_text())
-          builds = [b for b in data["Builds"] if b["versionCode"] == 2026101801]
-          assert len(builds) == 1, "Expected exactly one native build recipe"
-          assert builds[0]["versionName"] == "3.0.0"
-          assert builds[0]["commit"] != "FLUX_NATIVE_COMMIT"
-          assert len(data["AllowedAPKSigningKeys"]) == 2
-          print("F-Droid YAML and native build selection verified")
-          PY
-      - name: Run full F-Droid lint
-        working-directory: fdroid-ci
-        run: fdroid lint de.circle_dev.flux_news
-      - name: Build using fdroidserver recipe
-        working-directory: fdroid-ci
-        run: |
-          set -euo pipefail
-          fdroid build --verbose --test --force --no-tarball de.circle_dev.flux_news:2026101801 2>&1 | tee fdroid-build.log
-          if grep -Eq '([1-9][0-9]* build[s]? failed|Could not build app|Traceback \(most recent call last\))' fdroid-build.log; then
-            echo "::error::fdroidserver reported a build failure despite its exit status"
-            exit 1
-          fi
-          find . -type f -name '*.apk' -print
-          if ! find unsigned -maxdepth 1 -type f -name '*.apk' -size +0c | grep -q .; then
-            echo "::error::fdroidserver did not produce a nonempty APK"
-            exit 1
-          fi
-      - name: Upload F-Droid diagnostic output
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fdroid-native-recipe-diagnostics
-          path: |
-            fdroid-ci/fdroid-build.log\n            fdroid-ci/logs/
-            fdroid-ci/unsigned/
+            fdroid-ci/fdroid-build.log
+            fdroid-ci/logs/
+            fdroid-ci/tmp/*.apk
           if-no-files-found: ignore
           retention-days: 7
