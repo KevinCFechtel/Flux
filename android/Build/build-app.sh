@@ -14,10 +14,10 @@ Usage:
   android/Build/build-app.sh --help
 
 Variants:
-  developmentDebug    Debug APK (default if no variant is supplied).
+  developmentDebug    Debug APK (explicit opt-in).
   developmentRelease  Native development release APK.
   developmentBundle   Signed development release AAB for Play internal testing.
-  productionRelease   Production release APK (signing must be configured separately).
+  productionRelease   Production release APK (default; signing must be configured separately).
   productionBundle    Signed production AAB for Google Play (upload key).
 
 Parameters:
@@ -66,7 +66,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 [[ $# -le 3 ]] || fail_usage "Too many arguments."
-VARIANT="${1:-developmentDebug}"
+VARIANT="${1:-productionRelease}"
 VERSION_CODE="${2:-}"
 VERSION_NAME="${3:-}"
 

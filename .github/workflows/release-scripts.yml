@@ -1,0 +1,35 @@
+name: Release script contracts
+
+on:
+  pull_request:
+    paths:
+      - "Build/**"
+      - "android/Build/**"
+      - "apple/ios/Build/**"
+      - "apple/macos/Build/**"
+      - ".github/workflows/release-scripts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Build/**"
+      - "android/Build/**"
+      - "apple/ios/Build/**"
+      - "apple/macos/Build/**"
+      - ".github/workflows/release-scripts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  shell-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check shell syntax
+        run: |
+          bash -n Build/release.sh Build/test-release-cli.sh
+          bash -n android/Build/build-app.sh
+          bash -n apple/ios/Build/build-app.sh apple/ios/Build/archive.sh apple/ios/Build/export-appstore.sh
+          bash -n apple/macos/Build/build-app.sh apple/macos/Build/archive.sh apple/macos/Build/export-appstore.sh apple/macos/Build/release-developer-id.sh apple/macos/Build/verify-sandbox.sh
+      - name: Check release CLI contract
+        run: bash Build/test-release-cli.sh

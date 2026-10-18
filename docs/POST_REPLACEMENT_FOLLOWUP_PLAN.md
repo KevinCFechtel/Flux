@@ -196,7 +196,7 @@ items not yet proven by the signed-app checklist remain release-open.
 
 **Current source baseline:** `apple/macos/FluxNews/FluxNews.entitlements`
 contains the host App Sandbox, outbound network and App Group capabilities.
-The existing `apple/macos/Build/release.sh` Developer ID path is separate
+The existing `apple/macos/Build/release-developer-id.sh` Developer ID path is separate
 from future Mac App Store signing and does not verify store eligibility.
 
 **Implementation:**

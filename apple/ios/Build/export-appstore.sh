@@ -3,25 +3,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-VARIANT="developmentRelease"
+VARIANT="productionRelease"
 ARCHIVE_PATH="${ARCHIVE_PATH:-}"
 EXPORT_PATH="${EXPORT_PATH:-}"
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-8X9VDP43J9}"
 
 usage() {
   cat <<'EOF'
-Usage: export-testflight.sh [developmentRelease|productionRelease]
-       export-testflight.sh [developmentRelease|productionRelease] [--archive ARCHIVE_PATH] [--export-path EXPORT_PATH]
+Usage: export-appstore.sh [developmentRelease|productionRelease]
+       export-appstore.sh [developmentRelease|productionRelease] [--archive ARCHIVE_PATH] [--export-path EXPORT_PATH]
 
 Variants:
-  developmentRelease  NativeDev identity (default; backward compatible).
-  productionRelease   Existing Flutter production identity, for TestFlight migration testing.
+  developmentRelease  NativeDev identity (explicit opt-in).
+  productionRelease   Production identity (default), for App Store Connect export.
 
 Examples:
   ./apple/ios/Build/archive.sh productionRelease 3001 3.0.0
-  ./apple/ios/Build/export-testflight.sh productionRelease
-  ./apple/ios/Build/export-testflight.sh developmentRelease
-  ./apple/ios/Build/export-testflight.sh
+  ./apple/ios/Build/export-appstore.sh productionRelease
+  ./apple/ios/Build/export-appstore.sh developmentRelease
+  ./apple/ios/Build/export-appstore.sh
 
 The script exports a local App Store Connect IPA for manual Transporter upload.
 It does not upload, invite testers, or publish anything.

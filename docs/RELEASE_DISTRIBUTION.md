@@ -28,6 +28,32 @@ Platform-specific store requirements remain explicit. "Unified" means a common
 interface and ownership model, not one generic script that hides important
 differences between Gradle, Xcode, Play, F-Droid and App Store Connect.
 
+## R1 implementation — production-first defaults (17 October 2026)
+
+The existing platform build scripts now default to production **release build configurations**, not debug configurations. Debug/development identities require explicit arguments. This does **not** mean that a normal build publishes to a store, nor that every release-configured artifact is store-signed.
+
+- Android: `android/Build/build-app.sh` defaults to `productionRelease` (APK). Use `developmentDebug` explicitly for debug and `productionBundle <versionCode> <versionName>` for a signed Play AAB.
+- iOS: `apple/ios/Build/build-app.sh` defaults to the production-identity `Upgrade Test` configuration; `developmentDebug` selects Debug. `apple/ios/Build/archive.sh` and `export-appstore.sh` default to the production identity; `developmentRelease` remains explicit.
+- macOS: `apple/macos/Build/build-app.sh` defaults to the Release configuration; `CONFIGURATION=Debug` opts into debug. `--build-number N --version-name V` overrides the version for normal builds. Its existing `DEVELOPMENT_SIGNING` behavior is unchanged; store-signed distribution uses the separate archive/export scripts.
+
+The shared entry point is now `bash Build/release.sh`. Examples:
+
+```bash
+bash Build/release.sh android
+bash Build/release.sh android --debug
+bash Build/release.sh android --target play --version-code 2026101701 --version-name 3.0.0
+bash Build/release.sh ios
+bash Build/release.sh ios --target appstore --version-code 3002 --version-name 3.0.0
+bash Build/release.sh macos
+bash Build/release.sh macos --debug
+bash Build/release.sh macos --version-code 3002 --version-name 3.0.0
+bash Build/release.sh macos --target appstore --version-code 3002 --version-name 3.0.0
+```
+
+The entry point delegates to the existing platform scripts. Apple App Store export creates an IPA for **manual** Transporter upload only. Play produces an AAB without uploading. Version inputs are mandatory for store targets. F-Droid targets intentionally fail until implemented. macOS App Store archive/export is now implemented provisionally and requires real signing/export validation on a Mac.
+
+**R1 is partial:** full output normalization (Play AAB and iOS IPA now use stable `dist/android/play/` and `dist/ios/appstore/` paths), comprehensive signed distribution validation, macOS App Store signing/export validation on a real Mac, and CI orchestration are still to be implemented. `bash Build/test-release-cli.sh` checks argument validation without invoking Gradle or Xcode. Existing scripts' legacy invocation forms are preserved for compatibility. F-Droid-specific release validation remains B2.
+
 ## 2. Target command model
 
 Prefer a small repository-level release entry point, for example:
@@ -183,7 +209,7 @@ Current building blocks already exist:
 
 - `apple/ios/Build/build-app.sh`;
 - `apple/ios/Build/archive.sh`;
-- `apple/ios/Build/export-testflight.sh`.
+- `apple/ios/Build/export-appstore.sh`.
 
 These should be normalized into the common release model.
 
@@ -200,7 +226,7 @@ The final iOS App Store release path should:
 - clearly report that the IPA is ready for Transporter/manual App Store Connect
   upload.
 
-Rename `export-testflight.sh` to a more accurate App Store-oriented name if the
+Rename `export-appstore.sh` to a more accurate App Store-oriented name if the
 implementation confirms that it is a general `app-store-connect` export rather
 than TestFlight-specific behavior. Preserve compatibility temporarily if other
 automation already calls the old name.
@@ -380,3 +406,34 @@ This follow-up does not:
 - move production secrets into the repository;
 - make CI-produced artifacts the authoritative release source when the canonical
   local script produced and validated the final signed store artifact.
+
+## R2 macOS App Store export implementation (17 October 2026)
+
+`bash Build/release.sh macos --target appstore --version-code N --version-name V` invokes `apple/macos/Build/archive.sh` and `export-appstore.sh`. The archive uses the Release configuration, explicit host/widget version settings, automatic provisioning and Apple Distribution signing; `verify-sandbox.sh ... distribution` checks the signed host/widget bundle IDs, version parity, Sandbox and App Group entitlements, signature chain and Apple Distribution team. Export uses Xcode's App Store Connect export method, expects a non-empty `.pkg` in `dist/macos/appstore/`, and never uploads automatically.
+
+**Not yet accepted:** This flow has not been exercised with the owner's Apple Distribution certificates/profiles or Transporter. Xcode/macOS export compatibility, provisioning, App Group and embedded Rust library signing must be validated on the owner's Mac before calling R2 complete. Store signing credentials must remain outside Git.
+
+## R1 version argument parity
+
+The central `Build/release.sh` accepts `--version-code` and `--version-name` for normal and store builds on Android, iOS and macOS. For Apple, `--version-code` maps to `CFBundleVersion` / `CURRENT_PROJECT_VERSION` and `--version-name` to `CFBundleShortVersionString` / `MARKETING_VERSION`. Normal builds may omit both and use the project values; store release targets require both. The macOS direct build script accepts `--build-number N --version-name V` and passes both to Xcode, affecting app and widget targets. The iOS direct build and archive scripts already support equivalent version inputs; export scripts inherit the archived version. This is a CLI contract change, not a claim of device/store acceptance.
+
+## macOS local installation default
+
+`apple/macos/Build/install-local.sh` now defaults to strict `developer-id` verification, requiring a Developer ID Application signed host, widget and embedded Rust library with matching team, Sandbox and App Group entitlements. By default, the newest Developer ID ZIP in `dist/macos/developer-id/` is extracted and installed. Set `SOURCE_APP=/path/to/FluxNews.app` to select an unpackaged app explicitly. For deliberate development-only installs, `INSTALL_MODE=development` opts into the prior Apple Development/provisioning verification. Note that the ordinary `macos` build and App Store archive do **not** produce a Developer ID signed app: use `apple/macos/Build/release-developer-id.sh` (Developer ID signing/notarization pipeline) before the default local installation. The Developer ID release pipeline still has its own environment/signing prerequisites.
+
+## R cleanup: distribution entry points
+
+The former iOS `export-testflight.sh` has been replaced by `apple/ios/Build/export-appstore.sh`; the former macOS `release.sh` is now `apple/macos/Build/release-developer-id.sh`. Both former files have been deleted. The central `Build/release.sh` delegates to these named distribution scripts; for a notarized Developer ID ZIP run `bash Build/release.sh macos --target developer-id [--version-code N --version-name V]`. The Developer ID script accepts explicit version overrides, and its output is `dist/macos/developer-id/`; the newest notarized ZIP in `dist/macos/developer-id/` is the default source for `install-local.sh`. App Store and Developer ID are distinct signing/distribution channels. External automation using the old paths must be updated.
+
+The cleanup is not a claim of release acceptance: validate CI and run the Apple signing/notarization/export workflows on the owner's Mac before merging.
+
+## macOS distribution artifact layout
+
+The macOS unpackaged app and both distribution artifacts live under `dist/macos/`:
+
+- `dist/macos/FluxNews.app`: unpackaged app from macOS build; the Developer ID release signs and notarizes this app.
+
+- `dist/macos/appstore/*.pkg`: Mac App Store Connect package for Transporter (unchanged).
+- `dist/macos/developer-id/FluxNews-<version>-macos-<architecture>.zip`: notarized Developer ID ZIP (moved from `dist/release/`).
+
+By default `install-local.sh` extracts the newest Developer ID ZIP from `dist/macos/developer-id/` and installs its verified app; `SOURCE_APP` can still select an unpackaged app explicitly; existing ZIP files in the legacy `dist/release/` directory and the former `dist/FluxNews.app` are not automatically moved or removed. Re-run the Developer ID release to create an artifact in the new directory.

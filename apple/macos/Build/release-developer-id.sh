@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-APP_DIR="${REPOSITORY_DIR}/dist/FluxNews.app"
-RELEASE_DIR="${REPOSITORY_DIR}/dist/release"
+APP_DIR="${REPOSITORY_DIR}/dist/macos/FluxNews.app"
+RELEASE_DIR="${REPOSITORY_DIR}/dist/macos/developer-id"
 INFO_PLIST="${REPOSITORY_DIR}/apple/macos/FluxNews/Info.plist"
 APP_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNews/FluxNews.entitlements"
 WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
@@ -22,7 +22,27 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 SIGNING_TIMESTAMP_URL="${SIGNING_TIMESTAMP_URL:-}"
 NOTARY_TIMEOUT="${NOTARY_TIMEOUT:-30m}"
 RELEASE_ARCH="$(uname -m)"
-RELEASE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${INFO_PLIST}")"
+BUILD_NUMBER=""
+VERSION_NAME=""
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: release-developer-id.sh [--build-number N --version-name V]"
+  exit 0
+fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build-number) [[ $# -ge 2 ]] || { echo "Missing build number" >&2; exit 2; }; BUILD_NUMBER="$2"; shift 2;;
+    --version-name) [[ $# -ge 2 ]] || { echo "Missing version name" >&2; exit 2; }; VERSION_NAME="$2"; shift 2;;
+    *) echo "Unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[[ -z "$BUILD_NUMBER" && -z "$VERSION_NAME" || -n "$BUILD_NUMBER" && -n "$VERSION_NAME" ]] || { echo "Build number and version name must be supplied together" >&2; exit 2; }
+if [[ -n "$BUILD_NUMBER" ]]; then
+  [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid build number" >&2; exit 2; }
+  [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || { echo "Invalid version name" >&2; exit 2; }
+fi
+RELEASE_VERSION="${VERSION_NAME:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${INFO_PLIST}")}"
+build_args=()
+if [[ -n "$BUILD_NUMBER" ]]; then build_args+=(--build-number "$BUILD_NUMBER" --version-name "$VERSION_NAME"); fi
 
 [[ -n "${SIGNING_IDENTITY}" ]] || { echo "SIGNING_IDENTITY is required." >&2; exit 1; }
 [[ -n "${NOTARY_PROFILE}" ]] || { echo "NOTARY_PROFILE is required." >&2; exit 1; }
@@ -45,7 +65,7 @@ trap 'rm -rf -- "${CHECK_DIR}"' EXIT
 echo "1/8 Building the Release app with the Rust/UniFFI core"
 # The release signing identity is intentionally reserved for the timestamped
 # hardened-runtime signing step below. The shared build baseline stays ad-hoc.
-CONFIGURATION=Release DEVELOPMENT_SIGNING=0 SIGNING_IDENTITY=- "${SCRIPT_DIR}/build-app.sh"
+CONFIGURATION=Release DEVELOPMENT_SIGNING=0 SIGNING_IDENTITY=- bash "${SCRIPT_DIR}/build-app.sh" "${build_args[@]}"
 
 timestamp_args=(--timestamp)
 if [[ -z "${SIGNING_TIMESTAMP_URL}" ]]; then
@@ -95,6 +115,7 @@ verify_release_component "${APP_DIR}"
 codesign --verify --deep --strict --verbose=4 "${APP_DIR}"
 
 mkdir -p "${RELEASE_DIR}"
+"${SCRIPT_DIR}/verify-sandbox.sh" "${APP_DIR}" developer-id
 echo "3/8 Creating the notarization archive"
 rm -f -- "${SUBMISSION_ARCHIVE}"
 COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr "${APP_DIR}" "${SUBMISSION_ARCHIVE}"

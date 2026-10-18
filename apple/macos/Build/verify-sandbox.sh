@@ -4,11 +4,14 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: verify-sandbox.sh /path/to/FluxNews.app development|adhoc
+Usage: verify-sandbox.sh /path/to/FluxNews.app development|adhoc|archive|distribution|developer-id
 
 development: Apple Development signatures, same team and matching App Group
              provisioning for host and widget.
 adhoc:       verify signatures and Sandbox entitlements only; NOT a B1 acceptance.
+archive:      verify archive signatures, team and Sandbox entitlements before export.
+distribution: verify Apple Distribution team and Sandbox entitlements.
+developer-id: verify Developer ID Application team and Sandbox entitlements.
 USAGE
 }
 if [[ "$#" == 1 && "$1" == "--help" ]]; then usage; exit 0; fi
@@ -20,7 +23,7 @@ EXPECTED_TEAM_ID="8X9VDP43J9"
 HOST_ID="dev.kevincfechtel.fluxNews"
 WIDGET_ID="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 GROUP_ID="group.dev.kevincfechtel.fluxNews"
-case "$MODE" in development|adhoc) ;; *) echo "Invalid signing mode: $MODE" >&2; exit 2 ;; esac
+case "$MODE" in development|adhoc|archive|distribution|developer-id) ;; *) echo "Invalid signing mode: $MODE" >&2; exit 2 ;; esac
 for cmd in codesign plutil security /usr/libexec/PlistBuddy; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing tool: $cmd" >&2; exit 1; }
 done
@@ -69,6 +72,32 @@ equal "$(plist "$tmp/widget.plist" com.apple.security.app-sandbox)" true "Widget
 for file in "$tmp/host.plist" "$tmp/widget.plist"; do
   equal "$(plist "$file" com.apple.security.application-groups:0)" "$GROUP_ID" "App Group ($file)"
 done
+
+if [[ "$MODE" == developer-id ]]; then
+  for component in "$APP_DIR" "$WIDGET" "$LIBRARY"; do
+    details="$(codesign -dvvv "$component" 2>&1)"
+    grep -F "Authority=Developer ID Application:" <<< "$details" >/dev/null || { echo "Developer ID Application authority missing: $component" >&2; exit 1; }
+    team="$(sed -n 's/^TeamIdentifier=//p' <<< "$details" | head -n 1)"
+    equal "$team" "$EXPECTED_TEAM_ID" "Developer ID team ($component)"
+  done
+fi
+
+if [[ "$MODE" == archive ]]; then
+  for component in "$APP_DIR" "$WIDGET"; do
+    details="$(codesign -dvvv "$component" 2>&1)"
+    team="$(sed -n 's/^TeamIdentifier=//p' <<< "$details" | head -n 1)"
+    equal "$team" "$EXPECTED_TEAM_ID" "Archive team ($component)"
+  done
+fi
+
+if [[ "$MODE" == distribution ]]; then
+  for component in "$APP_DIR" "$WIDGET"; do
+    details="$(codesign -dvvv "$component" 2>&1)"
+    grep -F 'Authority=Apple Distribution' <<< "$details" >/dev/null || { echo "Apple Distribution authority missing: $component" >&2; exit 1; }
+    team="$(sed -n 's/^TeamIdentifier=//p' <<< "$details" | head -n 1)"
+    equal "$team" "$EXPECTED_TEAM_ID" "Distribution team ($component)"
+  done
+fi
 
 if [[ "$MODE" == development ]]; then
   for component in "$APP_DIR" "$WIDGET"; do
