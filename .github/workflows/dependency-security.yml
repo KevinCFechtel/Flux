@@ -41,4 +41,5 @@ jobs:
       - name: Install locked cargo-audit
         run: cargo install cargo-audit --locked
       - name: Check committed Rust dependency tree
-        run: cargo audit --file core/Cargo.lock --deny warnings
+        run: cargo audit --file core/Cargo.lock --deny unmaintained --deny unsound --deny yanked --deny informational
+          # Security vulnerabilities stay fatal; unmaintained-dependency notices are reviewed separately.
