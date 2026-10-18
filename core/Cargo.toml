@@ -9,7 +9,7 @@ version = "1.0.0"
 
 [workspace.dependencies]
 aes-gcm = "0.10"
-argon2 = "0.5"
+argon2 = "0.6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 html5ever = "0.39"
