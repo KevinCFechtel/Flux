@@ -1,6 +1,6 @@
 # Post-Replacement Stabilization and Store-Readiness Plan
 
-> **Status: IN PROGRESS — macOS C3.8 and B1 owner-accepted 17 October 2026**
+> **Status: IN PROGRESS — A1–A3 owner-accepted 18 October 2026; B2 remains open**
 >
 > **Verified code baseline:** `main` at `2edc6537aebac35260d35f4dcbcab8dcfc7a0ae9`
 > (16 October 2026; [Apple CI #167](https://github.com/KevinCFechtel/Flux/actions/runs/38934397341)
@@ -51,9 +51,9 @@ already accepted iOS/Android in-place Flutter-to-native upgrade guarantees.
 
 | ID | Priority | Target | Status on `main` (16 Oct) | Required remaining gate | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| A1 | P0 | iOS + macOS | ATS host policies and structural tests implemented | Actual HTTP/HTTPS media, redirect and playback tests per platform | — |
-| A2 | P0 | Rust + Apple | Rust `EventSubscription` Drop fallback implemented | Apple listener lifecycle/retention and regression evidence | — |
-| A3 | P0 | Android | WorkManager policy-tagged `updateWork()` and unit tests implemented | Runtime network-policy transitions | — |
+| A1 | P0 | iOS + macOS | **Owner-accepted 18 Oct 2026** | Closed by owner sign-off; previously listed runtime scenarios are not independently evidenced | — |
+| A2 | P0 | Rust + Apple | **Owner-accepted 18 Oct 2026** | Closed by owner sign-off; no independent lifecycle/leak-test evidence asserted | — |
+| A3 | P0 | Android | **Owner-accepted 18 Oct 2026** | Closed by owner sign-off; no independent runtime network-transition evidence asserted | — |
 | A4 | P0 | CI | **Implemented and Rust CI green** (PR #62 merged); blocking `cargo fmt --check` | Required-check branch protection remains a separate repository setting to verify if desired | — |
 | B1 | P0 before Mac App Store release | macOS | **Owner-accepted 17 Oct 2026** after successful Mac testing; entitlements/verifier/installer implemented (#38, #53) | Closed by owner sign-off; distribution validation belongs to R | A1/A2 validation as applicable |
 | B2 | P0 before F-Droid workflow | Android/F-Droid | No source-build/scanner gate proven | Reproducible build, scanner, signing/upgrade feasibility | A4 recommended |
@@ -76,8 +76,7 @@ separate focused PRs and run only the affected platform gates plus Rust gates.
 tests. This is deliberately broad because arbitrary feed media uses both
 URLSession and AVFoundation; see [APPLE_HTTP_MEDIA_ATS.md](APPLE_HTTP_MEDIA_ATS.md)
 for the security trade-off and App Store rationale. Widget ATS is unchanged.
-**Outstanding:** Real iOS and Mac HTTP-only image/artwork, streaming, download
-and redirect verification (including the separate HTTP account warning).
+**Acceptance (18 October 2026):** Owner marked A1 accepted. The previously listed iOS/macOS HTTP-only image/artwork, streaming, download and redirect checks remain historical test guidance, not independently verified evidence.
 The points below preserve the original verification contract.
 
 **Original implementation/validation scope:**
@@ -107,9 +106,7 @@ ATS exception is introduced without an explicit reason.
 **Implemented in part:** `core/crates/flux-uniffi/src/lib.rs` now has an
 idempotence-compatible `Drop for EventSubscription` fallback in addition to
 explicit `unsubscribe()`. This removes the original missing-Drop finding.
-**Outstanding:** Verify all Apple ownership/unsubscribe paths, listener
-lifecycle, possible strong references, repeated account/session replacement
-and memory retention before closing A2. Source presence is not leak-test evidence.
+**Acceptance (18 October 2026):** Owner marked A2 accepted. The previously listed Apple listener lifecycle and memory-retention checks are historical validation guidance; independent evidence for them is not asserted. Source presence is not leak-test evidence.
 
 **Original implementation/validation scope:**
 
@@ -137,8 +134,7 @@ and no retained retired Core session.
 changed policy tags for existing requests and uses WorkManager `updateWork()`
 instead of relying on `ExistingWorkPolicy.KEEP` alone. Tests in
 `AndroidMediaTransferPolicyTagsTest.kt` cover policy changes and unchanged
-constraints. **Outstanding:** Reproduce policy changes on queued/running
-downloads and real Wi-Fi/mobile networks; do not mark A3 runtime accepted yet.
+constraints. **Acceptance (18 October 2026):** Owner marked A3 accepted. The previously listed queued/running download and real Wi-Fi/mobile policy-change scenarios remain regression guidance, without an independent runtime-test claim.
 
 **Original implementation/validation scope:**
 
