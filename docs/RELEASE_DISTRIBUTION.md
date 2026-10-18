@@ -428,6 +428,95 @@ the final tag/GitHub Release only after this gate passes. Google Play
 preparation/submission remains optional and owner-controlled; it cannot
 delay an otherwise approved GitHub/F-Droid release.
 
+### Hybrid platform tags and selective CI gates (decision: 18 October 2026)
+
+> **Approved design, not implemented.** The release orchestrator, tag creation
+> and any Store/F-Droid publication remain disabled until explicitly built,
+> validated and authorized. PR #67 documents the design only.
+
+Flux uses one source repository but independent Android, iOS/iPadOS and macOS
+release cycles. A manual release-candidate workflow (proposed
+`workflow_dispatch`) takes `scope` (`android`, `ios`, `macos`, or
+`all`), `versionName`, the **full immutable Git commit SHA**, and the
+applicable platform build/version codes. Resolve these inputs up front;
+never silently test the current tip of `main` instead.
+
+| Scope | Required checks before any final tag | Final tags | GitHub Release |
+| --- | --- | --- | --- |
+| `android` | Android + Rust + **mandatory F-Droid source build, scanner, APK verification** | `android/vX.Y.Z` | One Android entry |
+| `ios` | iOS + Rust | `ios/vX.Y.Z` | One iOS entry |
+| `macos` | macOS + Rust (including relevant Sandbox/signing checks) | `macos/vX.Y.Z` | One macOS entry |
+| `all` | Android + F-Droid + iOS + macOS + **Rust once** | `android/vX.Y.Z`, `ios/vX.Y.Z`, `macos/vX.Y.Z`, `vX.Y.Z` | **One combined entry** |
+
+Each platform may have a different public version and release date. A
+combined `vX.Y.Z` release is allowed **only if all three platforms have
+exactly the same approved marketing version and tested commit SHA**. Its
+three platform tags and the combined tag all point to that SHA. Only
+`vX.Y.Z` gets a GitHub Release entry; the additional platform tags are
+provenance markers, not three more release pages. If versions or source
+commits differ, publish individually. Two-platform releases remain separate
+unless grouping is explicitly designed later.
+
+**Mandatory sequence:**
+
+1. Select the scope/version/immutable source SHA and draft platform-specific
+   notes. **No final release tag and no public GitHub Release exist yet.**
+2. Reuse the existing Android/iOS/macOS build/test scripts via separate
+   callable gates (`workflow_call` or equivalent). Run only selected
+   platforms and the Rust workspace regression tests **once per candidate**;
+   do not cascade full workflows or duplicate native compilation.
+3. For an `android` or `all` candidate, the F-Droid recipe lint/scanner
+   and real source-built APK identity/version/ABI checks are **blocking before
+   any GitHub release**. The CI APK is unsigned test evidence, not an
+   installable end-user release. Signing/update compatibility (B2) must be
+   approved separately before any official F-Droid submission.
+4. If any mandatory check is missing, skipped, inconclusive or failed, stop
+   without final tags, GitHub release, store upload or F-Droid submission.
+   Correct on a branch, then rerun all required gates for the **new** SHA.
+5. After every mandatory gate passes at the **same SHA**, a dedicated,
+   minimally permissioned promotion job verifies that tags and release names
+   do not already conflict; only then create the intended immutable tag(s)
+   and **exactly one** GitHub Release with the right notes and assets.
+   Never silently move an existing public tag. Partial promotion must be
+   detected and recovered explicitly.
+6. Apple Store exports/uploads and Google Play uploads/publication remain
+   owner-controlled, independent of GitHub release timing. F-Droid submission
+   is a separate explicitly authorized action; no official F-Droid release
+   or submission is permitted until B2 publication acceptance and owner
+   approval.
+
+**GitHub Release presentation and downloads:**
+
+- Clearly name the covered platform(s). A combined release has separate
+  Android, iOS/iPadOS and macOS sections of release notes.
+- Android may attach only a correctly **signed and verified** distributable
+  APK, never the unsigned F-Droid CI test output.
+- iOS/iPadOS has release notes and an App Store link, not a generic IPA
+  download. macOS has notes and a Mac App Store link; an optional ZIP
+  must first pass Developer ID signing, notarization and update-path review.
+- GitHub's `Latest` is repository-wide, not per platform. Maintain a
+  separate per-platform latest-version overview (e.g. in README).
+
+**CI invocation and cost controls:**
+
+- Existing PR/path-filtered Android/Apple/Rust checks remain in place for
+  development. The manual candidate orchestrator reuses them selectively;
+  docs-only changes must not start expensive F-Droid or Apple builds.
+- Tags are created *after* the gates. Tag-push events may trigger only
+  post-promotion bookkeeping, **not** the blocking checks. Multiple tags
+  on a common commit must not cause repeated CI or extra Releases; do not
+  depend on separate push events being emitted for every tag.
+- Use candidate-scoped concurrency and cancellation, with artifacts tied to
+  commit SHA/scope/version. Do not launch duplicate Rust or F-Droid builds.
+  Only the final publisher needs `contents: write`; ordinary checks
+  remain read-only and hold no store publishing credentials.
+
+**Still to implement:** reusable platform-specific CI jobs; candidate
+input and SHA validation; the F-Droid prerequisite for Android-bearing
+releases; deterministic, idempotent multi-tag/single-release promotion;
+and negative tests for failed/skipped gates, mismatched SHA/version,
+existing tags and duplicate triggers. This document changes no CI behavior.
+
 Release workflows should generally be manual or release/tag-driven and should:
 
 - call the same canonical scripts used locally;
@@ -479,6 +568,8 @@ This release-scripting follow-up is complete when:
 - one documented top-level interface can prepare each supported distribution
   target;
 - Android Play AAB preparation is deterministic and versioned;
+- the manual release entry point selects `android`, `ios`, `macos` or `all` gates by immutable candidate SHA, running shared Rust checks only once;
+- platform tags produce their independent release pages, while all-platform releases create a common tag and exactly one combined GitHub Release;
 - every Android GitHub Release is blocked until the F-Droid metadata/scanner/real-APK build and shared mandatory checks pass for the exact candidate SHA;
 - a failed release candidate cannot create a final tag or GitHub Release, and fixes are retested at a new SHA;
 - the F-Droid-style source build and scanner feasibility checks pass before publishing is automated;
