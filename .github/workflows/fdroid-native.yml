@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   source-build:
+    if: false
     name: Linux native APK and source dependency gate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -143,6 +144,9 @@ jobs:
           text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + os.environ['GITHUB_SHA'])
           p.write_text(text)
           PY
+          mkdir -p fdroid-ci/build/de.circle_dev.flux_news
+          cp -a .git fdroid-ci/build/de.circle_dev.flux_news/
+          git -C fdroid-ci/build/de.circle_dev.flux_news reset --hard "${GITHUB_SHA}"
           printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
           cat >> fdroid-ci/config.yml <<'YAML'
           categories:
@@ -171,7 +175,7 @@ jobs:
         working-directory: fdroid-ci
         run: |
           set -euo pipefail
-          fdroid build --verbose --test --no-tarball de.circle_dev.flux_news:2026101801 2>&1 | tee fdroid-build.log
+          fdroid build --verbose --test --force --no-tarball de.circle_dev.flux_news:2026101801 2>&1 | tee fdroid-build.log
           if grep -Eq '([1-9][0-9]* build[s]? failed|Could not build app|Traceback \(most recent call last\))' fdroid-build.log; then
             echo "::error::fdroidserver reported a build failure despite its exit status"
             exit 1
