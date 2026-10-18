@@ -1,0 +1,101 @@
+# Dependency maintenance and security policy
+
+> **Decision: 18 October 2026.** Applies to native Flux development now and
+> to **FluxNews after repository migration**. This policy does not approve a
+> release, merge, dependency major-version upgrade, or official F-Droid submission.
+
+## Why this is necessary
+
+Green unit/integration tests are **not** an assertion that dependencies are
+up-to-date or free of disclosed vulnerabilities. In the 18 October inventory,
+the Cargo workspace still pins `rustls-platform-verifier = "=0.5.3"`,
+`jni = "0.21"`, `ureq = "2.12"`, `rusqlite = "0.37"`, `uniffi = "0.29"`
+and other older API generations. Unlike most of the recent Android Gradle
+dependencies, these versions had not received an independently recorded
+freshness/compatibility assessment.
+
+Do **not** declare all such versions vulnerable: `Cargo.lock` shows the
+versions actually built, and a RustSec advisory check plus investigation of
+each finding is required before making security claims.
+
+## Automated monitoring and CI costs
+
+1. Configure GitHub Dependabot **version updates** for `cargo` at `/core`,
+   `gradle` at `/android` and `github-actions` at `/`. Prefer weekly
+   review for Cargo/Gradle and monthly for Actions, with at most **one
+   simultaneously open version-update PR per ecosystem** initially.
+2. Group routine patch/minor version updates, but keep **major updates**
+   separate and deliberate. No auto-merge and no auto-release. Dependabot
+   **security updates** and GitHub vulnerability alerts must remain enabled
+   in repository settings; verify that their alert visibility and notification
+   routing actually work after cutover.
+3. Run an isolated, **daily RustSec scan** of `core/Cargo.lock` (`cargo
+   audit`), without building Rust targets, Android apps, or Apple apps.
+   Run the same scan after `core/Cargo.lock` changes and via manual dispatch.
+   Fail for disclosed vulnerabilities, publish diagnostic output, and do
+   not silently suppress findings. Any explicit exception requires a
+   linked upstream advisory, rationale, owner, and a review/expiry date.
+4. Dependabot's routine PRs should not themselves cascade redundant full
+   test suites. Limit open PRs, group updates and use existing per-workflow
+   `concurrency.cancel-in-progress` behavior; Rust/Android/Apple CI remain
+   mandatory for changes they actually affect. Never weaken required
+   merge gates simply because a change comes from Dependabot.
+   Use paths to avoid unrelated platform builds. Do not start an
+   additional F-Droid source build when another equivalent immutable-SHA
+   F-Droid gate is already running.
+5. Dependabot creates suggested patches **rather than evaluating** Kotlin/
+   Rust JNI alignment, UniFFI-generated code, build IDs or the exact
+   required source revision of external Git submodules. Enforce those
+   relationships through project tests and human review.
+
+## Mandatory dependency review before acceptance
+
+For each dependency version change, verify:
+- **latest release and date** from the upstream registry/release notes,
+  including security advisories and any documented MSRV, Gradle, Kotlin,
+  Swift, Xcode, or Android SDK constraints;
+- actual locked versions (`core/Cargo.lock`, Gradle dependencies),
+  including relevant transitive dependencies and build toolchains;
+- direct and indirect license/provenance suitability (especially F-Droid
+  restrictions on prebuilt binaries);
+- source API and behavioral changes, with particular attention to
+  Android CA store, **user-installed CA trust**, TLS failure behavior,
+  networking, database migration, media decoding and playback;
+- relevant tests on all affected targets, both routine CI and specific
+  device/integration checks when required.
+
+Prioritize security fixes. Do not bulk-upgrade unrelated **major versions**
+just to make the inventory look current. Record intentional pins, why
+upgrading is blocked and an explicit re-review trigger. Release promotion
+must not rely on a skipped, missing, or failed required gate.
+
+## Baseline findings to investigate (inventory, not accepted upgrades)
+
+| Component | `Cargo.lock` on B2 branch, 18 October | Initial decision |
+| --- | --- | --- |
+| rustls-platform-verifier / Android companion | 0.5.3 / 0.1.1 | **P0:** evaluate 0.7.1 / 0.2.0 alongside JNI 0.22 and rebuilding Kotlin component from source, then rerun Android CA-trust cases |
+| ureq | 2.12.1 | **P1:** newer v3 has an incompatible transport API: evaluate independently of verifier |
+| rusqlite | 0.37.0 | **P1:** database/runtime compatibility and migrations |
+| uniffi | 0.29.5 | **P1:** generated Swift/Kotlin bindings and release scripts must change together |
+| jni | 0.21.1 | **Coupled to verifier:** no isolated update |
+| lofty | 0.22.4 | **P2:** media metadata and artwork extraction regression checks |
+| rand, argon2, html5ever | 0.8.8, 0.5.3, 0.39.0 | **P2:** check API changes / security findings, do not assume vulnerabilities |
+| AGP, Kotlin, Gradle | 9.4.0, 2.4.20, 9.7.1 | Recently refreshed, still monitor updates and wrapper provenance |
+
+The original pinned verifier was accepted for **Android TLS behavior**,
+not for being the newest version. A documented compatibility proof must
+not be misread as a dependency freshness assessment.
+
+## Implementation and migration boundaries
+
+- Prepare the policy, Dependabot configuration and lightweight security CI
+  in `Flux`; carry them over during the non-publishing migration.
+- After cutover, all dependency monitoring and security/release CI run in
+  `FluxNews` (and can no longer be controlled from `Flux`).
+- Keep documentation separate from source version changes so docs-only
+  commits do not trigger costly Rust/Apple/F-Droid CI.
+- Changes to critical or coupled dependencies should be tested on isolated
+  PRs with **one consolidated verification cycle per candidate SHA**.
+- A passing F-Droid recipe/build on a version is not a substitute for the
+  AAR provenance, same-SHA reproducibility or Flutter-to-native signed
+  upgrade acceptance gate.
