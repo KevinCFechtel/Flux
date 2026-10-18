@@ -488,40 +488,61 @@ delay an otherwise approved GitHub/F-Droid release.
   repository is always passed explicitly, never assumed from
   `GITHUB_REPOSITORY`.
 
-**Commit provenance across two repositories:**
+**Two separate stages: repository import versus release approval**
 
-- A tested `Flux` development commit and a `FluxNews` publication commit
-  generally have **different Git SHAs**, even if the native app files match,
-  because `FluxNews` retains its own previous history and `legacy/`.
-  Record both SHAs, and validate a manifest/hash comparison of the native
-  source tree and the committed platform versions. Do not equate the two.
-- Before promotion, prepare the target changes as a **candidate commit in
-  FluxNews** (e.g. a reviewable staging PR/branch). Preserve the old history
-  and tags, do not force-push a replacement Git history, and keep the
-  legacy sources from accidentally being built by root-level workflows.
-- The mandatory release gates, including the F-Droid recipe/source-APK gate
-  for Android, must validate the **exact candidate commit to be tagged in
-  FluxNews**. Running checks only for an earlier Flux SHA is not sufficient
-  after a migration, rebase, merge or version change. A candidate-changing
-  commit invalidates previous approvals and requires revalidation. Ensure
-  the eventual target release SHA has passed the required gates.
-- On success, create platform/common release tags pointing to the validated
-  **FluxNews** commit and publish exactly one corresponding **FluxNews**
-  GitHub Release. Add the origin Flux SHA and target FluxNews SHA to release
-  provenance/notes. For combined releases, all final tags point to the same
-  validated FluxNews commit.
+- **Migration is not a release.** First, import the native `Flux` sources
+  into the existing `FluxNews` repository, archive its Flutter sources in
+  `legacy/` and replace the old workflows. This produces an **import
+  commit** in `FluxNews`, but must create **no release tag, GitHub Release,
+  F-Droid submission or store upload**. The import can be reviewed, tested
+  and merged long before the first native release.
+- **Further commits are expected after the import.** Bug fixes, CI/workflow
+  work, migrations, translations and release preparation may advance
+  `FluxNews/main` over multiple commits. Do not assume the import commit
+  is the final release commit, require a release immediately after import,
+  or freeze development at that point.
+- The `Flux` source commit, `FluxNews` import commit and **eventual**
+  `FluxNews` release commit can all have different Git SHAs. Compare
+  source/version manifests when transferring the initial snapshot, and
+  record the import provenance. Later `FluxNews` commits may legitimately
+  change the native tree; do **not** require it to keep matching the
+  original `Flux` snapshot. For each actual release, the definitive
+  provenance is the **final target `FluxNews` commit**, not an old import
+  or development SHA.
+- At a later owner-selected release preparation point, select an immutable
+  **final candidate commit in `FluxNews`**, its committed platform versions,
+  scope and release notes. The central orchestration hosted in `Flux`
+  checks out and validates that **specific `FluxNews` SHA**. Only that
+  candidate is eligible for release gates. Normal development CI may run
+  meanwhile, but no full release-gate sequence is required after every
+  ordinary post-import commit.
+- All mandatory release checks, including the F-Droid recipe/source-APK
+  gate for Android, must pass for the **exact SHA to be tagged in
+  `FluxNews`**. Checks of a prior `Flux`, import or earlier target
+  commit cannot authorize it. A later source-changing candidate commit
+  requires another complete mandatory release-gate pass.
+- Only on success, create platform/common release tags pointing to that
+  verified **FluxNews** commit and publish exactly one corresponding
+  **FluxNews** GitHub Release. Record the validated target SHA and (for
+  traceability) relevant import/origin information without claiming those
+  commits are identical. Combined platform tags all reference the same
+  tested target commit.
 
 **Migration and CI safety requirements:**
 
 1. Implement and test release orchestration in `Flux` without initiating
    publications. Separately rehearse a non-destructive Flux-to-FluxNews
    import, preserving the target's existing history, releases and tag names.
-2. Audit and disable/replace **old Flutter tag-triggered workflows in
-   FluxNews before pushing any native release tag**, notably
-   `.github/workflows/build-and-release.yml` (`on.push.tags: v*`),
-   which also invokes `submit-fdroid-signatures.yml`. The old F-Droid
-   submission must **never** be triggered by a native or shared `vX.Y.Z`
-   tag. Merely moving Flutter code to `legacy/` does not disable workflows.
+2. **Replace the old Flutter workflows in FluxNews as part of the
+   repository cutover**, not merely archive their source files. In
+   particular, retire/replace `.github/workflows/build-and-release.yml`
+   (`on.push.tags: v*`) and its call to
+   `submit-fdroid-signatures.yml` before any native tag is pushed.
+   The replacement FluxNews workflows must coexist safely with the central
+   release controller in Flux: keep routine source/PR checks as needed,
+   but do not create a second release publisher, duplicate full release
+   builds or trigger an automatic F-Droid submission. The old F-Droid
+   process must **never** be triggered by a new `vX.Y.Z` tag.
 3. Update the **native** F-Droid recipe's final `Repo` and source commit
    references for the approved publication location. The current B2
    experimental recipe points to `Flux.git` and is **not yet the final
@@ -546,11 +567,15 @@ delay an otherwise approved GitHub/F-Droid release.
    submission is separately authorized and remains prohibited during B2
    test/CI work.
 
-**Order:** finish native/B2 technical readiness in Flux; establish and
-review the FluxNews cutover; validate the final FluxNews candidate SHA;
-then (and only then) authorize target tags/GitHub Release. The permanent
-release controller stays in Flux. This is an architecture decision, **not**
-an implemented repository migration or a publication authorization.
+**Order:** finish native/B2 technical readiness and the release
+controller in Flux; transfer native sources to FluxNews and replace its old
+workflows in a reviewable, non-publishing import; allow any number of later
+normal development commits in FluxNews; **only when the owner elects to
+release**, select and validate the final FluxNews candidate SHA through
+the controller in Flux; then authorize target tags/GitHub Release. The
+import itself is never an automatic release trigger. This is a documented
+architecture decision, **not** an implemented repository migration,
+release or publication authorization.
 
 ### Hybrid platform tags and selective CI gates (decision: 18 October 2026)
 
