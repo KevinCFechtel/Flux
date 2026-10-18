@@ -392,3 +392,7 @@ The owner considers Android localization (C1) complete for this roadmap. Weblate
 The project owner accepted Android C2 (feed and category creation) on 17 October 2026. The implemented flows are considered complete for this roadmap; subsequent issues are tracked as regression bugs rather than reopening C2. This is owner-reported acceptance, not a separately attached device test protocol.
 
 PR #61 (macOS parity, listening list and player fixes), PR #63 (C1 owner acceptance) and PR #64 (Android navigation action placement) have been merged into `main`. PR #62 implemented the blocking Rust formatting gate and was also merged. Remaining planned work is B2 (F-Droid feasibility/build/scanner/signing), release track R (unified release tooling and distribution validation), and separately scoped cross-platform Weblate integration. Historical descriptions of earlier validation gates remain as background, not as a reopening of accepted items.
+
+### B2 implementation branch (18 October 2026)
+
+Branch `feat/b2-fdroid-native-preparation` introduces opt-in `FLUX_ANDROID_INCLUDE_ARMV7=1` for the Rust UniFFI build (`armeabi-v7a` / `armv7-linux-androideabi`). Default Android builds remain unchanged. This is preparation only, not proof of successful armv7 compilation or F-Droid compliance. The dual-signature F-Droid release workflow, metadata migration, reproducibility and device upgrade tests remain pending. Do not publish or merge until validated.
