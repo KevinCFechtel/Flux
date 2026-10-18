@@ -7,7 +7,7 @@ ARCHIVE_PATH="${ARCHIVE_PATH:-$ROOT/.build/Archives/FluxNews-macos-production.xc
 BUILD_NUMBER=""; VERSION_NAME=""
 usage() {
   echo "Usage: bash apple/macos/Build/archive.sh <buildNumber> <versionName>"
-  echo "Creates a signed macOS production xcarchive; never uploads."
+  echo "Creates a macOS production xcarchive; App Store distribution signing is validated after export."
 }
 if [[ "${1:-}" == --help ]]; then usage; exit 0; fi
 [[ $# -eq 2 ]] || { usage >&2; exit 2; }
@@ -29,5 +29,5 @@ FLUX_UNIFFI_PREPARED=1 xcodebuild \
   ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO archive
 APP="$ARCHIVE_PATH/Products/Applications/FluxNews.app"
 [[ -d "$APP" ]] || { echo "Missing archived app: $APP" >&2; exit 1; }
-"$SCRIPT_DIR/verify-sandbox.sh" "$APP" distribution
+"$SCRIPT_DIR/verify-sandbox.sh" "$APP" archive
 echo "macOS production archive: $ARCHIVE_PATH"
