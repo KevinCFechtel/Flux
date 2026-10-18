@@ -154,7 +154,9 @@ verify_library() {
   if command -v file >/dev/null 2>&1; then
     local description
     description="$(file -b "${library}")"
-    [[ "${description}" == *"ELF 64-bit"* && "${description}" == *"shared object"* ]] || {
+    local elf_class="ELF 64-bit"
+  [[ "${abi}" == "armeabi-v7a" ]] && elf_class="ELF 32-bit"
+  [[ "${description}" == *"${elf_class}"* && "${description}" == *"shared object"* ]] || {
       echo "Expected an ELF shared library, found: ${description}" >&2
       exit 1
     }
