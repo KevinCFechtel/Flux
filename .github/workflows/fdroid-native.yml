@@ -8,6 +8,7 @@ on:
       - "android/**"
       - "core/**"
       - ".github/workflows/fdroid-native.yml"
+      - "fdroid/**"
   workflow_dispatch:
 
 permissions:
@@ -96,4 +97,66 @@ jobs:
             android/app/build/outputs/apk/production/release/*.apk
             fdroid-native-apk.sha256
           if-no-files-found: warn
+          retention-days: 7
+
+  fdroid-recipe:
+    name: F-Droid metadata and source build (experimental)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      FLUX_ANDROID_INCLUDE_ARMV7: "1"
+      ANDROID_NDK_VERSION: "29.0.14206865"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4.0.4
+        with:
+          packages: platform-tools
+      - name: Install Android SDK and NDK
+        run: |
+          ANDROID_CLI="${ANDROID_HOME}/cmdline-tools/22.0/bin/android"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "platforms/android-37.0"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "build-tools/37.0.0"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "ndk/${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
+      - name: Install fdroidserver in isolated Python environment
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/fdroid-venv"
+          "${RUNNER_TEMP}/fdroid-venv/bin/pip" install --upgrade pip
+          "${RUNNER_TEMP}/fdroid-venv/bin/pip" install fdroidserver
+          echo "${RUNNER_TEMP}/fdroid-venv/bin" >> "${GITHUB_PATH}"
+      - name: Prepare isolated F-Droid metadata workspace
+        run: |
+          set -euo pipefail
+          mkdir -p fdroid-ci/metadata
+          cp fdroid/metadata/de.circle_dev.flux_news.yml fdroid-ci/metadata/
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path('fdroid-ci/metadata/de.circle_dev.flux_news.yml')
+          text = p.read_text().replace('commit: HEAD', 'commit: ' + os.environ['GITHUB_SHA'])
+          p.write_text(text)
+          PY
+          printf "sdk_path: '%s'\\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
+      - name: Validate F-Droid metadata
+        working-directory: fdroid-ci
+        run: fdroid lint de.circle_dev.flux_news
+      - name: Build using fdroidserver recipe
+        working-directory: fdroid-ci
+        run: fdroid build --verbose --latest --no-tarball de.circle_dev.flux_news
+      - name: Upload F-Droid diagnostic output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fdroid-native-recipe-diagnostics
+          path: |
+            fdroid-ci/logs/
+            fdroid-ci/unsigned/
+          if-no-files-found: ignore
           retention-days: 7
