@@ -14,7 +14,7 @@ fi
 for cmd in xcodebuild plutil codesign; do command -v "$cmd" >/dev/null || { echo "Missing: $cmd" >&2; exit 1; }; done
 APP="$ARCHIVE_PATH/Products/Applications/FluxNews.app"
 [[ -d "$APP" ]] || { echo "Missing macOS archive app: $APP" >&2; exit 1; }
-"$SCRIPT_DIR/verify-sandbox.sh" "$APP" distribution
+"$SCRIPT_DIR/verify-sandbox.sh" "$APP" archive
 options="$(mktemp "${TMPDIR:-/tmp}/flux-macos-export.XXXXXX.plist")"
 trap 'rm -f "$options"' EXIT
 plutil -create xml1 "$options"
