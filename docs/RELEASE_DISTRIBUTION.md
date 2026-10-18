@@ -131,6 +131,89 @@ All final scripts should print a concise release summary containing:
 - signing identity/certificate fingerprint where safe and useful;
 - whether publication occurred.
 
+## Android release promotion policy (decision: 18 October 2026)
+
+> **Binding release policy; orchestration still to be implemented.** This policy
+> applies to Android/FluxNews releases. It does not imply that B2, F-Droid signing
+> continuity, the official F-Droid publication, or the new release workflow have
+> already passed acceptance.
+
+**Channel ownership and cadence**
+
+- **GitHub Releases** and **F-Droid** follow the latest *approved* FluxNews
+  release. New approved releases must not be held back by Google Play review.
+  F-Droid's external build/review queue can introduce a delay after submission.
+- **Google Play** is a separate, owner-operated distribution channel. The owner
+  chooses when to prepare, upload and publish an AAB. Slow Google review must
+  not block GitHub Releases, F-Droid submissions or continued development on
+  `main`. Do not automate Play submission/publication.
+- One source version and immutable release commit identify the approved release.
+  It is acceptable for Play to remain on an older published version and skip
+  intermediate GitHub/F-Droid releases. All Android version codes must stay
+  compatible with Android's monotonic update rules.
+
+**Required promotion sequence — fail closed**
+
+1. Select an Android release candidate: explicit `versionName`,
+   `versionCode`, full source commit SHA and candidate release notes. Treat
+   the SHA as immutable for this attempt; do not create the *final* release tag
+   or publish a GitHub Release yet.
+2. Run the common Android/Rust release checks and **one actual F-Droid
+   metadata/scanner/source-build gate against that exact SHA**. The gate must
+   produce a nonempty unsigned APK and verify the application ID
+   `de.circle_dev.flux_news`, versions, and required native architectures
+   (`arm64-v8a`, `x86_64`, `armeabi-v7a`). Reject missing, failed, skipped or
+   inconclusive mandatory checks. Reuse existing checks and avoid duplicate
+   native builds.
+3. Before any first native F-Droid publication, also close B2's dependency
+   provenance, reproducibility, historical metadata/signature and
+   Flutter-to-native signed-update acceptance criteria. CI success alone does
+   **not** establish signing/update compatibility.
+4. **Only after all required gates succeed for the same SHA**, create the
+   immutable version tag on that tested SHA, publish the corresponding GitHub
+   Release and its validated artifacts/release notes, and prepare/submit the
+   matching F-Droid recipe referencing that exact tag/SHA. F-Droid submission
+   must be explicit and separate from build verification.
+5. Official F-Droid infrastructure has its own acceptance/build cycle. A
+   successful local or GitHub Actions recipe build is required before GitHub
+   publication but does **not** guarantee a successful official F-Droid build.
+   Track an external failure explicitly; do not silently change the already
+   published tag or its source. Resolve it with a newly tested candidate
+   (normally the next patch release), preserving traceability.
+
+**When a candidate fails**
+
+- **No GitHub Release, final tag or F-Droid submission** when any mandatory
+  gate fails. Fix the cause on a development/release branch, create a new
+  commit/SHA, and rerun *all mandatory gates for that new SHA* before promotion.
+  Keep development on `main` independent of any pending store review.
+- CI must check the exact commit, expected metadata and actual APK content; a
+  workflow marked green with `1 build failed`, or without an APK, is a failure.
+- Cost-control: build F-Droid on explicit release validation and focused
+  F-Droid changes rather than every documentation-only update. Use path-aware
+  triggers, reusable jobs, scoped concurrency/cancellation and **one** recipe
+  build per candidate where possible. Do not tie Google Play or Apple jobs to
+  the F-Droid gate merely for sequencing.
+
+**Google Play release notes**
+
+- The owner may submit a later approved release directly and omit intervening
+  GitHub/F-Droid versions. Generate Play-specific release notes as the
+  cumulative *user-relevant* changes since the version **last actually
+  published on Google Play**, not since the last GitHub release or an
+  unapproved Play submission. Review the combined notes manually before
+  uploading the selected signed AAB.
+- Review delays, replaced submissions and Managed Publishing do not change the
+  identity or readiness of the GitHub/F-Droid source release.
+
+**Implementation status (18 October 2026):** PR
+[#66](https://github.com/KevinCFechtel/Flux/pull/66) has a successful
+[experimental recipe-build run](https://github.com/KevinCFechtel/Flux/actions/runs/39140681750)
+for Android 3.0.0 / `2026101801`, including APK identity/ABI validation.
+This proves one CI test build, **not** repeatable official F-Droid eligibility,
+historic-signing compatibility or implemented release promotion. PR #66
+remains separate from this documentation decision.
+
 ## 4. Android — Google Play
 
 The current Android build already has a canonical production bundle path through
@@ -149,9 +232,12 @@ The Play preparation step must:
 - write the final AAB to a stable `dist/` location;
 - never commit signing properties or keystores.
 
-Uploading to Play Console may remain manual initially. If a future publish action
-is added, it must be a distinct explicit operation and must not make a normal
-release build publish automatically.
+Uploading to Play Console and releasing there are deliberately manual
+owner-controlled actions. This repository must prepare/validate a selected
+signed Play AAB without automatically submitting or publishing it. The owner
+may skip intervening GitHub/F-Droid versions and use consolidated release notes
+relative to the last version actually published on Play; see the Android
+release promotion policy above.
 
 ## 5. Android — F-Droid
 
@@ -193,10 +279,16 @@ It should have two clearly separated responsibilities:
 - **publish/submit:** explicit release/manual/tag-triggered submission step after
   build/verify succeeds.
 
-Do not make every push to `main` publish an F-Droid release.
+Do not make every push to `main` publish an F-Droid release. The
+F-Droid recipe/source-build job is a **required, blocking pre-release gate**
+for GitHub publication, not a best-effort post-release check. Its workflow must
+allow explicit candidate-SHA validation *before* the final tag exists.
 
-Prefer `workflow_dispatch` and/or a deliberate release/tag trigger with
-explicit version inputs or validated tag-derived versions.
+Prefer `workflow_dispatch` and/or deliberate release-candidate triggering
+with explicit version inputs, a fixed commit SHA and a reusable build/verify
+job. Publishing/submitting the F-Droid recipe is a separate explicit action
+**after** promotion of the previously validated SHA. No GitHub Release or tag
+may be created first and then retroactively "validated".
 
 The Action must call repository scripts. It must not contain a second independent
 implementation of signing, versioning or packaging logic in YAML.
@@ -330,6 +422,12 @@ Add release-oriented workflows only where they provide value:
 - iOS App Store artifact: optional;
 - macOS App Store artifact: optional.
 
+For Android, the release candidate / GitHub promotion workflow must
+depend on a verified F-Droid recipe APK from the **same commit**, and create
+the final tag/GitHub Release only after this gate passes. Google Play
+preparation/submission remains optional and owner-controlled; it cannot
+delay an otherwise approved GitHub/F-Droid release.
+
 Release workflows should generally be manual or release/tag-driven and should:
 
 - call the same canonical scripts used locally;
@@ -381,6 +479,8 @@ This release-scripting follow-up is complete when:
 - one documented top-level interface can prepare each supported distribution
   target;
 - Android Play AAB preparation is deterministic and versioned;
+- every Android GitHub Release is blocked until the F-Droid metadata/scanner/real-APK build and shared mandatory checks pass for the exact candidate SHA;
+- a failed release candidate cannot create a final tag or GitHub Release, and fixes are retested at a new SHA;
 - the F-Droid-style source build and scanner feasibility checks pass before publishing is automated;
 - Android has a native F-Droid build/publish workflow in this repository;
 - F-Droid update compatibility over the existing Flutter-distributed app is
