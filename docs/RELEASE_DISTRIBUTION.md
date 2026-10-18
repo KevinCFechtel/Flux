@@ -429,9 +429,11 @@ The cleanup is not a claim of release acceptance: validate CI and run the Apple 
 
 ## macOS distribution artifact layout
 
-Both macOS distribution artifacts live under `dist/macos/`:
+The macOS unpackaged app and both distribution artifacts live under `dist/macos/`:
+
+- `dist/macos/FluxNews.app`: unpackaged app from macOS build; the Developer ID release signs and notarizes this app.
 
 - `dist/macos/appstore/*.pkg`: Mac App Store Connect package for Transporter (unchanged).
 - `dist/macos/developer-id/FluxNews-<version>-macos-<architecture>.zip`: notarized Developer ID ZIP (moved from `dist/release/`).
 
-By default `install-local.sh` extracts the newest Developer ID ZIP from `dist/macos/developer-id/` and installs its verified app; `SOURCE_APP` can still select an unpackaged app explicitly; existing ZIP files in the legacy `dist/release/` directory are not automatically moved or removed. Re-run the Developer ID release to create an artifact in the new directory.
+By default `install-local.sh` extracts the newest Developer ID ZIP from `dist/macos/developer-id/` and installs its verified app; `SOURCE_APP` can still select an unpackaged app explicitly; existing ZIP files in the legacy `dist/release/` directory and the former `dist/FluxNews.app` are not automatically moved or removed. Re-run the Developer ID release to create an artifact in the new directory.
