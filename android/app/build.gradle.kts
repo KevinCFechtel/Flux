@@ -135,6 +135,12 @@ fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<E
     )
     outputs.dir(file("../Build/Products/$mode"))
     outputs.dir(file("../Build/Products/Bindings/$mode/kotlin"))
+    // F-Droid sets this via gradleprops; ordinary builds retain their environment.
+    val includeArmv7 = providers.gradleProperty("fluxAndroidIncludeArmv7")
+        .orElse(providers.environmentVariable("FLUX_ANDROID_INCLUDE_ARMV7"))
+        .orElse("0")
+    inputs.property("fluxAndroidIncludeArmv7", includeArmv7)
+    environment("FLUX_ANDROID_INCLUDE_ARMV7", includeArmv7.get())
     commandLine(uniffiBuildScript.absolutePath, mode)
 }
 fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }

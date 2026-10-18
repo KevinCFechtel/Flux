@@ -114,9 +114,21 @@ NDK_VERSION="${NDK_DIR##*/}"
 echo "Using Android NDK ${NDK_VERSION} (${TOOLCHAIN_DIR##*/}) with API ${API_LEVEL}."
 
 abis=(arm64-v8a x86_64)
+if [[ "${FLUX_ANDROID_INCLUDE_ARMV7:-0}" == "1" ]]; then
+  abis+=(armeabi-v7a)
+fi
 targets=(aarch64-linux-android x86_64-linux-android)
+if [[ "${FLUX_ANDROID_INCLUDE_ARMV7:-0}" == "1" ]]; then
+  targets+=(armv7-linux-androideabi)
+fi
 target_envs=(aarch64_linux_android x86_64_linux_android)
+if [[ "${FLUX_ANDROID_INCLUDE_ARMV7:-0}" == "1" ]]; then
+  target_envs+=(armv7_linux_androideabi)
+fi
 target_uppers=(AARCH64_LINUX_ANDROID X86_64_LINUX_ANDROID)
+if [[ "${FLUX_ANDROID_INCLUDE_ARMV7:-0}" == "1" ]]; then
+  target_uppers+=(ARMV7_LINUX_ANDROIDEABI)
+fi
 for target in "${targets[@]}"; do
   rustup target list --installed | grep -Fxq "${target}" || {
     echo "Required Rust target is not installed: ${target}" >&2
@@ -142,13 +154,16 @@ verify_library() {
   if command -v file >/dev/null 2>&1; then
     local description
     description="$(file -b "${library}")"
-    [[ "${description}" == *"ELF 64-bit"* && "${description}" == *"shared object"* ]] || {
+    local elf_class="ELF 64-bit"
+  [[ "${abi}" == "armeabi-v7a" ]] && elf_class="ELF 32-bit"
+  [[ "${description}" == *"${elf_class}"* && "${description}" == *"shared object"* ]] || {
       echo "Expected an ELF shared library, found: ${description}" >&2
       exit 1
     }
     case "${abi}" in
       arm64-v8a) [[ "${description}" == *"ARM aarch64"* ]] ;;
       x86_64) [[ "${description}" == *"x86-64"* ]] ;;
+      armeabi-v7a) [[ "${description}" == *"ELF 32-bit"* && "${description}" == *"ARM"* ]] ;;
     esac || {
       echo "Unexpected ELF architecture for ${abi}: ${description}" >&2
       exit 1
@@ -162,8 +177,10 @@ for index in "${!targets[@]}"; do
   abi="${abis[${index}]}"
   target_env="${target_envs[${index}]}"
   target_upper="${target_uppers[${index}]}"
-  clang="${TOOLCHAIN_DIR}/bin/${target}${API_LEVEL}-clang"
-  clangxx="${TOOLCHAIN_DIR}/bin/${target}${API_LEVEL}-clang++"
+  clang_target="${target}"
+  [[ "${target}" == "armv7-linux-androideabi" ]] && clang_target="armv7a-linux-androideabi"
+  clang="${TOOLCHAIN_DIR}/bin/${clang_target}${API_LEVEL}-clang"
+  clangxx="${TOOLCHAIN_DIR}/bin/${clang_target}${API_LEVEL}-clang++"
   llvm_ar="${TOOLCHAIN_DIR}/bin/llvm-ar"
   source_library="${CORE_DIR}/target/${target}/${PROFILE}/libflux_uniffi.so"
   output_library="${OUTPUT_DIR}/${abi}/libflux_uniffi.so"
