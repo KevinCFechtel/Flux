@@ -1,0 +1,26 @@
+# Experimental native F-Droid recipe. Not publishing metadata.
+# The CI substitutes commit and version from the checked-out Flux revision.
+Categories:
+  - Reading
+License: GPL-3.0-only
+SourceCode: https://github.com/KevinCFechtel/Flux
+IssueTracker: https://github.com/KevinCFechtel/Flux/issues
+RepoType: git
+Repo: https://github.com/KevinCFechtel/Flux.git
+
+Builds:
+  - versionName: 3.0.0
+    versionCode: 2026101801
+    commit: HEAD
+    subdir: android
+    gradle:
+      - productionRelease
+    gradleprops:
+      - fluxBuildVersionCode=2026101801
+      - fluxBuildVersionName=3.0.0
+    prebuild:
+      - export FLUX_ANDROID_INCLUDE_ARMV7=1
+      - sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8/' gradle.properties
+
+AutoUpdateMode: None
+UpdateCheckMode: None
