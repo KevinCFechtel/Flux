@@ -160,7 +160,7 @@ jobs:
           PY
       - name: Build using fdroidserver recipe
         working-directory: fdroid-ci
-        run: fdroid build --verbose --latest --no-tarball --force de.circle_dev.flux_news:2026101801
+        run: fdroid build --verbose --test --no-tarball de.circle_dev.flux_news:2026101801
       - name: Upload F-Droid diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
