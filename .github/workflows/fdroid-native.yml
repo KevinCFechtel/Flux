@@ -3,6 +3,8 @@ name: F-Droid native build feasibility
 on:
   pull_request:
     paths:
+      - "Build/version.properties"
+      - "Build/release.sh"
       - "android/**"
       - "core/**"
       - ".github/workflows/fdroid-native.yml"
@@ -46,7 +48,7 @@ jobs:
           cargo fetch --locked --manifest-path core/Cargo.toml
           cargo metadata --locked --offline --manifest-path core/Cargo.toml --format-version 1 > /dev/null
       - name: Build unsigned production APK from source
-        run: ./android/Build/build-app.sh productionRelease 2026101801 3.0.0
+        run: bash Build/release.sh android
       - name: Verify APK identity and ABI coverage
         run: |
           set -euo pipefail
