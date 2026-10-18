@@ -9,6 +9,7 @@ This directory is intentionally small.
 - `PHASE_D_NATIVE_IOS_IPADOS.md` — authoritative Phase-D contract and roadmap for the native iOS/iPadOS replacement, including Apple sharing boundaries, development/production identities, migration safety, mobile UX, system integrations, and the active D1–D9 sequencing.
 - `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` — final native replacement-completion contract: retained Flutter migration/parity release gates, Settings/widget completion work, and explicit retired/replaced legacy behaviors.
 - `PHASE_E_NATIVE_ANDROID.md` — authoritative Phase-E contract for the native Android replacement, including Kotlin/Compose/UniFFI foundation, production migration, adaptive UI, background work, widgets, media, Android Auto, testing, and E1–E9 sequencing.
+- `FDROID_OPEN_GATES.md` — authoritative remaining gates for native F-Droid publication; pre-release preparation may merge without claiming signed-upgrade or reproducibility acceptance.
 - `DEPENDENCY_MAINTENANCE.md` — agreed dependency update, vulnerability scan and CI-cost policy; audits must cover pinned Rust, Android and Apple tooling before release.
 - `RELEASE_DISTRIBUTION.md` — authoritative next-step plan for unified cross-platform release scripting and store-specific distribution for Android, iOS and macOS.
 - `POST_REPLACEMENT_FOLLOWUP_PLAN.md` — post-E9 stabilization and store-readiness plan; macOS is deliberately a clean-sandbox start with no migration. Signed Sandbox acceptance is deferred, **not completed**; see `MACOS_SANDBOX_ACCEPTANCE.md`.
