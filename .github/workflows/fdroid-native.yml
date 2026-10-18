@@ -3,7 +3,7 @@ name: F-Droid native build feasibility
 on:
   pull_request:
     paths:
-      - "Build/version.properties"
+      - "Build/versions/android.properties"
       - "Build/release.sh"
       - "android/**"
       - "core/**"
@@ -84,10 +84,10 @@ jobs:
               missing=1
             fi
           done
-          source Build/version.properties
+          source Build/versions/android.properties
           package_line=$("${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep '^package:' | head -n 1)
           if [[ "${package_line}" == *"name='de.circle_dev.flux_news'"* && "${package_line}" == *"versionCode='${BUILD_NUMBER}'"* && "${package_line}" == *"versionName='${VERSION_NAME}'"* ]]; then
-            echo "PASS: package ID and version match Build/version.properties"
+            echo "PASS: package ID and version match Build/versions/android.properties"
           else
             echo "::error::Unexpected package metadata (expected de.circle_dev.flux_news, ${VERSION_NAME}, ${BUILD_NUMBER}): ${package_line}"
             missing=1
@@ -178,6 +178,12 @@ jobs:
           data = yaml.safe_load(Path("metadata/de.circle_dev.flux_news.yml").read_text())
           builds = [b for b in data["Builds"] if b["versionCode"] == 2026101801]
           assert len(builds) == 1, "Expected exactly one native build recipe"
+          # Committed Android version is authoritative; historical metadata is immutable.
+          version_file = Path("../Build/versions/android.properties")
+          versions = dict(line.split("=", 1) for line in version_file.read_text().splitlines()
+                          if line and not line.startswith("#"))
+          assert builds[0]["versionCode"] == int(versions["BUILD_NUMBER"]), "Android versionCode and F-Droid recipe differ"
+          assert builds[0]["versionName"] == versions["VERSION_NAME"], "Android versionName and F-Droid recipe differ"
           assert builds[0]["versionName"] == "3.0.0"
           assert builds[0]["commit"] != "FLUX_NATIVE_COMMIT"
           assert len(data["AllowedAPKSigningKeys"]) == 2
