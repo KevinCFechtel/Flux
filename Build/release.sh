@@ -20,7 +20,7 @@ Defaults to production RELEASE builds (never publishes).
 --target appstore archives and exports an Apple Store artifact for manual upload.
 --target developer-id (macOS) signs and notarizes an outside-store release ZIP.
 --version-code is the Android versionCode or Apple CFBundleVersion.
-Normal builds use project versions when version parameters are omitted. Store targets require both.
+Build/release.sh reads Build/versions/<platform>.properties by default; explicit version arguments override both.
 HELP
 }
 
@@ -39,6 +39,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -z "$version_code" && -z "$version_name" || -n "$version_code" && -n "$version_name" ]] || die "Version code and name must be provided together"
+if [[ -z "$version_code" && -z "$version_name" ]]; then
+  version_file="$ROOT/Build/versions/${platform}.properties"
+  [[ -f "$version_file" ]] || die "Missing platform version file: $version_file"
+  version_code="$(sed -n 's/^BUILD_NUMBER=//p' "$version_file")"
+  version_name="$(sed -n 's/^VERSION_NAME=//p' "$version_file")"
+  [[ -n "$version_code" && -n "$version_name" ]] || die "Missing version code or name in platform version file: $version_file"
+fi
 if [[ -n "$version_code" ]]; then
   [[ "$version_code" =~ ^[1-9][0-9]*$ ]] || die "Version code must be a positive integer"
   [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die "Invalid version name"
