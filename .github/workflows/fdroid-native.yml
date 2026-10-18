@@ -140,16 +140,17 @@ jobs:
           from pathlib import Path
           import os
           p = Path('fdroid-ci/metadata/de.circle_dev.flux_news.yml')
-          text = p.read_text().replace('commit: HEAD', 'commit: ' + os.environ['GITHUB_SHA'])
+          text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + os.environ['GITHUB_SHA'])
           p.write_text(text)
           PY
           printf "sdk_path: '%s'\\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
+          printf "Internet:\\n  name: Internet\\nNews:\\n  name: News\\nReading:\\n  name: Reading\\n" > fdroid-ci/categories.yml
       - name: Validate F-Droid metadata
         working-directory: fdroid-ci
         run: fdroid lint de.circle_dev.flux_news
       - name: Build using fdroidserver recipe
         working-directory: fdroid-ci
-        run: fdroid build --verbose --latest --no-tarball de.circle_dev.flux_news
+        run: fdroid build --verbose --latest --no-tarball --force de.circle_dev.flux_news:2026101801
       - name: Upload F-Droid diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
