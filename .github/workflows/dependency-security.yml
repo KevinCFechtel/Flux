@@ -1,0 +1,44 @@
+name: Dependency security (RustSec)
+
+on:
+  schedule:
+    - cron: "13 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "core/Cargo.lock"
+      - "core/Cargo.toml"
+      - "core/crates/**/Cargo.toml"
+      - ".github/workflows/dependency-security.yml"
+  push:
+    branches: [main]
+    paths:
+      - "core/Cargo.lock"
+      - "core/Cargo.toml"
+      - "core/crates/**/Cargo.toml"
+      - ".github/workflows/dependency-security.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rustsec:
+    name: Scan committed Cargo.lock for advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo audit binary and registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+          key: cargo-audit-v1
+      - name: Install locked cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Check committed Rust dependency tree
+        run: cargo audit --file core/Cargo.lock --deny warnings
