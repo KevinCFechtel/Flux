@@ -2885,10 +2885,10 @@ Builds:
   - versionName: 3.0.0
     versionCode: 2026101801
     commit: FLUX_NATIVE_COMMIT
-    output: android/app/build/outputs/apk/production/release/*.apk
+    output: android/app/build/outputs/apk/production/release/app-production-release-unsigned.apk
     build:
       - export FLUX_ANDROID_INCLUDE_ARMV7=1
-      - bash android/Build/build-app.sh productionRelease 2026101801 3.0.0
+      - bash Build/release.sh android --version-code 2026101801 --version-name 3.0.0
 
 
 AllowedAPKSigningKeys:
