@@ -53,12 +53,32 @@ jobs:
         run: |
           set -euo pipefail
           apk="android/app/build/outputs/apk/production/release/app-production-release.apk"
-          test -s "${apk}"
-          unzip -Z1 "${apk}" | grep -q '^lib/arm64-v8a/libflux_uniffi.so$'
-          unzip -Z1 "${apk}" | grep -q '^lib/x86_64/libflux_uniffi.so$'
-          unzip -Z1 "${apk}" | grep -q '^lib/armeabi-v7a/libflux_uniffi.so$'
-          "${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep -F "package: name='de.circle_dev.flux_news' versionCode='2026101801'"
+          test -s "${apk}" || { echo "::error::Missing or empty APK: ${apk}"; exit 1; }
+          echo "::group::Native libraries packaged in APK"
+          unzip -Z1 "${apk}" | grep '^lib/' || true
+          echo "::endgroup::"
+          echo "::group::APK package metadata"
+          "${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | head -n 12
+          echo "::endgroup::"
+          missing=0
+          for abi in arm64-v8a x86_64 armeabi-v7a; do
+            if unzip -Z1 "${apk}" | grep -Fx "lib/${abi}/libflux_uniffi.so" >/dev/null; then
+              echo "PASS: ${abi} native library"
+            else
+              echo "::error::Missing native library for ${abi}"
+              missing=1
+            fi
+          done
+          source Build/version.properties
+          package_line=$("${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep '^package:' | head -n 1)
+          if [[ "${package_line}" == *"name='de.circle_dev.flux_news'"* && "${package_line}" == *"versionCode='${BUILD_NUMBER}'"* && "${package_line}" == *"versionName='${VERSION_NAME}'"* ]]; then
+            echo "PASS: package ID and version match Build/version.properties"
+          else
+            echo "::error::Unexpected package metadata (expected de.circle_dev.flux_news, ${VERSION_NAME}, ${BUILD_NUMBER}): ${package_line}"
+            missing=1
+          fi
           sha256sum "${apk}" > fdroid-native-apk.sha256
+          exit "${missing}"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
