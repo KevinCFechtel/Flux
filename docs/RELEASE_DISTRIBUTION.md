@@ -423,6 +423,15 @@ The central `Build/release.sh` accepts `--version-code` and `--version-name` for
 
 ## R cleanup: distribution entry points
 
-The former iOS `export-testflight.sh` has been replaced by `apple/ios/Build/export-appstore.sh`; the former macOS `release.sh` is now `apple/macos/Build/release-developer-id.sh`. Both former files have been deleted. The central `Build/release.sh` delegates to these named distribution scripts; for a notarized Developer ID ZIP run `bash Build/release.sh macos --target developer-id [--version-code N --version-name V]`. The Developer ID script accepts explicit version overrides, and its output remains `dist/release/`; the notarized `dist/FluxNews.app` is the default source for `install-local.sh`. App Store and Developer ID are distinct signing/distribution channels. External automation using the old paths must be updated.
+The former iOS `export-testflight.sh` has been replaced by `apple/ios/Build/export-appstore.sh`; the former macOS `release.sh` is now `apple/macos/Build/release-developer-id.sh`. Both former files have been deleted. The central `Build/release.sh` delegates to these named distribution scripts; for a notarized Developer ID ZIP run `bash Build/release.sh macos --target developer-id [--version-code N --version-name V]`. The Developer ID script accepts explicit version overrides, and its output is `dist/macos/developer-id/`; the notarized `dist/FluxNews.app` is the default source for `install-local.sh`. App Store and Developer ID are distinct signing/distribution channels. External automation using the old paths must be updated.
 
 The cleanup is not a claim of release acceptance: validate CI and run the Apple signing/notarization/export workflows on the owner's Mac before merging.
+
+## macOS distribution artifact layout
+
+Both macOS distribution artifacts live under `dist/macos/`:
+
+- `dist/macos/appstore/*.pkg`: Mac App Store Connect package for Transporter (unchanged).
+- `dist/macos/developer-id/FluxNews-<version>-macos-<architecture>.zip`: notarized Developer ID ZIP (moved from `dist/release/`).
+
+The unpackaged `dist/FluxNews.app` remains the source for `install-local.sh`; existing ZIP files in the legacy `dist/release/` directory are not automatically moved or removed. Re-run the Developer ID release to create an artifact in the new directory.
