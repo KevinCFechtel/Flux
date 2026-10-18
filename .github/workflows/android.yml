@@ -26,6 +26,7 @@ jobs:
   build:
     name: Unit and build gate
     if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feat/b2-fdroid-native-preparation' }}
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feat/b2-fdroid-native-preparation' }}
     runs-on: ubuntu-24.04
     env:
       ANDROID_NDK_VERSION: "29.0.14206865"
