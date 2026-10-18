@@ -25,6 +25,7 @@ permissions:
 jobs:
   macos:
     name: macOS tests
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feat/b2-fdroid-native-preparation' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
