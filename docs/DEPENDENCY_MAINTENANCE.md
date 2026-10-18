@@ -48,6 +48,42 @@ is emergency mitigation, **not** completion of an outdated dependency upgrade.
   **making the code compatible**, not by disabling tests or suppressing
   advisories.
 
+## Strict unmaintained-dependency release gate
+
+A dependency which is no longer maintained is an **unacceptable release
+risk** for Flux, even if no specific exploit has yet been disclosed. The
+project must not ship a new release while RustSec reports a vulnerability
+**or an unmaintained dependency** in the resolved dependency graph.
+This includes **transitive** packages. Replacing the dependency or migrating
+its parent crate is mandatory; no blanket ignore list, downgraded exit status
+or permanent exception is accepted.
+
+The workflow therefore enforces `cargo audit --file core/Cargo.lock --deny
+warnings`, deliberately including RustSec's maintenance warnings. A red
+result is actionable and must remain visible until the dependency is replaced.
+Passing this check is necessary for release readiness, not sufficient
+proof of complete security or up-to-date dependencies.
+
+**Current blocking findings (18 October 2026):**
+
+| Unmaintained crate | Locked version | Direct dependency chain |
+| --- | --- | --- |
+| `paste` | 1.0.15 | `lofty 0.22.4` |
+| `rustls-pemfile` | 2.2.0 | `ureq 2.12.1` → `rustls-native-certs 0.7.3` |
+| `rustybuzz` | 0.20.1 | `usvg 0.45.1` |
+| `ttf-parser` | 0.25.1 | `usvg 0.45.1` → `fontdb 0.23.0` and `rustybuzz 0.20.1` |
+
+These **must actually disappear from `core/Cargo.lock`** after upgrading or
+replacing `lofty`, `ureq`, `usvg`, or transitive dependencies. Updating a
+manifest constraint without rebuilding and verifying the lockfile does not
+satisfy the gate.
+
+**One-time transition:** landing the strict policy/CI into `main` makes
+already-present findings visible and can initially create an expected red
+security check. This is not a waiver for any release or later dependency
+acceptance. Work on dependency updates continues as the highest priority
+until the strict security check AND all affected platform checks pass.
+
 ## Automated monitoring and CI costs
 
 1. Configure GitHub Dependabot **version updates including major versions**
@@ -60,12 +96,11 @@ is emergency mitigation, **not** completion of an outdated dependency upgrade.
    **security updates** and GitHub vulnerability alerts must remain enabled
    in repository settings; verify that their alert visibility and notification
    routing actually work after cutover.
-3. Run an isolated, **daily RustSec scan** of `core/Cargo.lock` (`cargo
-   audit`), without building Rust targets, Android apps, or Apple apps.
-   Run the same scan after `core/Cargo.lock` changes and via manual dispatch.
-   Fail for disclosed vulnerabilities, publish diagnostic output, and do
-   not silently suppress findings. Any explicit exception requires a
-   linked upstream advisory, rationale, owner, and a review/expiry date.
+3. Run an isolated, **daily strict RustSec scan** of `core/Cargo.lock`
+   (`cargo audit --deny warnings`), without building Rust targets, Android
+   apps, or Apple apps. Run it after `core/Cargo.lock` changes and via
+   manual dispatch. **Fail for vulnerabilities, unmaintained crates and
+   other RustSec warnings.** Preserve output, do not suppress findings.
 4. Dependabot's routine PRs should not themselves cascade redundant full
    test suites. Limit open PRs, group updates and use existing per-workflow
    `concurrency.cancel-in-progress` behavior; Rust/Android/Apple CI remain
