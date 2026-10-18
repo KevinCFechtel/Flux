@@ -143,7 +143,13 @@ jobs:
           text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + os.environ['GITHUB_SHA'])
           p.write_text(text)
           PY
-          printf "sdk_path: '%s'\\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
+          printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
+          cat >> fdroid-ci/config.yml <<'YAML'
+          categories:
+            - Internet
+            - News
+            - Reading
+          YAML
       - name: Validate F-Droid YAML and native build selection
         working-directory: fdroid-ci
         run: |
@@ -158,16 +164,30 @@ jobs:
           assert len(data["AllowedAPKSigningKeys"]) == 2
           print("F-Droid YAML and native build selection verified")
           PY
+      - name: Run full F-Droid lint
+        working-directory: fdroid-ci
+        run: fdroid lint de.circle_dev.flux_news
       - name: Build using fdroidserver recipe
         working-directory: fdroid-ci
-        run: fdroid build --verbose --test --no-tarball de.circle_dev.flux_news:2026101801
+        run: |
+          set -euo pipefail
+          fdroid build --verbose --test --no-tarball de.circle_dev.flux_news:2026101801 2>&1 | tee fdroid-build.log
+          if grep -Eq '([1-9][0-9]* build[s]? failed|Could not build app|Traceback \(most recent call last\))' fdroid-build.log; then
+            echo "::error::fdroidserver reported a build failure despite its exit status"
+            exit 1
+          fi
+          find . -type f -name '*.apk' -print
+          if ! find . -type f -name '*.apk' -size +0c | grep -q .; then
+            echo "::error::fdroidserver did not produce a nonempty APK"
+            exit 1
+          fi
       - name: Upload F-Droid diagnostic output
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: fdroid-native-recipe-diagnostics
           path: |
-            fdroid-ci/logs/
+            fdroid-ci/fdroid-build.log\n            fdroid-ci/logs/
             fdroid-ci/unsigned/
           if-no-files-found: ignore
           retention-days: 7
