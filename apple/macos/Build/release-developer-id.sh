@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-APP_DIR="${REPOSITORY_DIR}/dist/FluxNews.app"
+APP_DIR="${REPOSITORY_DIR}/dist/macos/FluxNews.app"
 RELEASE_DIR="${REPOSITORY_DIR}/dist/macos/developer-id"
 INFO_PLIST="${REPOSITORY_DIR}/apple/macos/FluxNews/Info.plist"
 APP_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNews/FluxNews.entitlements"
