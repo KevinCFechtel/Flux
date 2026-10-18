@@ -214,6 +214,45 @@ This proves one CI test build, **not** repeatable official F-Droid eligibility,
 historic-signing compatibility or implemented release promotion. PR #66
 remains separate from this documentation decision.
 
+### Platform-specific version files (decision: 18 October 2026)
+
+The repository records release versions in **one committed file per platform**:
+
+| File | Application | Keys |
+| --- | --- | --- |
+| `Build/versions/android.properties` | Android (GitHub, F-Droid, Play) | `VERSION_NAME`, `BUILD_NUMBER` |
+| `Build/versions/ios.properties` | iOS/iPadOS | `VERSION_NAME`, `BUILD_NUMBER` |
+| `Build/versions/macos.properties` | macOS (App Store, optional Developer ID) | `VERSION_NAME`, `BUILD_NUMBER` |
+
+`VERSION_NAME` is the marketing version; `BUILD_NUMBER` maps to Android
+`versionCode` or Apple `CFBundleVersion`. A platform-specific version
+change must be reviewed and committed with the intended source changes.
+The files start at the previously shared values, `3.0.0` and
+`2026101801`, **without declaring any new release or bumping versions**.
+They may diverge later as release cycles become independent.
+
+`bash Build/release.sh <platform>` defaults to that platform's committed
+file; explicit `--version-code` and `--version-name` together continue to
+override it, preserving the existing CLI contract. A missing/incomplete
+platform version file is an error, not permission to fall back silently to
+another platform. Internal Gradle/Xcode development fallbacks are **not**
+production release-version sources.
+
+The eventual release orchestrator reads and validates the requested
+platform file(s), their monotonically compatible build numbers and the exact
+candidate SHA. It must **not** generate/auto-increment versions or push
+version-bump commits during promotion. For `all` releases it additionally
+checks that all three `VERSION_NAME` values match; differing numbers imply
+separate platform releases. The F-Droid recipe/versionCode and versionName
+must agree with the **Android** file, but historical F-Droid entries and
+signing fingerprints remain immutable. Do not introduce multiple manually
+maintained version authorities in Gradle, Xcode, F-Droid and Actions.
+
+**Implementation state:** The split and CLI selection are being developed
+in [PR #66](https://github.com/KevinCFechtel/Flux/pull/66); orchestration
+and automated F-Droid recipe generation remain follow-up work. Documenting
+this decision does not authorize any tag, store upload, or F-Droid submission.
+
 ## 4. Android — Google Play
 
 The current Android build already has a canonical production bundle path through
