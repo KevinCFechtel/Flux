@@ -133,6 +133,8 @@ jobs:
           "${RUNNER_TEMP}/fdroid-venv/bin/pip" install fdroidserver
           echo "${RUNNER_TEMP}/fdroid-venv/bin" >> "${GITHUB_PATH}"
       - name: Prepare isolated F-Droid metadata workspace
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           mkdir -p fdroid-ci/metadata
@@ -141,12 +143,11 @@ jobs:
           from pathlib import Path
           import os
           p = Path('fdroid-ci/metadata/de.circle_dev.flux_news.yml')
-          text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + os.environ['GITHUB_SHA'])
+          sha = os.environ.get('PR_HEAD_SHA') or os.environ['GITHUB_SHA']
+          text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + sha)
           p.write_text(text)
           PY
-          mkdir -p fdroid-ci/build/de.circle_dev.flux_news
-          cp -a .git fdroid-ci/build/de.circle_dev.flux_news/
-          git -C fdroid-ci/build/de.circle_dev.flux_news reset --hard "${GITHUB_SHA}"
+          echo "F-Droid source commit: ${PR_HEAD_SHA:-$GITHUB_SHA}"
           printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
           cat >> fdroid-ci/config.yml <<'YAML'
           categories:
@@ -181,7 +182,7 @@ jobs:
             exit 1
           fi
           find . -type f -name '*.apk' -print
-          if ! find . -type f -name '*.apk' -size +0c | grep -q .; then
+          if ! find unsigned -maxdepth 1 -type f -name '*.apk' -size +0c | grep -q .; then
             echo "::error::fdroidserver did not produce a nonempty APK"
             exit 1
           fi
