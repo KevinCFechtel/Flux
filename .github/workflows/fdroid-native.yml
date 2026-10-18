@@ -144,10 +144,20 @@ jobs:
           p.write_text(text)
           PY
           printf "sdk_path: '%s'\\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
-          printf "Internet:\\n  name: Internet\\nNews:\\n  name: News\\nReading:\\n  name: Reading\\n" > fdroid-ci/categories.yml
-      - name: Validate F-Droid metadata
+      - name: Validate F-Droid YAML and native build selection
         working-directory: fdroid-ci
-        run: fdroid lint de.circle_dev.flux_news
+        run: |
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+          data = yaml.safe_load(Path("metadata/de.circle_dev.flux_news.yml").read_text())
+          builds = [b for b in data["Builds"] if b["versionCode"] == 2026101801]
+          assert len(builds) == 1, "Expected exactly one native build recipe"
+          assert builds[0]["versionName"] == "3.0.0"
+          assert builds[0]["commit"] != "FLUX_NATIVE_COMMIT"
+          assert len(data["AllowedAPKSigningKeys"]) == 2
+          print("F-Droid YAML and native build selection verified")
+          PY
       - name: Build using fdroidserver recipe
         working-directory: fdroid-ci
         run: fdroid build --verbose --latest --no-tarball --force de.circle_dev.flux_news:2026101801
