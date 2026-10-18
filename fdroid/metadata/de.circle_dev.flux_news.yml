@@ -2880,16 +2880,30 @@ Builds:
     ndk: r28c
 
 
-  # Native Flux 3.0 source-build candidate. The CI replaces the commit with
-  # the exact PR head SHA; this is not a published F-Droid release.
+  # Native Flux 3.0 source-build candidate. CI substitutes the PR head SHA.
+  # Gradle orchestrates Rust/UniFFI once; fdroidserver handles the APK output.
   - versionName: 3.0.0
     versionCode: 2026101801
     commit: FLUX_NATIVE_COMMIT
-    output: android/app/build/outputs/apk/production/release/app-production-release-unsigned.apk
-    build:
-      - export FLUX_ANDROID_INCLUDE_ARMV7=1
-      - bash Build/release.sh android --version-code 2026101801 --version-name 3.0.0
-
+    subdir: android
+    sudo:
+      - apt-get update
+      - apt-get install -y rustup
+    gradle:
+      - production
+    output: app/build/outputs/apk/production/release/app-production-release-unsigned.apk
+    prebuild:
+      - rustup default 1.98.0
+      - rustup target add aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
+    # settings.gradle.kts uses a Cargo-lock-pinned local Maven AAR repository.
+    # fdroidserver 2.4.5 mistakes the Kotlin expression for a remote URL.
+    scanignore:
+      - android/settings.gradle.kts
+    gradleprops:
+      - fluxBuildVersionCode=2026101801
+      - fluxBuildVersionName=3.0.0
+      - fluxAndroidIncludeArmv7=1
+    ndk: 29.0.14206865
 
 AllowedAPKSigningKeys:
   - fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb
