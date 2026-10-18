@@ -467,14 +467,100 @@ the final tag/GitHub Release only after this gate passes. Google Play
 preparation/submission remains optional and owner-controlled; it cannot
 delay an otherwise approved GitHub/F-Droid release.
 
+### Two-repository release ownership and cutover (decision: 18 October 2026)
+
+**Confirmed repository ownership:**
+
+- [`KevinCFechtel/Flux`](https://github.com/KevinCFechtel/Flux)
+  **remains** the development repository and hosts the release orchestration,
+  release scripts, PR checks and candidate validation. Do **not** relocate
+  the entire release workflow to FluxNews.
+- [`KevinCFechtel/FluxNews`](https://github.com/KevinCFechtel/FluxNews)
+  remains the **public product repository**: its repository identity,
+  stars/watchers, issues/discussions/comments, existing releases and
+  historical Flutter Git tags must be preserved. After the approved
+  cutover, its root contains the native app; the current Flutter source is
+  archived under `legacy/`. Flux itself also remains available.
+- The final user-facing GitHub Release pages, Android download links and
+  release tags belong to **FluxNews**. Running the publishing workflow
+  from **Flux** is compatible with publishing into another repository;
+  workflow residence and release destination are independent. The target
+  repository is always passed explicitly, never assumed from
+  `GITHUB_REPOSITORY`.
+
+**Commit provenance across two repositories:**
+
+- A tested `Flux` development commit and a `FluxNews` publication commit
+  generally have **different Git SHAs**, even if the native app files match,
+  because `FluxNews` retains its own previous history and `legacy/`.
+  Record both SHAs, and validate a manifest/hash comparison of the native
+  source tree and the committed platform versions. Do not equate the two.
+- Before promotion, prepare the target changes as a **candidate commit in
+  FluxNews** (e.g. a reviewable staging PR/branch). Preserve the old history
+  and tags, do not force-push a replacement Git history, and keep the
+  legacy sources from accidentally being built by root-level workflows.
+- The mandatory release gates, including the F-Droid recipe/source-APK gate
+  for Android, must validate the **exact candidate commit to be tagged in
+  FluxNews**. Running checks only for an earlier Flux SHA is not sufficient
+  after a migration, rebase, merge or version change. A candidate-changing
+  commit invalidates previous approvals and requires revalidation. Ensure
+  the eventual target release SHA has passed the required gates.
+- On success, create platform/common release tags pointing to the validated
+  **FluxNews** commit and publish exactly one corresponding **FluxNews**
+  GitHub Release. Add the origin Flux SHA and target FluxNews SHA to release
+  provenance/notes. For combined releases, all final tags point to the same
+  validated FluxNews commit.
+
+**Migration and CI safety requirements:**
+
+1. Implement and test release orchestration in `Flux` without initiating
+   publications. Separately rehearse a non-destructive Flux-to-FluxNews
+   import, preserving the target's existing history, releases and tag names.
+2. Audit and disable/replace **old Flutter tag-triggered workflows in
+   FluxNews before pushing any native release tag**, notably
+   `.github/workflows/build-and-release.yml` (`on.push.tags: v*`),
+   which also invokes `submit-fdroid-signatures.yml`. The old F-Droid
+   submission must **never** be triggered by a native or shared `vX.Y.Z`
+   tag. Merely moving Flutter code to `legacy/` does not disable workflows.
+3. Update the **native** F-Droid recipe's final `Repo` and source commit
+   references for the approved publication location. The current B2
+   experimental recipe points to `Flux.git` and is **not yet the final
+   migrated release recipe**. Preserve historic Flutter build metadata,
+   commit/tag resolvability and both allowed signing fingerprints. Audit
+   official F-Droid source checkout and signing/update compatibility before
+   authorizing a real submission.
+4. Cross-repository writes (staging synchronization, target tag and release
+   creation) require an explicit least-privilege GitHub App installation
+   token or narrowly scoped fine-grained credential authorized for
+   `FluxNews`; the ordinary `Flux` `GITHUB_TOKEN` must not be assumed
+   to have cross-repository write rights. Separate read-only CI from
+   narrowly permissioned promotion, with explicit owner approval.
+5. Protect existing `FluxNews` tags and releases; reject collisions and
+   use a recoverable staged promotion instead of rewriting tags or starting
+   concurrent publication paths. Existing historical Flutter downloads
+   remain accessible. Verify source continuity, correct store/package
+   identity and matching signed update path before the first native release.
+6. `Flux` remains the location of the four-scope manual release control
+   (`android`, `ios`, `macos`, `all`). Google Play and Apple App Store
+   uploads remain manual/owner-controlled; actual official F-Droid
+   submission is separately authorized and remains prohibited during B2
+   test/CI work.
+
+**Order:** finish native/B2 technical readiness in Flux; establish and
+review the FluxNews cutover; validate the final FluxNews candidate SHA;
+then (and only then) authorize target tags/GitHub Release. The permanent
+release controller stays in Flux. This is an architecture decision, **not**
+an implemented repository migration or a publication authorization.
+
 ### Hybrid platform tags and selective CI gates (decision: 18 October 2026)
 
 > **Approved design, not implemented.** The release orchestrator, tag creation
 > and any Store/F-Droid publication remain disabled until explicitly built,
 > validated and authorized. PR #67 documents the design only.
 
-Flux uses one source repository but independent Android, iOS/iPadOS and macOS
-release cycles. A manual release-candidate workflow (proposed
+Flux is the development/orchestration repository while FluxNews retains the
+public product history, tags and GitHub Releases; the release cycles for
+Android, iOS/iPadOS and macOS remain independent. A manual release-candidate workflow (proposed
 `workflow_dispatch`) takes `scope` (`android`, `ios`, `macos`, or
 `all`), `versionName`, the **full immutable Git commit SHA**, and the
 applicable platform build/version codes. Resolve these inputs up front;
@@ -609,6 +695,7 @@ This release-scripting follow-up is complete when:
 - Android Play AAB preparation is deterministic and versioned;
 - the manual release entry point selects `android`, `ios`, `macos` or `all` gates by immutable candidate SHA, running shared Rust checks only once;
 - platform tags produce their independent release pages, while all-platform releases create a common tag and exactly one combined GitHub Release;
+- release orchestration remains in `Flux`; target repository `FluxNews` retains its history, public tags and GitHub Releases, with both source/target SHA provenance and final gates on the actual FluxNews candidate;
 - every Android GitHub Release is blocked until the F-Droid metadata/scanner/real-APK build and shared mandatory checks pass for the exact candidate SHA;
 - a failed release candidate cannot create a final tag or GitHub Release, and fixes are retested at a new SHA;
 - the F-Droid-style source build and scanner feasibility checks pass before publishing is automated;
