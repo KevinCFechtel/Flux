@@ -259,6 +259,16 @@ risks to audit, **not proof** of F-Droid scanner rejection.
 and source requirements are documented, and Flutter-to-native signed update
 compatibility is demonstrated before publication automation replaces legacy.
 
+### B2.1 preliminary repository audit (18 October 2026)
+
+**Status: source inspection started; no F-Droid scanner/source build executed.**
+
+- `android/settings.gradle.kts` runs `cargo metadata` at Gradle settings evaluation and resolves a Maven AAR bundled with the pinned `rustls-platform-verifier-android` Cargo crate. Verify availability under F-Droid's prepared/offline build environment and source/provenance rules.
+- `android/app/build.gradle.kts` declares `net.java.dev.jna:jna:5.19.1@aar` and `rustls:rustls-platform-verifier:...@aar`; audit both against current F-Droid scanner and source-build requirements before changing dependencies.
+- `android/Build/build-uniffi.sh` compiles Rust shared libraries for `arm64-v8a` and `x86_64`. The legacy `FluxNews` F-Droid metadata/signature workflow handles `x86_64`, `armeabi-v7a` and `arm64-v8a` separately with version-code offsets +1/+2/+3. Compare existing fdroiddata recipes and decide how native ABI coverage and version codes can transition safely.
+- The old `FluxNews/.github/workflows/submit-fdroid-signatures.yml` prepares developer signatures and metadata; `prepare_fdroid_metadata.py` enforces `AllowedAPKSigningKeys` and `AutoUpdateMode: None`. Do not copy old Flutter-specific recipes verbatim.
+- Next gate: retrieve actual fdroiddata metadata, record existing signing fingerprints/version codes and build recipe; run representative F-Droid-style build plus scanner, then validate signed upgrade on device. No F-Droid compatibility or reproducibility claim yet.
+
 ## 5. C — Product parity and quality improvements
 
 ### C1 — Android localization
