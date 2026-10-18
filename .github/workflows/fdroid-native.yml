@@ -19,91 +19,6 @@ permissions:
   contents: read
 
 jobs:
-  source-build:
-    if: false
-    name: Linux native APK and source dependency gate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      ANDROID_NDK_VERSION: "29.0.14206865"
-      FLUX_ANDROID_INCLUDE_ARMV7: "1"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-      - uses: android-actions/setup-android@v4.0.4
-        with:
-          packages: platform-tools
-      - name: Install Android SDK and NDK
-        run: |
-          ANDROID_CLI="${ANDROID_HOME}/cmdline-tools/22.0/bin/android"
-          test -x "${ANDROID_CLI}"
-          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "platforms/android-37.0"
-          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "build-tools/37.0.0"
-          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "ndk/${ANDROID_NDK_VERSION}"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
-      - uses: dtolnay/rust-toolchain@1.98.0
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
-      - name: Check Rust dependency lock and metadata
-        run: |
-          cargo metadata --locked --manifest-path core/Cargo.toml --format-version 1 > /dev/null
-          cargo fetch --locked --manifest-path core/Cargo.toml
-          cargo metadata --locked --offline --manifest-path core/Cargo.toml --format-version 1 > /dev/null
-      - name: Build unsigned production APK from source
-        run: bash Build/release.sh android
-      - name: Verify APK identity and ABI coverage
-        run: |
-          set -euo pipefail
-          apk_dir="android/app/build/outputs/apk/production/release"
-          echo "::group::Gradle APK outputs"
-          find android/app/build/outputs/apk -maxdepth 5 -type f -print | sort || true
-          echo "::endgroup::"
-          mapfile -t apks < <(find "${apk_dir}" -maxdepth 1 -type f -name '*.apk' -size +0c | sort)
-          if (( ${#apks[@]} != 1 )); then
-            echo "::error::Expected exactly one nonempty production release APK in ${apk_dir}; found ${#apks[@]}"
-            exit 1
-          fi
-          apk="${apks[0]}"
-          echo "Validating APK: ${apk}"
-          echo "::group::Native libraries packaged in APK"
-          unzip -Z1 "${apk}" | grep '^lib/' || true
-          echo "::endgroup::"
-          echo "::group::APK package metadata"
-          "${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | head -n 12
-          echo "::endgroup::"
-          missing=0
-          for abi in arm64-v8a x86_64 armeabi-v7a; do
-            if unzip -Z1 "${apk}" | grep -Fx "lib/${abi}/libflux_uniffi.so" >/dev/null; then
-              echo "PASS: ${abi} native library"
-            else
-              echo "::error::Missing native library for ${abi}"
-              missing=1
-            fi
-          done
-          source Build/versions/android.properties
-          package_line=$("${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep '^package:' | head -n 1)
-          if [[ "${package_line}" == *"name='de.circle_dev.flux_news'"* && "${package_line}" == *"versionCode='${BUILD_NUMBER}'"* && "${package_line}" == *"versionName='${VERSION_NAME}'"* ]]; then
-            echo "PASS: package ID and version match Build/versions/android.properties"
-          else
-            echo "::error::Unexpected package metadata (expected de.circle_dev.flux_news, ${VERSION_NAME}, ${BUILD_NUMBER}): ${package_line}"
-            missing=1
-          fi
-          sha256sum "${apk}" > fdroid-native-apk.sha256
-          exit "${missing}"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: fdroid-native-feasibility
-          path: |
-            android/app/build/outputs/apk/production/release/*.apk
-            fdroid-native-apk.sha256
-          if-no-files-found: warn
-          retention-days: 7
-
   fdroid-recipe:
     name: F-Droid metadata and source build (experimental)
     runs-on: ubuntu-24.04
@@ -146,16 +61,10 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          mkdir -p fdroid-ci/metadata
-          cp fdroid/metadata/de.circle_dev.flux_news.yml fdroid-ci/metadata/
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          p = Path('fdroid-ci/metadata/de.circle_dev.flux_news.yml')
-          sha = os.environ.get('PR_HEAD_SHA') or os.environ['GITHUB_SHA']
-          text = p.read_text().replace('commit: FLUX_NATIVE_COMMIT', 'commit: ' + sha)
-          p.write_text(text)
-          PY
+          source_sha="${PR_HEAD_SHA:-$GITHUB_SHA}"
+          python3 fdroid/test_prepare_native_recipe.py
+          python3 fdroid/prepare_native_recipe.py --source-sha "${source_sha}" --output fdroid-ci/metadata/de.circle_dev.flux_news.yml
+          echo "FDROID_SOURCE_SHA=${source_sha}" >> "${GITHUB_ENV}"
           echo "F-Droid source commit: ${PR_HEAD_SHA:-$GITHUB_SHA}"
           # fdroidserver 2.4.5 reads SOURCE_DATE_EPOCH before it checks out sources.
           git clone --no-checkout https://github.com/KevinCFechtel/Flux.git fdroid-ci/build/de.circle_dev.flux_news
@@ -185,7 +94,7 @@ jobs:
           assert builds[0]["versionCode"] == int(versions["BUILD_NUMBER"]), "Android versionCode and F-Droid recipe differ"
           assert builds[0]["versionName"] == versions["VERSION_NAME"], "Android versionName and F-Droid recipe differ"
           assert builds[0]["versionName"] == "3.0.0"
-          assert builds[0]["commit"] != "FLUX_NATIVE_COMMIT"
+          assert builds[0]["commit"] == __import__("os").environ["FDROID_SOURCE_SHA"]
           assert len(data["AllowedAPKSigningKeys"]) == 2
           print("F-Droid YAML and native build selection verified")
           PY
@@ -196,20 +105,21 @@ jobs:
         working-directory: fdroid-ci
         run: |
           set -euo pipefail
-          fdroid build --verbose --test --stop --no-tarball de.circle_dev.flux_news:2026101801 2>&1 | tee fdroid-build.log
+          source ../Build/versions/android.properties
+          fdroid build --verbose --test --stop --no-tarball "de.circle_dev.flux_news:${BUILD_NUMBER}" 2>&1 | tee fdroid-build.log
           if grep -Eq '([1-9][0-9]* build[s]? failed|Could not build app|Traceback \(most recent call last\))' fdroid-build.log; then
             echo "::error::fdroidserver reported a build failure despite its exit status"
             exit 1
           fi
           # fdroidserver --test outputs are in tmp/, not unsigned/.
-          apk="tmp/de.circle_dev.flux_news_2026101801.apk"
+          apk="tmp/de.circle_dev.flux_news_${BUILD_NUMBER}.apk"
           if [[ ! -s "${apk}" ]]; then
             echo "::error::Missing or empty F-Droid test APK: ${apk}"
             find tmp -maxdepth 1 -type f -name '*.apk' -print || true
             exit 1
           fi
           package_line="$("${ANDROID_HOME}/build-tools/37.0.0/aapt" dump badging "${apk}" | grep '^package:')"
-          if [[ "${package_line}" != *"name='de.circle_dev.flux_news'"* || "${package_line}" != *"versionCode='2026101801'"* || "${package_line}" != *"versionName='3.0.0'"* ]]; then
+          if [[ "${package_line}" != *"name='de.circle_dev.flux_news'"* || "${package_line}" != *"versionCode='${BUILD_NUMBER}'"* || "${package_line}" != *"versionName='${VERSION_NAME}'"* ]]; then
             echo "::error::Unexpected F-Droid APK identity: ${package_line}"
             exit 1
           fi
