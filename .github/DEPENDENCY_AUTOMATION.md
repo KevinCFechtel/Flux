@@ -9,8 +9,12 @@ RustSec advisory check daily and whenever the Rust manifests/lockfile change.
 
 - Enable GitHub Dependency Graph, Dependabot Alerts and Dependabot Security
   Updates in repository settings. The YAML file alone cannot activate alerts.
-- Version-update PRs are bounded to 2 open PRs per ecosystem, with patch/minor
-  versions grouped. Major updates remain separate. Dependabot security updates
+- Version-update PRs are bounded to 8 open PRs per ecosystem to keep major
+  upgrades visible, with routine patch/minor updates grouped. New stable
+  major versions are actively targeted (including necessary source migrations),
+  rather than skipped to protect existing pins. An old major needs an active
+  upgrade PR or a concrete, dated blocker; do not rely on green CI as proof
+  that using an old version is acceptable. Dependabot security updates
   may have independent behavior and must be reviewed immediately.
 - A RustSec run is a vulnerability/advisory signal, **not** a guarantee that
   every dependency is current, correct, legal for F-Droid or safe.
