@@ -18,14 +18,45 @@ Do **not** declare all such versions vulnerable: `Cargo.lock` shows the
 versions actually built, and a RustSec advisory check plus investigation of
 each finding is required before making security claims.
 
+## Update-first maintenance policy
+
+**Default: regularly adopt the newest stable upstream dependency generations, including
+major-version changes.** A build that happens to work on an old version is not a
+reason to retain it. Compatibility work is part of dependency maintenance,
+not an indefinite blocker or a separate optional project. Security-only patching
+is emergency mitigation, **not** completion of an outdated dependency upgrade.
+
+- At least weekly, compare all direct Rust, Gradle/Kotlin/Android and GitHub
+  Actions dependencies against the latest **stable** releases, and review the
+  actually resolved lockfile and relevant transitive dependencies. Include
+  compiler/SDK/NDK/Xcode and the rustls Kotlin/Rust subcomponent relationship
+  in a periodic toolchain review; Dependabot alone cannot cover all of them.
+- **Do not exclude major upgrades.** Offer them in Dependabot and work through
+  API/source/FFI migrations, adapting code, tests and generation scripts.
+  Group dependencies according to compatibility boundaries rather than
+  applying the largest number of unrelated upgrades in one unreviewable PR.
+- Every outdated major version must have an active upgrade PR or a tracked
+  actionable blocker, with affected APIs, a concrete next action, owner and
+  review date. A green CI or vague fear of breakage is **not** an accepted
+  blocker. Revisit blockers at least weekly; do not roll them over silently.
+- Urgent advisories receive an immediate targeted fix if required, followed
+  by the ordinary **current-stable upgrade**. Security fixes and currency
+  are two separate success criteria.
+- Merge only after affected Rust, Android, Apple, F-Droid and runtime trust/
+  migration gates are satisfied. No untested bulk version bumps, skipped
+  required CI, automatic merge or release. Apply current versions by
+  **making the code compatible**, not by disabling tests or suppressing
+  advisories.
+
 ## Automated monitoring and CI costs
 
-1. Configure GitHub Dependabot **version updates** for `cargo` at `/core`,
-   `gradle` at `/android` and `github-actions` at `/`. Prefer weekly
-   review for Cargo/Gradle and monthly for Actions, with at most **one
-   simultaneously open version-update PR per ecosystem** initially.
-2. Group routine patch/minor version updates, but keep **major updates**
-   separate and deliberate. No auto-merge and no auto-release. Dependabot
+1. Configure GitHub Dependabot **version updates including major versions**
+   for `cargo` at `/core`, `gradle` at `/android` and `github-actions`
+   at `/`. Review Cargo/Gradle weekly and Actions monthly, with a meaningful
+   PR budget that does **not** hide unreviewed majors behind a two-PR queue.
+2. Group patch/minor updates to control CI load, and actively migrate **major
+   updates** as small compatibility-related batches, not postponed indefinitely.
+   No auto-merge and no auto-release. Dependabot
    **security updates** and GitHub vulnerability alerts must remain enabled
    in repository settings; verify that their alert visibility and notification
    routing actually work after cutover.
@@ -64,9 +95,11 @@ For each dependency version change, verify:
 - relevant tests on all affected targets, both routine CI and specific
   device/integration checks when required.
 
-Prioritize security fixes. Do not bulk-upgrade unrelated **major versions**
-just to make the inventory look current. Record intentional pins, why
-upgrading is blocked and an explicit re-review trigger. Release promotion
+Prioritize both security **and latest stable versions**. Do not create one
+unreviewable PR that changes all unrelated major APIs at once, but also do not
+keep old major generations solely to avoid adapting product code. For any
+necessary temporary pin, require a reproducible blocker, a concrete follow-up
+and a dated review; keep its owner-visible status current. Release promotion
 must not rely on a skipped, missing, or failed required gate.
 
 ## Baseline findings to investigate (inventory, not accepted upgrades)
@@ -94,6 +127,11 @@ not be misread as a dependency freshness assessment.
   `FluxNews` (and can no longer be controlled from `Flux`).
 - Keep documentation separate from source version changes so docs-only
   commits do not trigger costly Rust/Apple/F-Droid CI.
+- Carry out a tracked series of compatibility-focused current-stable updates:
+  (a) rustls-platform-verifier + Android JNI/Kotlin source and TLS trust,
+  (b) ureq transport, (c) rusqlite/storage, (d) UniFFI bindings across all
+  platforms, then other audio/rendering/crypto dependencies. These are **upgrade
+  tasks**, not indefinite recommendations to remain on old versions.
 - Changes to critical or coupled dependencies should be tested on isolated
   PRs with **one consolidated verification cycle per candidate SHA**.
 - A passing F-Droid recipe/build on a version is not a substitute for the
