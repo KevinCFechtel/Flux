@@ -52,8 +52,17 @@ jobs:
       - name: Verify APK identity and ABI coverage
         run: |
           set -euo pipefail
-          apk="android/app/build/outputs/apk/production/release/app-production-release.apk"
-          test -s "${apk}" || { echo "::error::Missing or empty APK: ${apk}"; exit 1; }
+          apk_dir="android/app/build/outputs/apk/production/release"
+          echo "::group::Gradle APK outputs"
+          find android/app/build/outputs/apk -maxdepth 5 -type f -print | sort || true
+          echo "::endgroup::"
+          mapfile -t apks < <(find "${apk_dir}" -maxdepth 1 -type f -name '*.apk' -size +0c | sort)
+          if (( ${#apks[@]} != 1 )); then
+            echo "::error::Expected exactly one nonempty production release APK in ${apk_dir}; found ${#apks[@]}"
+            exit 1
+          fi
+          apk="${apks[0]}"
+          echo "Validating APK: ${apk}"
           echo "::group::Native libraries packaged in APK"
           unzip -Z1 "${apk}" | grep '^lib/' || true
           echo "::endgroup::"
