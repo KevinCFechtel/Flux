@@ -22,7 +22,6 @@ permissions:
 jobs:
   workspace:
     name: Rust workspace regression gate
-    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feat/b2-fdroid-native-preparation' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
