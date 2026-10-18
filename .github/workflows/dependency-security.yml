@@ -40,5 +40,8 @@ jobs:
           key: cargo-audit-v1
       - name: Install locked cargo-audit
         run: cargo install cargo-audit --locked
-      - name: Check committed Rust dependency tree
-        run: cargo audit --file core/Cargo.lock
+      # Both vulnerabilities and ecosystem warnings (including unmaintained
+      # crates) block dependency acceptance and production releases.
+      # Do not ignore or suppress advisories merely to make this job green.
+      - name: Check committed Rust dependency tree (strict)
+        run: cargo audit --file core/Cargo.lock --deny warnings

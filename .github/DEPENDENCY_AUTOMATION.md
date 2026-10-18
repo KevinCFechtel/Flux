@@ -16,8 +16,19 @@ RustSec advisory check daily and whenever the Rust manifests/lockfile change.
   upgrade PR or a concrete, dated blocker; do not rely on green CI as proof
   that using an old version is acceptable. Dependabot security updates
   may have independent behavior and must be reviewed immediately.
-- A RustSec run is a vulnerability/advisory signal, **not** a guarantee that
-  every dependency is current, correct, legal for F-Droid or safe.
+- The RustSec job uses `cargo audit --deny warnings`: **known vulnerabilities
+  AND unmaintained dependency warnings are blocking**, including transitive
+  crates. Do not add ignore lists, blanket allow rules, or downgrade the
+  exit status to obtain a green check. A clean audit is still not proof that
+  all libraries are current, safe or legally usable in F-Droid.
+- **Known red baseline (18 October 2026)**: `paste 1.0.15` via `lofty 0.22.4`;
+  `rustls-pemfile 2.2.0` via `ureq 2.12.1` /
+  `rustls-native-certs 0.7.3`; `rustybuzz 0.20.1` via
+  `usvg 0.45.1`; and `ttf-parser 0.25.1` via
+  `usvg 0.45.1` (`fontdb` and `rustybuzz`).
+  All four require removal from the **resolved Cargo.lock** before
+  dependency remediation is complete, not just bumping parent manifest
+  version requirements.
 - Do not skip required Android/Rust/Apple gates for Dependabot PRs, nor add
   automatic full F-Droid, device or release builds to this security workflow.
 - Before merging changes to `rustls-platform-verifier`, `jni`, `uniffi`,
