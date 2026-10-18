@@ -3,11 +3,27 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-SOURCE_APP="${SOURCE_APP:-${REPOSITORY_DIR}/dist/FluxNews.app}"
+SOURCE_APP="${SOURCE_APP:-}"
+RELEASE_DIR="${REPOSITORY_DIR}/dist/macos/developer-id"
 INSTALL_MODE="${INSTALL_MODE:-developer-id}"
 case "$INSTALL_MODE" in developer-id|development) ;; *) echo "Invalid INSTALL_MODE: $INSTALL_MODE" >&2; exit 2;; esac
 INSTALLED_APP="/Applications/FluxNews.app"
 BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flux-install-local.XXXXXX")"
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
+if [[ -z "$SOURCE_APP" ]]; then
+  shopt -s nullglob
+  archives=("$RELEASE_DIR"/FluxNews-*-macos-*.zip)
+  shopt -u nullglob
+  (( ${#archives[@]} > 0 )) || { echo "No Developer ID release ZIP found in $RELEASE_DIR" >&2; exit 1; }
+  latest_archive="${archives[0]}"
+  for candidate in "${archives[@]:1}"; do
+    [[ "$candidate" -nt "$latest_archive" ]] && latest_archive="$candidate"
+  done
+  echo "Installing Developer ID release: $latest_archive"
+  ditto -x -k "$latest_archive" "$TEMP_DIR"
+  SOURCE_APP="$TEMP_DIR/FluxNews.app"
+fi
 [[ -d "$SOURCE_APP" && ! -L "$SOURCE_APP" ]] || { echo "Signed app missing: $SOURCE_APP" >&2; exit 1; }
 "$SCRIPT_DIR/verify-sandbox.sh" "$SOURCE_APP" "$INSTALL_MODE"
 if [[ -e "$INSTALLED_APP" || -L "$INSTALLED_APP" ]]; then
