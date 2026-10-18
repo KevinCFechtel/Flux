@@ -1,4 +1,8 @@
 # Experimental native F-Droid recipe. Not publishing metadata.
+Categories:
+  - Internet
+  - News
+  - Reading
 # The CI substitutes commit and version from the checked-out Flux revision.
 License: GPL-3.0-only
 SourceCode: https://github.com/KevinCFechtel/Flux
