@@ -10,7 +10,7 @@ The manual `.github/workflows/release.yml` runs in **Flux**, prior to the FluxNe
 
 ## Signing secrets
 
-The `release-testing` GitHub Environment should be restricted to main and require manual deployment approval. The following **existing FluxNews names** are used as GitHub Environment Secrets (not source files):
+The `release-testing` GitHub Environment should be restricted to main and require manual deployment approval. In Flux, the following **existing FluxNews names are currently configured as Repository Secrets** and are consumed only by the signer job, which is bound to `release-testing`. This is acceptable for the pre-cutover test; long term, move them to Environment Secrets for tighter exposure:
 
 - `KEYSTORE_BASE64`
 - `KEYSTORE_PASSWORD`
@@ -25,5 +25,9 @@ The full release mode requires a successful exact same-SHA reproducibility compa
 
 - Choose a full immutable SHA on `main`. Old tags are never moved. Each failed build requires a new fixed SHA and new mandatory checks.
 - Only the publishing job gets `contents: write`, and only the signer gets the four environment secrets.
-- Partial combined-release creation (some platform tags created but the final GitHub release failed) requires manual recovery; never reuse or overwrite existing tags automatically.
+- Partial promotion is fail-closed. If tag creation has begun and a later GitHub operation fails, the workflow reports the tags it can observe and requires manual recovery. A rerun is rejected by preflight while any immutable target tag exists; never reuse, move, delete, or overwrite tags automatically.
 - FD-01 user-installed CA is owner-accepted residual risk. This release process does not reopen that device test.
+
+## Automated workflow contract
+
+`Release script contracts` validates the release-related workflow YAML with pinned `actionlint` v1.7.12 and runs `Build/test-release-workflow-contract.py`. These checks are intentionally build-free: they cover the four scopes, selective gates, one Rust gate, Android F-Droid reproducibility/signing dependencies, tag sets, restricted write permissions, signing secret names, and partial-promotion fail-closed behavior without starting Android, F-Droid, or Apple builds.

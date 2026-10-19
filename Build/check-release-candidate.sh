@@ -24,11 +24,20 @@ if [[ "$mode" == release ]]; then
   if [[ "$scope" == all ]]; then
     tags=("android/v$version" "ios/v$version" "macos/v$version" "v$version")
   fi
+  existing_tags=()
   for tag in "${tags[@]}"; do
-    if git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
-      echo "Existing tag $tag; refusing to overwrite" >&2
+    remote="$(git ls-remote --tags origin "refs/tags/$tag")" || {
+      echo "Unable to verify immutable tag state for $tag" >&2
       exit 1
-    fi
+    }
+    [[ -z "$remote" ]] || existing_tags+=("$tag")
   done
+  if (( ${#existing_tags[@]} > 0 )); then
+    printf 'Existing immutable tag(s): %s\n' "${existing_tags[*]}" >&2
+    if [[ "$scope" == all && ${#existing_tags[@]} -lt ${#tags[@]} ]]; then
+      echo "Partial combined release state detected; manual recovery is required. Existing tags will not be moved or deleted automatically." >&2
+    fi
+    exit 1
+  fi
 fi
 printf 'sha=%s\n' "$sha"
