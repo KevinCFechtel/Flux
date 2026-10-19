@@ -1,0 +1,114 @@
+name: Flux Android release candidate
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character SHA on main
+        required: true
+        type: string
+      mode:
+        description: Validation only, or sign and create a Flux prerelease
+        type: choice
+        required: true
+        default: validate
+        options: [validate, prerelease]
+permissions:
+  contents: read
+concurrency:
+  group: flux-android-release-${{ inputs.source_sha }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Require committed version and release candidate on main
+        id: check
+        env:
+          SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git cat-file -e "$SHA^{commit}"
+          git merge-base --is-ancestor "$SHA" origin/main || { echo "::error::SHA not on main"; exit 1; }
+          git checkout --detach "$SHA"
+          source Build/versions/android.properties
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ && "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+  fdroid:
+    needs: preflight
+    uses: ./.github/workflows/fdroid-native.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.sha }}
+    permissions:
+      contents: read
+  promote:
+    needs: [preflight, fdroid]
+    if: ${{ inputs.mode == 'prerelease' }}
+    runs-on: ubuntu-24.04
+    environment: release-testing
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
+      KS_BASE64: ${{ secrets.FDROID_DEVELOPER_KEYSTORE_BASE64 }}
+      KS_STORE_PASSWORD: ${{ secrets.FDROID_DEVELOPER_STORE_PASSWORD }}
+      KS_KEY_PASSWORD: ${{ secrets.FDROID_DEVELOPER_KEY_PASSWORD }}
+      KS_ALIAS: ${{ secrets.FDROID_DEVELOPER_KEY_ALIAS }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v7
+        with:
+          name: fdroid-native-recipe-diagnostics
+          path: fdroid-artifacts
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4.0.4
+        with:
+          packages: build-tools;37.0.0
+      - name: Validate signing identity and publish immutable Flux prerelease
+        run: |
+          set -euo pipefail
+          for key in KS_BASE64 KS_STORE_PASSWORD KS_KEY_PASSWORD KS_ALIAS; do
+            [[ -n "$(printenv "$key")" ]] || { echo "::error::Missing release-testing secret $key"; exit 1; }
+          done
+          source Build/versions/android.properties
+          input="fdroid-artifacts/tmp/de.circle_dev.flux_news_${BUILD_NUMBER}.apk"
+          [[ -s "$input" ]] || { echo "::error::Validated unsigned APK unavailable"; exit 1; }
+          tag="android/v${VERSION_NAME}"
+          if git show-ref --verify --quiet "refs/tags/$tag" || git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Release tag already exists: $tag"; exit 1
+          fi
+          mkdir -p dist/android/github
+          signed="dist/android/github/FluxNews-${VERSION_NAME}-${BUILD_NUMBER}-developer.apk"
+          ks="$(mktemp "$RUNNER_TEMP/flux-key.XXXXXX")"
+          trap 'rm -f "$ks"' EXIT
+          printf '%s' "$KS_BASE64" | base64 --decode > "$ks"
+          chmod 600 "$ks"
+          signer="$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          "$signer" sign --ks "$ks" --ks-key-alias "$KS_ALIAS" \
+            --ks-pass env:KS_STORE_PASSWORD --key-pass env:KS_KEY_PASSWORD \
+            --out "$signed" "$input"
+          "$signer" verify --verbose --print-certs "$signed" > "$RUNNER_TEMP/apk-verification.txt"
+          expected="fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb"
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-verification.txt" | head -1 | tr 'A-F' 'a-f')"
+          [[ "$actual" == "$expected" ]] || { echo "::error::Developer signing key fingerprint mismatch"; exit 1; }
+          badging="$("$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$signed" | grep '^package:')"
+          [[ "$badging" == *"name='de.circle_dev.flux_news'"* && "$badging" == *"versionCode='${BUILD_NUMBER}'"* && "$badging" == *"versionName='${VERSION_NAME}'"* ]] || exit 1
+          sha256sum "$signed" | tee dist/android/github/SHA256SUMS
+          git tag "$tag" "$SOURCE_SHA"
+          git push origin "refs/tags/$tag"
+          gh release create "$tag" "$signed" dist/android/github/SHA256SUMS \
+            --verify-tag --prerelease --title "Flux Android ${VERSION_NAME}" \
+            --notes "Developer-signed native Android candidate at ${SOURCE_SHA}. Flux testing release; no store or F-Droid submission."
