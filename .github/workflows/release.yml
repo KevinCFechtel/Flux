@@ -12,9 +12,10 @@ on:
       source_sha:
         type: string
         required: true
-      publish:
-        type: boolean
-        default: false
+      mode:
+        type: choice
+        default: validate
+        options: [validate, release]
 permissions:
   contents: read
 concurrency:
@@ -25,6 +26,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.check.outputs.sha }}
+      android_code: ${{ steps.check.outputs.android_code }}
+      ios_code: ${{ steps.check.outputs.ios_code }}
+      macos_code: ${{ steps.check.outputs.macos_code }}
     steps:
       - uses: actions/checkout@v7
         with: {ref: main, fetch-depth: 0}
@@ -33,19 +37,10 @@ jobs:
           SHA: ${{ inputs.source_sha }}
           SCOPE: ${{ inputs.scope }}
           VERSION: ${{ inputs.version_name }}
+          MODE: ${{ inputs.mode }}
         run: |
-          set -euo pipefail
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$SHA^{commit}"
-          git merge-base --is-ancestor "$SHA" origin/main
-          git checkout --detach "$SHA"
-          for app in android ios macos; do
-            if [[ "$SCOPE" == all || "$SCOPE" == "$app" ]]; then
-              value="$(sed -n 's/^VERSION_NAME=//p' "Build/versions/$app.properties")"
-              [[ "$value" == "$VERSION" ]] || exit 1
-            fi
-          done
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          bash Build/check-release-candidate.sh "$SCOPE" "$VERSION" "$SHA" "$MODE" >> "$GITHUB_OUTPUT"
+
   rust:
     needs: preflight
     runs-on: ubuntu-24.04
@@ -83,27 +78,100 @@ jobs:
     needs: preflight
     uses: ./.github/workflows/fdroid-native.yml
     with: {source_sha: "${{ needs.preflight.outputs.sha }}"}
+  fdroid-repeat:
+    if: "${{ inputs.mode == 'release' && (inputs.scope == 'android' || inputs.scope == 'all') }}"
+    needs: preflight
+    uses: ./.github/workflows/fdroid-native.yml
+    with:
+      source_sha: "${{ needs.preflight.outputs.sha }}"
+      artifact_name: fdroid-native-repeat
+  compare:
+    if: "${{ inputs.mode == 'release' && (inputs.scope == 'android' || inputs.scope == 'all') }}"
+    needs: [fdroid, fdroid-repeat]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with: {name: fdroid-native-recipe-diagnostics, path: first}
+      - uses: actions/download-artifact@v7
+        with: {name: fdroid-native-repeat, path: second}
+      - name: Compare two independent builds
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          a=(first/tmp/*.apk); b=(second/tmp/*.apk)
+          [[ ${#a[@]} -eq 1 && ${#b[@]} -eq 1 ]]
+          sha256sum "${a[0]}" "${b[0]}"
+          cmp -- "${a[0]}" "${b[0]}"
+  sign-android:
+    if: "${{ !cancelled() && inputs.mode == 'release' && (inputs.scope == 'android' || inputs.scope == 'all') && needs.rust.result == 'success' && needs.fdroid.result == 'success' && needs.compare.result == 'success' }}"
+    needs: [preflight, rust, fdroid, compare]
+    runs-on: ubuntu-24.04
+    environment: release-testing
+    env:
+      KEYSTORE_BASE64: "${{ secrets.KEYSTORE_BASE64 }}"
+      KEYSTORE_PASSWORD: "${{ secrets.KEYSTORE_PASSWORD }}"
+      KEY_PASSWORD: "${{ secrets.KEY_PASSWORD }}"
+      KEY_ALIAS: "${{ secrets.KEY_ALIAS }}"
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}"}
+      - uses: actions/download-artifact@v7
+        with: {name: fdroid-native-recipe-diagnostics, path: unsigned}
+      - uses: actions/setup-java@v6
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v4.0.4
+        with: {packages: "build-tools;37.0.0"}
+      - run: bash Build/sign-release-apk.sh "unsigned/tmp/de.circle_dev.flux_news_${{ needs.preflight.outputs.android_code }}.apk" "${{ inputs.version_name }}" "${{ needs.preflight.outputs.android_code }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flux-android-signed
+          path: dist/android/github/*
+          if-no-files-found: error
   publish:
-    if: >-
-      ${{ !cancelled() && inputs.publish && needs.preflight.result == 'success' && needs.rust.result == 'success' &&
-      (inputs.scope != 'android' && inputs.scope != 'all' || needs.fdroid.result == 'success') &&
-      (inputs.scope != 'ios' && inputs.scope != 'all' || needs.ios.result == 'success') &&
-      (inputs.scope != 'macos' && inputs.scope != 'all' || needs.macos.result == 'success') }}
-    needs: [preflight, rust, ios, macos, fdroid]
+    if: "${{ !cancelled() && inputs.mode == 'release' && needs.preflight.result == 'success' && needs.rust.result == 'success' && (inputs.scope != 'android' && inputs.scope != 'all' || needs.sign-android.result == 'success') && (inputs.scope != 'ios' && inputs.scope != 'all' || needs.ios.result == 'success') && (inputs.scope != 'macos' && inputs.scope != 'all' || needs.macos.result == 'success') }}"
+    needs: [preflight, rust, ios, macos, fdroid, fdroid-repeat, compare, sign-android]
     runs-on: ubuntu-24.04
     permissions: {contents: write}
     env:
       GH_TOKEN: "${{ github.token }}"
       SHA: "${{ needs.preflight.outputs.sha }}"
-      VERSION: "${{ inputs.version_name }}"
       SCOPE: "${{ inputs.scope }}"
+      VERSION: "${{ inputs.version_name }}"
     steps:
       - uses: actions/checkout@v7
-        with: {ref: "${{ needs.preflight.outputs.sha }}"}
-      - name: Publish notes-only Apple release (Android disabled until signing gate)
+        with: {ref: "${{ needs.preflight.outputs.sha }}", fetch-depth: 0}
+      - uses: actions/download-artifact@v7
+        if: "${{ inputs.scope == 'android' || inputs.scope == 'all' }}"
+        with: {name: flux-android-signed, path: artifacts}
+      - name: Publish one release with immutable platform tags
         run: |
           set -euo pipefail
-          [[ "$SCOPE" == ios || "$SCOPE" == macos ]] || { echo "::error::Android publishing requires verified signing pipeline"; exit 1; }
-          tag="$SCOPE/v$VERSION"
-          ! gh release view "$tag" >/dev/null 2>&1 || exit 1
-          gh release create "$tag" --target "$SHA" --title "FluxNews $VERSION ($SCOPE)" --notes "Tested $SCOPE source SHA $SHA. App Store publication is separate." --latest=false
+          if [[ "$SCOPE" == all ]]; then
+            tags=("android/v$VERSION" "ios/v$VERSION" "macos/v$VERSION" "v$VERSION")
+            tag="v$VERSION"
+          else
+            tags=("$SCOPE/v$VERSION")
+            tag="$SCOPE/v$VERSION"
+          fi
+          for item in "${tags[@]}"; do
+            if git ls-remote --tags origin "refs/tags/$item" | grep -q .; then echo "::error::Existing immutable tag: $item"; exit 1; fi
+          done
+          {
+            printf '# FluxNews %s (%s)\n\nSource: %s\n\n' "$VERSION" "$SCOPE" "$SHA"
+            [[ "$SCOPE" != android && "$SCOPE" != all ]] || printf '## Android\n\nSigned APK. F-Droid scanner/source build and reproducibility passed. No automatic F-Droid submission.\n\n'
+            [[ "$SCOPE" != ios && "$SCOPE" != all ]] || printf '## iOS / iPadOS\n\nTest gate passed; distribution remains manual. No IPA attached.\n\n'
+            [[ "$SCOPE" != macos && "$SCOPE" != all ]] || printf '## macOS\n\nTest gate passed; distribution remains manual. No PKG attached.\n\n'
+          } > RELEASE_NOTES.md
+          if [[ "$SCOPE" == android || "$SCOPE" == all ]]; then
+            shopt -s nullglob
+            assets=(artifacts/*.apk artifacts/SHA256SUMS)
+            [[ ${#assets[@]} -eq 2 ]] || exit 1
+          else
+            assets=()
+          fi
+          if [[ "$SCOPE" == all ]]; then
+            for item in "${tags[@]:0:3}"; do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$item" -f sha="$SHA" >/dev/null
+            done
+          fi
+          gh release create "$tag" "${assets[@]}" --target "$SHA" --title "FluxNews $VERSION ($SCOPE)" --notes-file RELEASE_NOTES.md --latest=false

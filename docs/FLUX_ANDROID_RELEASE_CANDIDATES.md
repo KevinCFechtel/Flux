@@ -1,36 +1,29 @@
-# Flux Android release candidate
+# Flux: Unified release process (Android, iOS, macOS)
 
-The Android release workflow is deliberately implemented in Flux before any FluxNews cutover. No F-Droid/GitLab, Play or FluxNews publication occurs.
+The manual `.github/workflows/release.yml` runs in **Flux**, prior to the FluxNews repository cutover. It accepts the exact `scope` (android, ios, macos, all), `version_name`, immutable full `source_sha` on main, and `mode` (validate or release). Selected version names must match the respective committed `Build/versions/<platform>.properties`; existing date-based versionCodes remain unchanged.
 
-## Manually start
+- validate: run the Rust workspace regression gate once, iOS/macOS tests for selected platforms, and for Android the existing F-Droid recipe/scanner/unsigned source-build gate.
+- release: the same selected gates; Android additionally runs two independent same-SHA F-Droid builds, compares their exact APK bytes, signs the unsigned APK with the developer key and checks package/version/fingerprint; only then publish to GitHub Releases in **Flux**.
+- Tags: android/vX.Y.Z, ios/vX.Y.Z, macos/vX.Y.Z independently. Scope all requires identical version and SHA for all platforms and creates all three tags plus vX.Y.Z, **one** combined GitHub Release.
+- Android release assets are signed APK and checksum. iOS/macOS Releases contain test status and notes, not an unverified IPA/PKG. App Store exports and uploads remain manual.
+- No F-Droid GitLab submission or Play publication. Cutover to FluxNews remains separate and requires explicit authorization.
 
-Actions > Flux Android release candidate > Run workflow.
+## Signing secrets
 
-Specify a full 40-character commit SHA that is reachable from main and contains the intended version fields in Build/versions/android.properties.
+The `release-testing` GitHub Environment should be restricted to main and require manual deployment approval. The following **existing FluxNews names** are used as GitHub Environment Secrets (not source files):
 
-- Mode validate: one existing F-Droid source build with lint, blocking scanner, package/version/three-ABI checks; never loads signing secrets.
-- Mode prerelease: two independent source builds from the identical SHA; strict byte-for-byte APK comparison; only then developer-sign APK and create an immutable GitHub prerelease in Flux with tag android/vX.Y.Z. Existing tags cannot be overwritten.
-- Version name and version code are taken from committed Build/versions/android.properties, retaining the date-based code convention such as 2026101901.
+- `KEYSTORE_BASE64`
+- `KEYSTORE_PASSWORD`
+- `KEY_PASSWORD`
+- `KEY_ALIAS`
 
-## Configure before signing
+The signing job explicitly checks the existing developer certificate SHA-256 `fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb`. **Do not use a Play upload key if it has a different fingerprint.** Secret configuration and trust are controlled in GitHub settings, not by this PR.
 
-Create GitHub Actions environment release-testing in the Flux repository, require manual approval and restrict it to a trusted main branch. Repository environment protection must be configured manually.
+The full release mode requires a successful exact same-SHA reproducibility comparison; it can fail if native source builds are not byte-identical. That is a blocker to that release mode, not permission to bypass the comparison. A normal CI/validation run uses no signing secrets. No release or tag is created from a push or PR.
 
-Provide these environment secrets (never commit the keystore):
+## Safety and preflight
 
-- FDROID_DEVELOPER_KEYSTORE_BASE64: base64 of the original Flutter/F-Droid developer signing keystore, one line.
-- FDROID_DEVELOPER_STORE_PASSWORD
-- FDROID_DEVELOPER_KEY_PASSWORD
-- FDROID_DEVELOPER_KEY_ALIAS
-
-The signing job verifies the previously published developer signer SHA-256 fingerprint fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb and fails for any mismatch. A Google Play upload key is not automatically the same signer. No secrets are passed to source-build jobs.
-
-When moving to FluxNews, recreate the environment in FluxNews, transfer the secrets securely and retire the temporary Flux signing access.
-
-## Explicit limitations
-
-- Flux GitHub prereleases are permitted, but official F-Droid submission and Play publication are not implemented in this workflow.
-- Identical unsigned source APKs validate same-SHA build reproducibility; they are not automatically proof that independently built APK bytes can be combined with a developer signature under F-Droid's reproducible-build verification.
-- Android updates still require compatible signer fingerprints, the same package ID, and increasing version codes.
-- FD-01 user-installed CA remains an owner-accepted risk rather than a proven device test.
-- No release tags are created from pushes or PRs. Sign/promotion requires a separate manually dispatched prerelease mode. Only Android/F-Droid work is performed for that mode.
+- Choose a full immutable SHA on `main`. Old tags are never moved. Each failed build requires a new fixed SHA and new mandatory checks.
+- Only the publishing job gets `contents: write`, and only the signer gets the four environment secrets.
+- Partial combined-release creation (some platform tags created but the final GitHub release failed) requires manual recovery; never reuse or overwrite existing tags automatically.
+- FD-01 user-installed CA is owner-accepted residual risk. This release process does not reopen that device test.
