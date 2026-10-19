@@ -12,11 +12,10 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
-html5ever = "0.39"
+html5ever = "0.40.1"
 jni = { version = "0.21", default-features = false }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"] }
 lofty = "0.22"
-markup5ever_rcdom = "0.39"
 resvg = { version = "0.45.1", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
 rand = "0.8"

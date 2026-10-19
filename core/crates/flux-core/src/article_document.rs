@@ -1,9 +1,9 @@
 use html5ever::{parse_document, tendril::TendrilSink};
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::domain::{
     DetailRenderingMode, ReaderBlock, ReaderDocument, ReaderInline, ReaderListItem,
 };
+use crate::html_dom::{Dom, Handle, NodeData};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ArticleDocument {
@@ -40,7 +40,7 @@ pub(crate) fn parse(html: &str, article_url: &str) -> ArticleDocument {
     }
     let base = url::Url::parse(article_url).ok();
     let dom = match std::panic::catch_unwind(|| {
-        parse_document(RcDom::default(), Default::default())
+        parse_document(Dom::default(), Default::default())
             .from_utf8()
             .one(html.as_bytes())
     }) {
@@ -663,7 +663,7 @@ fn attr(node: &Handle, key: &str) -> Option<String> {
         NodeData::Element { attrs, .. } => attrs
             .borrow()
             .iter()
-            .find(|attribute| attribute.name.local.as_ref() == key)
+            .find(|attribute| <_ as AsRef<str>>::as_ref(&attribute.name.local) == key)
             .map(|attribute| attribute.value.trim().to_string())
             .filter(|value| !value.is_empty()),
         _ => None,

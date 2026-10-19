@@ -2,9 +2,9 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use html5ever::{parse_document, tendril::TendrilSink};
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::domain::{MediaChapter, MediaChapterSource};
+use crate::html_dom::{Dom, Handle, NodeData};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AnalyzedMedia {
@@ -482,7 +482,7 @@ fn article_chapter_text(value: &str) -> String {
         return value.replace("&nbsp;", " ");
     }
     let Ok(dom) = std::panic::catch_unwind(|| {
-        parse_document(RcDom::default(), Default::default())
+        parse_document(Dom::default(), Default::default())
             .from_utf8()
             .one(value.as_bytes())
     }) else {

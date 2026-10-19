@@ -7,6 +7,7 @@ pub mod config_backup;
 pub mod diagnostics;
 pub mod domain;
 mod feed_icon;
+mod html_dom;
 mod media_metadata;
 pub mod miniflux;
 pub mod mutations;
