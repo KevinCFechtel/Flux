@@ -505,8 +505,8 @@ impl MinifluxClient {
             .redirects(5);
         #[cfg(any(target_vendor = "apple", target_os = "android"))]
         {
-            agent_builder = agent_builder.tls_config(platform_tls_config());
-            media_probe_builder = media_probe_builder.tls_config(platform_tls_config());
+            agent_builder = agent_builder.tls_config(platform_tls_config()?);
+            media_probe_builder = media_probe_builder.tls_config(platform_tls_config()?);
         }
         Ok(Self {
             agent: agent_builder.build(),
@@ -1351,10 +1351,12 @@ impl MinifluxClient {
 /// Android verifier bootstrap before the first request. Every other target keeps the
 /// `ureq` default TLS configuration.
 #[cfg(any(target_vendor = "apple", target_os = "android"))]
-fn platform_tls_config() -> Arc<rustls::ClientConfig> {
+fn platform_tls_config() -> Result<Arc<rustls::ClientConfig>, CoreError> {
     use rustls_platform_verifier::ConfigVerifierExt;
 
-    Arc::new(rustls::ClientConfig::with_platform_verifier())
+    rustls::ClientConfig::with_platform_verifier()
+        .map(Arc::new)
+        .map_err(|error| CoreError::internal(format!("configure platform TLS verifier: {error}")))
 }
 
 #[derive(Debug)]

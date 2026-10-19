@@ -9,7 +9,7 @@ use aes_gcm::{
 };
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rand::{RngCore, rngs::OsRng};
+use rand::{TryRng, rngs::SysRng};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -217,8 +217,12 @@ pub fn export_config_backup(
     }
     let mut salt = [0u8; SALT_BYTES];
     let mut nonce = [0u8; NONCE_BYTES];
-    OsRng.fill_bytes(&mut salt);
-    OsRng.fill_bytes(&mut nonce);
+    SysRng
+        .try_fill_bytes(&mut salt)
+        .map_err(|_| ConfigBackupError::Internal)?;
+    SysRng
+        .try_fill_bytes(&mut nonce)
+        .map_err(|_| ConfigBackupError::Internal)?;
     let kdf = production_kdf();
     let header = EnvelopeHeader {
         magic: MAGIC.into(),
@@ -234,7 +238,7 @@ pub fn export_config_backup(
     let ciphertext = Aes256Gcm::new_from_slice(&key)
         .map_err(|_| ConfigBackupError::Internal)?
         .encrypt(
-            Nonce::from_slice(&nonce),
+            &Nonce::from(nonce),
             Payload {
                 msg: &plaintext,
                 aad: &aad,
@@ -278,7 +282,9 @@ pub fn parse_config_backup(
         return Err(ConfigBackupError::PlatformMismatch);
     }
     let salt = decode_exact(&envelope.salt, SALT_BYTES)?;
-    let nonce = decode_exact(&envelope.nonce, NONCE_BYTES)?;
+    let nonce: [u8; NONCE_BYTES] = decode_exact(&envelope.nonce, NONCE_BYTES)?
+        .try_into()
+        .map_err(|_| ConfigBackupError::InvalidCryptoMetadata)?;
     validate_kdf(&envelope.kdf)?;
     if envelope.crypto != "aes-256-gcm" {
         return Err(ConfigBackupError::InvalidCryptoMetadata);
@@ -303,7 +309,7 @@ pub fn parse_config_backup(
     let plaintext = Aes256Gcm::new_from_slice(&key)
         .map_err(|_| ConfigBackupError::Internal)?
         .decrypt(
-            Nonce::from_slice(&nonce),
+            &Nonce::from(nonce),
             Payload {
                 msg: &ciphertext,
                 aad: &aad,
@@ -613,7 +619,11 @@ mod tests {
     fn rewrite_payload(bytes: &[u8], edit: impl FnOnce(&mut Value)) -> Vec<u8> {
         let mut envelope = envelope(bytes);
         let salt = STANDARD.decode(&envelope.salt).unwrap();
-        let nonce = STANDARD.decode(&envelope.nonce).unwrap();
+        let nonce: [u8; NONCE_BYTES] = STANDARD
+            .decode(&envelope.nonce)
+            .unwrap()
+            .try_into()
+            .unwrap();
         let header = EnvelopeHeader {
             magic: envelope.magic.clone(),
             version: envelope.version,
@@ -627,7 +637,7 @@ mod tests {
         let plaintext = Aes256Gcm::new_from_slice(&key)
             .unwrap()
             .decrypt(
-                Nonce::from_slice(&nonce),
+                &Nonce::from(nonce),
                 Payload {
                     msg: &STANDARD.decode(&envelope.ciphertext).unwrap(),
                     aad: &header_bytes(&header).unwrap(),
@@ -640,7 +650,7 @@ mod tests {
             Aes256Gcm::new_from_slice(&key)
                 .unwrap()
                 .encrypt(
-                    Nonce::from_slice(&nonce),
+                    &Nonce::from(nonce),
                     Payload {
                         msg: &serde_json::to_vec(&payload).unwrap(),
                         aad: &header_bytes(&header).unwrap(),

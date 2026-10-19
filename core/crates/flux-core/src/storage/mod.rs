@@ -3520,6 +3520,8 @@ impl Store {
         &self,
         pending: &PendingMediaProgressMutation,
     ) -> Result<bool, CoreError> {
+        let progression_seconds = i64::try_from(pending.progression_seconds)
+            .map_err(|_| CoreError::data("media progression exceeds SQLite integer range"))?;
         let mut connection = self
             .connection
             .lock()
@@ -3527,10 +3529,10 @@ impl Store {
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute(
             "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
-            params![pending.progression_seconds, pending.enclosure_id],
+            params![progression_seconds, pending.enclosure_id],
         )
         .map_err(sql_error)?;
-        let deleted = tx.execute("DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1 AND progression_seconds=?2 AND revision=?3", params![pending.enclosure_id, pending.progression_seconds, pending.revision]).map_err(sql_error)?;
+        let deleted = tx.execute("DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1 AND progression_seconds=?2 AND revision=?3", params![pending.enclosure_id, progression_seconds, pending.revision]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
         Ok(deleted == 1)
     }
@@ -3539,6 +3541,8 @@ impl Store {
         &self,
         pending: &PendingMediaProgressMutation,
     ) -> Result<bool, CoreError> {
+        let progression_seconds = i64::try_from(pending.progression_seconds)
+            .map_err(|_| CoreError::data("media progression exceeds SQLite integer range"))?;
         let connection = self
             .connection
             .lock()
@@ -3546,7 +3550,7 @@ impl Store {
         let deleted = connection
             .execute(
                 "DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1 AND progression_seconds=?2 AND revision=?3",
-                params![pending.enclosure_id, pending.progression_seconds, pending.revision],
+                params![pending.enclosure_id, progression_seconds, pending.revision],
             )
             .map_err(sql_error)?;
         Ok(deleted == 1)
@@ -3985,7 +3989,7 @@ impl Store {
                     COALESCE(SUM(CASE WHEN is_starred=1 THEN 1 ELSE 0 END),0) \
                  FROM articles",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row_u64(row, 0)?, row_u64(row, 1)?)),
             )
             .map_err(sql_error)?;
         let (feed_sql, category_sql) = match count_mode {
@@ -4113,7 +4117,7 @@ impl Store {
         );
         connection
             .query_row(&sql, rusqlite::params_from_iter(values), |row| {
-                row.get::<_, u64>(0)
+                row_u64(row, 0)
             })
             .map_err(sql_error)
     }
@@ -4225,24 +4229,24 @@ impl Store {
             .map_err(sql_error)?;
         let all_unread = connection
             .query_row("SELECT COUNT(*) FROM articles WHERE is_read=0", [], |r| {
-                r.get(0)
+                row_u64(r, 0)
             })
             .map_err(sql_error)?;
         let all_articles = connection
-            .query_row("SELECT COUNT(*) FROM articles", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM articles", [], |r| row_u64(r, 0))
             .map_err(sql_error)?;
         let bookmarks = connection
             .query_row(
                 "SELECT COUNT(*) FROM articles WHERE is_starred=1",
                 [],
-                |r| r.get(0),
+                |r| row_u64(r, 0),
             )
             .map_err(sql_error)?;
         let bookmarks_unread = connection
             .query_row(
                 "SELECT COUNT(*) FROM articles WHERE is_starred=1 AND is_read=0",
                 [],
-                |r| r.get(0),
+                |r| row_u64(r, 0),
             )
             .map_err(sql_error)?;
         let feed_unread = scoped_counts(
@@ -4326,7 +4330,7 @@ fn scoped_counts(connection: &Connection, sql: &str) -> Result<Vec<WidgetScopedC
         .query_map([], |r| {
             Ok(WidgetScopedCount {
                 id: r.get(0)?,
-                count: r.get(1)?,
+                count: row_u64(r, 1)?,
             })
         })
         .map_err(sql_error)?
@@ -4342,7 +4346,7 @@ fn navigation_scoped_counts(
         .query_map([], |row| {
             Ok(NavigationScopedCount {
                 id: row.get(0)?,
-                count: row.get(1)?,
+                count: row_u64(row, 1)?,
             })
         })
         .map_err(sql_error)?
@@ -5015,6 +5019,8 @@ fn reconcile_remote_enclosures(
             reconcile_playback_progress(tx, enclosure, old)?;
         }
         if stale_write && let Some(written) = written {
+            let written = i64::try_from(written)
+                .map_err(|_| CoreError::data("media progression exceeds SQLite integer range"))?;
             tx.execute(
                 "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
                 params![written, enclosure.id],
@@ -5064,6 +5070,10 @@ fn reconcile_playback_progress(
     if local.is_some() && old == Some(progression) {
         return Ok(());
     }
+    let duration = duration
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?;
     tx.execute("INSERT INTO playback_states(enclosure_id,position_ms,duration_ms,status,updated_at) VALUES(?1,?2,?3,?4,datetime('now')) ON CONFLICT(enclosure_id) DO UPDATE SET position_ms=excluded.position_ms,duration_ms=COALESCE(excluded.duration_ms,playback_states.duration_ms),status=excluded.status,updated_at=excluded.updated_at", params![enclosure.id,position,duration, status]).map_err(sql_error)?;
     Ok(())
 }
@@ -5342,6 +5352,9 @@ fn parse_field(field: &str) -> Result<MutationField, rusqlite::Error> {
         "starred" => Ok(MutationField::Starred),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
+}
+fn row_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    u64::try_from(row.get::<_, i64>(index)?).map_err(|_| rusqlite::Error::InvalidQuery)
 }
 fn sql_error(error: rusqlite::Error) -> CoreError {
     CoreError::persistence(error.to_string())
