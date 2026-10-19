@@ -5,13 +5,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 WORKSPACE="${REPOSITORY_DIR}/core/Cargo.toml"
 CRATE="flux-uniffi"
-PACKAGE_DIR="${SCRIPT_DIR}/Products/FluxUniFFI"
-XCFRAMEWORK="${PACKAGE_DIR}/FluxUniFFI.xcframework"
-SOURCES_DIR="${PACKAGE_DIR}/Sources"
-MACOS_DIR="${PACKAGE_DIR}/MacOS"
-PACKAGE_HEADERS_DIR="${PACKAGE_DIR}/Headers"
+OUTPUT_PACKAGE_DIR="${SCRIPT_DIR}/Products/FluxUniFFI"
+MACOS_DEPLOYMENT_TARGET="15.0"
+IOS_DEPLOYMENT_TARGET="17.0"
 
-for command_name in cargo lipo install_name_tool plutil rustup xcodebuild; do
+for command_name in cargo lipo install_name_tool otool plutil rustup vtool xcodebuild; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Required command missing: ${command_name}" >&2; exit 1; }
 done
 
@@ -31,12 +29,26 @@ for target in "${targets[@]}"; do
 done
 
 for target in "${targets[@]}"; do
-  cargo build --manifest-path "${WORKSPACE}" --package "${CRATE}" --release --target "${target}"
+  case "${target}" in
+    *-apple-darwin)
+      MACOSX_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET}" \
+        cargo build --manifest-path "${WORKSPACE}" --package "${CRATE}" --release --locked --target "${target}"
+      ;;
+    *-apple-ios*)
+      IPHONEOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}" \
+        cargo build --manifest-path "${WORKSPACE}" --package "${CRATE}" --release --locked --target "${target}"
+      ;;
+  esac
 done
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/flux-uniffi-apple.XXXXXX")"
 trap 'rm -rf -- "${work_dir}"' EXIT
 
+PACKAGE_DIR="${work_dir}/FluxUniFFI"
+XCFRAMEWORK="${PACKAGE_DIR}/FluxUniFFI.xcframework"
+SOURCES_DIR="${PACKAGE_DIR}/Sources"
+MACOS_DIR="${PACKAGE_DIR}/MacOS"
+PACKAGE_HEADERS_DIR="${PACKAGE_DIR}/Headers"
 macos_library="${work_dir}/macos/libflux_uniffi.dylib"
 ios_framework="${work_dir}/ios/FluxUniFFI.framework"
 ios_simulator_framework="${work_dir}/ios-simulator/FluxUniFFI.framework"
@@ -55,7 +67,7 @@ mkdir -p \
 
 (
   cd "${REPOSITORY_DIR}/core"
-  cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
+  cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen --locked -- \
     generate "${REPOSITORY_DIR}/core/target/aarch64-apple-darwin/release/libflux_uniffi.dylib" \
     --crate flux_uniffi --language swift --out-dir "${headers_dir}"
 )
@@ -119,6 +131,40 @@ xcodebuild -create-xcframework \
   -framework "${ios_simulator_framework}" \
   -output "${XCFRAMEWORK}"
 
+lipo "${macos_library}" -verify_arch arm64
+lipo "${macos_library}" -verify_arch x86_64
+lipo "${ios_framework}/FluxUniFFI" -verify_arch arm64
+lipo "${ios_simulator_framework}/FluxUniFFI" -verify_arch arm64
+
+verify_minimum_os() {
+  local library="$1"
+  local architecture="$2"
+  local minimum="$3"
+  local build_metadata
+  build_metadata="$(vtool -arch "${architecture}" -show-build "${library}")"
+  grep -Eq "(^|[[:space:]])(minos|version)[[:space:]]+${minimum}([[:space:]]|$)" <<<"${build_metadata}" || {
+    echo "Unexpected minimum OS in ${library} (${architecture}); expected ${minimum}:" >&2
+    echo "${build_metadata}" >&2
+    exit 1
+  }
+}
+
+verify_minimum_os "${macos_library}" arm64 "${MACOS_DEPLOYMENT_TARGET}"
+verify_minimum_os "${macos_library}" x86_64 "${MACOS_DEPLOYMENT_TARGET}"
+verify_minimum_os "${ios_framework}/FluxUniFFI" arm64 "${IOS_DEPLOYMENT_TARGET}"
+verify_minimum_os "${ios_simulator_framework}/FluxUniFFI" arm64 "${IOS_DEPLOYMENT_TARGET}"
+
+[[ "$(otool -D "${macos_library}" | tail -n 1)" == "@rpath/libflux_uniffi.dylib" ]] || {
+  echo "Unexpected macOS UniFFI install name" >&2
+  exit 1
+}
+for framework_binary in "${ios_framework}/FluxUniFFI" "${ios_simulator_framework}/FluxUniFFI"; do
+  [[ "$(otool -D "${framework_binary}" | tail -n 1)" == "@rpath/FluxUniFFI.framework/FluxUniFFI" ]] || {
+    echo "Unexpected iOS UniFFI install name: ${framework_binary}" >&2
+    exit 1
+  }
+done
+
 for required in \
   "${MACOS_DIR}/libflux_uniffi.dylib" \
   "${SOURCES_DIR}/flux_uniffi.swift" \
@@ -128,4 +174,8 @@ for required in \
   [[ -f "${required}" ]] || { echo "Missing packaged UniFFI artifact: ${required}" >&2; exit 1; }
 done
 
-echo "FluxUniFFI package: ${PACKAGE_DIR}"
+rm -rf -- "${OUTPUT_PACKAGE_DIR}"
+mkdir -p "$(dirname -- "${OUTPUT_PACKAGE_DIR}")"
+mv "${PACKAGE_DIR}" "${OUTPUT_PACKAGE_DIR}"
+
+echo "FluxUniFFI package: ${OUTPUT_PACKAGE_DIR}"
