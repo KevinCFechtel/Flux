@@ -39,6 +39,10 @@ jobs:
           VERSION: ${{ inputs.version_name }}
           MODE: ${{ inputs.mode }}
         run: |
+          if [[ "$MODE" == release && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo '::error::Release jobs must be dispatched from main' >&2
+            exit 1
+          fi
           bash Build/check-release-candidate.sh "$SCOPE" "$VERSION" "$SHA" "$MODE" >> "$GITHUB_OUTPUT"
 
   rust:

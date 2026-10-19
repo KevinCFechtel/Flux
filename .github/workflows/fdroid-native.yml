@@ -73,7 +73,6 @@ jobs:
           "${RUNNER_TEMP}/fdroid-venv/bin/pip" install "fdroidserver==2.4.5"
           echo "${RUNNER_TEMP}/fdroid-venv/bin" >> "${GITHUB_PATH}"
       - name: Prepare isolated F-Droid metadata workspace
-        env:
         run: |
           set -euo pipefail
           source_sha="${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}"
