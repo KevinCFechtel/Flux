@@ -1,0 +1,109 @@
+name: Flux scoped release
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        type: choice
+        options: [android, ios, macos, all]
+        required: true
+      version_name:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: flux-release-${{ inputs.scope }}-${{ inputs.source_sha }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: main, fetch-depth: 0}
+      - id: check
+        env:
+          SHA: ${{ inputs.source_sha }}
+          SCOPE: ${{ inputs.scope }}
+          VERSION: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$SHA^{commit}"
+          git merge-base --is-ancestor "$SHA" origin/main
+          git checkout --detach "$SHA"
+          for app in android ios macos; do
+            if [[ "$SCOPE" == all || "$SCOPE" == "$app" ]]; then
+              value="$(sed -n 's/^VERSION_NAME=//p' "Build/versions/$app.properties")"
+              [[ "$value" == "$VERSION" ]] || exit 1
+            fi
+          done
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+  rust:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}"}
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with: {components: rustfmt,clippy}
+      - run: |
+          cargo fmt --manifest-path core/Cargo.toml --all --check
+          cargo test --locked --manifest-path core/Cargo.toml --workspace
+          cargo clippy --locked --manifest-path core/Cargo.toml --workspace --all-targets
+  ios:
+    if: ${{ inputs.scope == 'ios' || inputs.scope == 'all' }}
+    needs: preflight
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}"}
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with: {targets: "aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim"}
+      - run: ./apple/ios/Build/test.sh
+  macos:
+    if: ${{ inputs.scope == 'macos' || inputs.scope == 'all' }}
+    needs: preflight
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}"}
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with: {targets: "aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim"}
+      - run: ./apple/macos/Build/test.sh
+  fdroid:
+    if: ${{ inputs.scope == 'android' || inputs.scope == 'all' }}
+    needs: preflight
+    uses: ./.github/workflows/fdroid-native.yml
+    with: {source_sha: "${{ needs.preflight.outputs.sha }}"}
+  publish:
+    if: >-
+      ${{ !cancelled() && inputs.publish && needs.preflight.result == 'success' && needs.rust.result == 'success' &&
+      (inputs.scope != 'android' && inputs.scope != 'all' || needs.fdroid.result == 'success') &&
+      (inputs.scope != 'ios' && inputs.scope != 'all' || needs.ios.result == 'success') &&
+      (inputs.scope != 'macos' && inputs.scope != 'all' || needs.macos.result == 'success') }}
+    needs: [preflight, rust, ios, macos, fdroid]
+    runs-on: ubuntu-24.04
+    permissions: {contents: write}
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      SHA: "${{ needs.preflight.outputs.sha }}"
+      VERSION: "${{ inputs.version_name }}"
+      SCOPE: "${{ inputs.scope }}"
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}"}
+      - name: Publish notes-only Apple release (Android disabled until signing gate)
+        run: |
+          set -euo pipefail
+          [[ "$SCOPE" == ios || "$SCOPE" == macos ]] || { echo "::error::Android publishing requires verified signing pipeline"; exit 1; }
+          tag="$SCOPE/v$VERSION"
+          ! gh release view "$tag" >/dev/null 2>&1 || exit 1
+          gh release create "$tag" --target "$SHA" --title "FluxNews $VERSION ($SCOPE)" --notes "Tested $SCOPE source SHA $SHA. App Store publication is separate." --latest=false
