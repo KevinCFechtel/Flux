@@ -109,15 +109,16 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
     let structured_chapters = bytes.as_deref().map(parse_id3_chapters).unwrap_or_default();
     // Probe bytes rather than the filename so legacy Flutter downloads with a
     // `.audio` suffix retain format-independent duration and metadata support.
-    let (duration_ms, probed_artwork, format_chapters) =
-        probe_media(path).unwrap_or((None, None, Vec::new()));
+    let probed = probe_media(path).unwrap_or_default();
+    let duration_ms = probed.duration_ms;
     // Truncated old MP3s can still contain a valid APIC frame even when no
     // complete media stream can be probed. Keep the bounded parser as fallback.
-    let artwork = probed_artwork
+    let artwork = probed
+        .artwork
         .or_else(|| bytes.as_deref().and_then(parse_id3_artwork))
         .or_else(|| bytes.as_deref().and_then(probe_mp4_artwork));
     let mut embedded_chapters = if structured_chapters.is_empty() {
-        format_chapters
+        probed.embedded_chapters
     } else {
         structured_chapters
     };
@@ -129,7 +130,7 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
     }
 }
 
-fn probe_media(path: &Path) -> Option<(Option<u64>, Option<Vec<u8>>, Vec<MediaChapterInput>)> {
+fn probe_media(path: &Path) -> Option<AnalyzedMedia> {
     const MAX_ARTWORK_BYTES: usize = 10 * 1024 * 1024;
 
     let source = std::fs::File::open(path).ok()?;
@@ -178,7 +179,11 @@ fn probe_media(path: &Path) -> Option<(Option<u64>, Option<Vec<u8>>, Vec<MediaCh
         }
     }
 
-    Some((duration_ms, front_cover.or(first_visual), chapters))
+    Some(AnalyzedMedia {
+        duration_ms,
+        artwork: front_cover.or(first_visual),
+        embedded_chapters: chapters,
+    })
 }
 
 fn duration_ms(format: &dyn symphonia::core::formats::FormatReader) -> Option<u64> {

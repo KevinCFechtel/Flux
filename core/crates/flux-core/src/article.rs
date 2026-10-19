@@ -88,12 +88,12 @@ fn append_text(out: &mut String, node: &Handle) {
             }
             if tag == "br" {
                 out.push('\n');
-            } else if tag == "img" {
-                if let Some(alt) = attr(attrs, "alt") {
-                    out.push(' ');
-                    out.push_str(&alt);
-                    out.push(' ');
-                }
+            } else if tag == "img"
+                && let Some(alt) = attr(attrs, "alt")
+            {
+                out.push(' ');
+                out.push_str(&alt);
+                out.push(' ');
             }
             if BLOCKS.contains(&tag) {
                 out.push('\n');

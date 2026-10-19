@@ -569,7 +569,7 @@ impl MinifluxClient {
         {
             Ok(response) => response,
             Err(error) => {
-                log_request_failure(&path, &error, started.elapsed());
+                log_request_failure(path, &error, started.elapsed());
                 return Err(error);
             }
         };
@@ -2451,12 +2451,10 @@ mod tests {
         (address, worker)
     }
 
-    fn json_server(
-        responses: Vec<(u16, String)>,
-    ) -> (
-        SocketAddr,
-        thread::JoinHandle<Vec<(String, String, serde_json::Value)>>,
-    ) {
+    type JsonRequest = (String, String, serde_json::Value);
+    type JsonServer = (SocketAddr, thread::JoinHandle<Vec<JsonRequest>>);
+
+    fn json_server(responses: Vec<(u16, String)>) -> JsonServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let worker = thread::spawn(move || {

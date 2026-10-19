@@ -5202,9 +5202,7 @@ fn request_download_deletion_in_transaction(
     Ok(())
 }
 
-fn listening_list_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(
+type ListeningListRow = (
     i64,
     i64,
     String,
@@ -5212,7 +5210,9 @@ fn listening_list_row(
     String,
     String,
     Option<ListeningListEnclosure>,
-)> {
+);
+
+fn listening_list_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ListeningListRow> {
     let enclosure_id = row.get::<_, Option<i64>>(6)?;
     let enclosure = enclosure_id
         .map(|id| {
@@ -8441,7 +8441,11 @@ mod tests {
         // No remotely synced feed/category: do not create orphan articles.
         assert!(
             !store
-                .restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id)
+                .restore_legacy_media_article(
+                    &article,
+                    std::slice::from_ref(&enclosure),
+                    enclosure.id,
+                )
                 .unwrap()
         );
         assert!(store.enclosure(enclosure.id).unwrap().is_none());
@@ -8465,7 +8469,7 @@ mod tests {
         // Wrong or non-audio enclosures may never count as verified.
         assert!(
             !store
-                .restore_legacy_media_article(&article, &[enclosure.clone()], 9999)
+                .restore_legacy_media_article(&article, std::slice::from_ref(&enclosure), 9999)
                 .unwrap()
         );
         assert!(
@@ -8484,7 +8488,11 @@ mod tests {
 
         assert!(
             store
-                .restore_legacy_media_article(&article, &[enclosure.clone()], enclosure.id)
+                .restore_legacy_media_article(
+                    &article,
+                    std::slice::from_ref(&enclosure),
+                    enclosure.id,
+                )
                 .unwrap()
         );
         assert_eq!(
@@ -8773,7 +8781,7 @@ mod tests {
             .reconcile_with_enclosures_and_progress_mode(
                 &categories,
                 &feeds,
-                &[new_article.clone()],
+                std::slice::from_ref(&new_article),
                 &[audio.clone(), video],
                 &HashMap::new(),
                 DiscoveryMode::LiveDiscovery,

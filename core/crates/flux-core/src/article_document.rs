@@ -382,10 +382,10 @@ fn truncate(blocks: Vec<ReaderBlock>, limit: u32) -> (Vec<ReaderBlock>, bool) {
             result.push(block);
             continue;
         }
-        if remaining > 0 {
-            if let Some(block) = truncate_block(block, remaining) {
-                result.push(block);
-            }
+        if remaining > 0
+            && let Some(block) = truncate_block(block, remaining)
+        {
+            result.push(block);
         }
         return (result, true);
     }
