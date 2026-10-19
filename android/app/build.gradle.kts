@@ -200,7 +200,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
-    implementation("rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar")
+    implementation(project(":rustls-platform-verifier"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

@@ -129,4 +129,8 @@ if [[ "${VARIANT}" == "productionBundle" ]]; then
   EXTRA_ARGS+=("-PfluxProductionBundleSigning=true")
 fi
 
-exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" "${TASK}" "${EXTRA_ARGS[@]}"
+if (( ${#EXTRA_ARGS[@]} > 0 )); then
+  exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" "${TASK}" "${EXTRA_ARGS[@]}"
+else
+  exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" "${TASK}"
+fi

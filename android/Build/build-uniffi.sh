@@ -191,7 +191,7 @@ for index in "${!targets[@]}"; do
   }
 
   echo "Building ${CRATE} for ${abi} (${target}, ${MODE})."
-  cargo_args=(build --manifest-path "${WORKSPACE}" --package "${CRATE}" --target "${target}")
+  cargo_args=(build --locked --manifest-path "${WORKSPACE}" --package "${CRATE}" --target "${target}")
   [[ "${MODE}" == "release" ]] && cargo_args+=(--release)
   env \
     "CARGO_TARGET_DIR=${CORE_DIR}/target" \
@@ -215,7 +215,7 @@ rm -rf -- "${BINDINGS_DIR}"
 mkdir -p "${BINDINGS_DIR}"
 (
   cd "${CORE_DIR}"
-  cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
+  cargo run --locked --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
     generate "${OUTPUT_DIR}/arm64-v8a/libflux_uniffi.so" \
     --crate flux_uniffi --language kotlin --out-dir "${BINDINGS_DIR}"
 )
