@@ -47,8 +47,38 @@ jobs:
       source_sha: ${{ needs.preflight.outputs.sha }}
     permissions:
       contents: read
+  fdroid-repeat:
+    needs: preflight
+    if: ${{ inputs.mode == 'prerelease' }}
+    uses: ./.github/workflows/fdroid-native.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.sha }}
+      artifact_name: fdroid-native-recipe-repeat
+    permissions:
+      contents: read
+  reproducibility:
+    needs: [fdroid, fdroid-repeat]
+    if: ${{ inputs.mode == 'prerelease' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: fdroid-native-recipe-diagnostics
+          path: first
+      - uses: actions/download-artifact@v7
+        with:
+          name: fdroid-native-recipe-repeat
+          path: second
+      - name: Require bit-identical independent source builds
+        run: |
+          set -euo pipefail
+          first=(first/tmp/*.apk)
+          second=(second/tmp/*.apk)
+          [[ ${#first[@]} -eq 1 && ${#second[@]} -eq 1 && -s "${first[0]}" && -s "${second[0]}" ]] || exit 1
+          sha256sum "${first[0]}" "${second[0]}"
+          cmp -- "${first[0]}" "${second[0]}" || { echo "::error::Independent F-Droid source builds differ"; exit 1; }
   promote:
-    needs: [preflight, fdroid]
+    needs: [preflight, fdroid, reproducibility]
     if: ${{ inputs.mode == 'prerelease' }}
     runs-on: ubuntu-24.04
     environment: release-testing
