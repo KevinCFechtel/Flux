@@ -109,12 +109,13 @@ Veröffentlichung bleiben ungeprüft und wurden nicht angestoßen.
 
 ## CI- und Toolchain-Status
 
-`.github/workflows/apple.yml` ist bereits auf Rust 1.98.0 und alle vier
-Apple-Targets fixiert; für diese Migration ist keine Apple-CI-Änderung nötig.
+Die lokale Apple-Abnahme erfolgte mit Rust 1.98.0. Die anschließende gemeinsame
+Toolchain-Integration fixiert `.github/workflows/apple.yml` auf Rust 1.99.1 und
+alle vier Apple-Targets.
 Die in Dependabot-PR #72 genannte Rust-Version 1.120.0 ist am 19. Oktober 2026
 kein offizieller Rust-Release. Die offizielle Release-Liste führt Rust 1.99.1
 als aktuelle Version. Deshalb wurde kein ungültiger Toolchain-Pin übernommen;
-die spätere plattformübergreifende Toolchain-Vereinheitlichung bleibt außerhalb
-dieser Apple-Migration.
+die plattformübergreifende Toolchain-Vereinheitlichung verwendet stattdessen
+Rust 1.99.1.
 
 - [Offizielle Rust-Releases](https://blog.rust-lang.org/releases/)

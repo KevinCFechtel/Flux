@@ -53,7 +53,7 @@
 
 - Kein vollständiger lokaler `fdroid build`: auf ausdrückliche Anweisung
   übersprungen; der nächste Lauf erfolgt gezielt über
-  `.github/workflows/fdroid-native.yml` mit Submodulen, Rust 1.98.0, NDK
+  `.github/workflows/fdroid-native.yml` mit Submodulen, Rust 1.99.1, NDK
   `29.0.14206865` und allen drei ABIs.
 - Keine aktualisierte Android-TLS-Geräteabnahme: Es war kein Gerät oder
   Emulator verbunden; `test-transport-runtime.sh` beendete sich deshalb mit

@@ -32,7 +32,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Verify pinned Rust compiler
+        run: rustc --version | grep -F 'rustc 1.99.1 '
       - name: Cache cargo audit binary and registry
         uses: Swatinem/rust-cache@v2
         with:

@@ -45,14 +45,17 @@ jobs:
           "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "build-tools/37.0.0"
           "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "ndk/${ANDROID_NDK_VERSION}"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify pinned Rust compiler
+        run: rustc --version | grep -F 'rustc 1.99.1 '
+      - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.7.1"
+          cache-provider: basic
+          gradle-version: "9.8.1"
       - name: Verify pinned Gradle for local F-Droid recipe
-        run: gradle --version | grep -F 'Gradle 9.7.1'
+        run: gradle --version | grep -F 'Gradle 9.8.1'
       - name: Install fdroidserver in isolated Python environment
         run: |
           python3 -m venv "${RUNNER_TEMP}/fdroid-venv"
@@ -98,12 +101,23 @@ jobs:
           assert builds[0]["versionName"] == versions["VERSION_NAME"], "Android versionName and F-Droid recipe differ"
           assert builds[0]["versionName"] == "3.0.0"
           assert builds[0]["commit"] == __import__("os").environ["FDROID_SOURCE_SHA"]
+          assert "scanignore" not in builds[0], "Native recipe must not suppress scanner findings"
+          app_gradle = Path("../android/app/build.gradle.kts").read_text()
+          assert 'implementation(project(":rustls-platform-verifier"))' in app_gradle
+          assert "rustls:rustls-platform-verifier" not in app_gradle, "Prebuilt verifier dependency returned"
+          assert not list(Path("../vendor/rustls-platform-verifier").rglob("*.aar")), "Verifier submodule contains a prebuilt AAR"
           assert len(data["AllowedAPKSigningKeys"]) == 2
           print("F-Droid YAML and native build selection verified")
           PY
       - name: Run full F-Droid lint
         working-directory: fdroid-ci
         run: fdroid lint de.circle_dev.flux_news
+      - name: Scan native source with a blocking exit status
+        working-directory: fdroid-ci
+        run: |
+          set -euo pipefail
+          source ../Build/versions/android.properties
+          fdroid scanner --verbose --exit-code "de.circle_dev.flux_news:${BUILD_NUMBER}" 2>&1 | tee fdroid-scanner.log
       - name: Build using fdroidserver recipe
         working-directory: fdroid-ci
         run: |
@@ -141,6 +155,7 @@ jobs:
           name: fdroid-native-recipe-diagnostics
           path: |
             fdroid-ci/fdroid-build.log
+            fdroid-ci/fdroid-scanner.log
             fdroid-ci/logs/
             fdroid-ci/tmp/*.apk
           if-no-files-found: ignore

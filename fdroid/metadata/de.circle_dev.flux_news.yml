@@ -2894,7 +2894,7 @@ Builds:
       - production
     output: app/build/outputs/apk/production/release/app-production-release-unsigned.apk
     prebuild:
-      - rustup default 1.98.0
+      - rustup default 1.99.1
       - rustup target add aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
     gradleprops:
       - fluxBuildVersionCode=2026101801
