@@ -35,3 +35,33 @@ openssl pkcs8 -topk8 -nocrypt -in server.key -outform DER -out flux-test-usertru
 ```
 
 The CA private key is deliberately not kept anywhere in this repository.
+
+## FD-01 on a non-rooted Android device
+
+The existing `android/Build/test-transport-runtime.sh` supports two manual phases without
+`adb root`, local HTTPS infrastructure or a private Miniflux installation. Both phases run
+instrumentation against the loopback HTTPS fixture and the real Rust/UniFFI TLS transport.
+
+1. Enable USB debugging, connect and authorize the phone, and ensure `adb devices` lists it.
+2. **Before installing the CA**, from the Flux repository root run:
+   `./android/Build/test-transport-runtime.sh --phase absent`
+   This must reject the test-CA-signed endpoint; public HTTPS, hostname-mismatch and
+   untrusted-certificate checks also run as part of the instrumentation package.
+3. Transfer `android/app/src/androidTest/resources/flux-test-user-ca.crt` to the phone.
+   In Android Settings, search for **Install a certificate** → **CA certificate** (menu names
+   depend on Android manufacturer and version), choose this TEST ONLY file and explicitly
+   approve the OS warning. Do not install it on your Mac or on a production server.
+4. Run `./android/Build/test-transport-runtime.sh --phase present`. The same
+   loopback HTTPS server must now be trusted by the Rust transport; the other TLS tests must
+   continue passing.
+5. **Immediately remove** `Flux TEST ONLY User CA` from Android Settings under installed
+   user credentials/certificates. Do not leave the test CA trusted during ordinary phone use.
+
+If `adb` sees multiple devices, append the serial before `--phase`.
+The script deliberately does not install or remove certificates in manual mode and
+refuses to run if the observed certificate state disagrees with the requested phase.
+The existing root-capable automated two-phase mode remains available without `--phase`.
+
+Record the two test outcomes and Android version under FD-01 in
+`docs/FDROID_OPEN_GATES.md`. Passing only the public HTTPS check is partial evidence,
+not a completed FD-01 sign-off.
