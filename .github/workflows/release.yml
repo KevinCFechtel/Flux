@@ -73,6 +73,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
         with: {targets: "aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim"}
       - run: ./apple/macos/Build/test.sh
+  android-tests:
+    if: "${{ inputs.scope == 'android' || inputs.scope == 'all' }}"
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: "${{ needs.preflight.outputs.sha }}", submodules: recursive}
+      - uses: actions/setup-java@v6
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v4.0.4
+        with: {packages: platform-tools}
+      - name: Prepare SDK and NDK
+        run: |
+          cli="$ANDROID_HOME/cmdline-tools/22.0/bin/android"
+          "$cli" --sdk="$ANDROID_HOME" sdk install platforms/android-37.0
+          "$cli" --sdk="$ANDROID_HOME" sdk install build-tools/37.0.0
+          "$cli" --sdk="$ANDROID_HOME" sdk install ndk/29.0.14206865
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with: {targets: 'aarch64-linux-android,x86_64-linux-android'}
+      - run: ./android/Build/test.sh
+
   fdroid:
     if: ${{ inputs.scope == 'android' || inputs.scope == 'all' }}
     needs: preflight
@@ -103,8 +125,8 @@ jobs:
           sha256sum "${a[0]}" "${b[0]}"
           cmp -- "${a[0]}" "${b[0]}"
   sign-android:
-    if: "${{ !cancelled() && inputs.mode == 'release' && (inputs.scope == 'android' || inputs.scope == 'all') && needs.rust.result == 'success' && needs.fdroid.result == 'success' && needs.compare.result == 'success' }}"
-    needs: [preflight, rust, fdroid, compare]
+    if: "${{ !cancelled() && inputs.mode == 'release' && (inputs.scope == 'android' || inputs.scope == 'all') && needs.rust.result == 'success' && needs.fdroid.result == 'success' && needs.android-tests.result == 'success' && needs.compare.result == 'success' }}"
+    needs: [preflight, rust, android-tests, fdroid, compare]
     runs-on: ubuntu-24.04
     environment: release-testing
     env:
@@ -128,8 +150,8 @@ jobs:
           path: dist/android/github/*
           if-no-files-found: error
   publish:
-    if: "${{ !cancelled() && inputs.mode == 'release' && needs.preflight.result == 'success' && needs.rust.result == 'success' && (inputs.scope != 'android' && inputs.scope != 'all' || needs.sign-android.result == 'success') && (inputs.scope != 'ios' && inputs.scope != 'all' || needs.ios.result == 'success') && (inputs.scope != 'macos' && inputs.scope != 'all' || needs.macos.result == 'success') }}"
-    needs: [preflight, rust, ios, macos, fdroid, fdroid-repeat, compare, sign-android]
+    if: "${{ !cancelled() && inputs.mode == 'release' && needs.preflight.result == 'success' && needs.rust.result == 'success' && (inputs.scope != 'android' && inputs.scope != 'all' || needs.android-tests.result == 'success' && needs.sign-android.result == 'success') && (inputs.scope != 'ios' && inputs.scope != 'all' || needs.ios.result == 'success') && (inputs.scope != 'macos' && inputs.scope != 'all' || needs.macos.result == 'success') }}"
+    needs: [preflight, rust, android-tests, ios, macos, fdroid, fdroid-repeat, compare, sign-android]
     runs-on: ubuntu-24.04
     permissions: {contents: write}
     env:
