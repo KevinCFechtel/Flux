@@ -107,8 +107,6 @@ jobs:
           badging="$("$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$signed" | grep '^package:')"
           [[ "$badging" == *"name='de.circle_dev.flux_news'"* && "$badging" == *"versionCode='${BUILD_NUMBER}'"* && "$badging" == *"versionName='${VERSION_NAME}'"* ]] || exit 1
           sha256sum "$signed" | tee dist/android/github/SHA256SUMS
-          git tag "$tag" "$SOURCE_SHA"
-          git push origin "refs/tags/$tag"
           gh release create "$tag" "$signed" dist/android/github/SHA256SUMS \
-            --verify-tag --prerelease --title "Flux Android ${VERSION_NAME}" \
+            --target "$SOURCE_SHA" --prerelease --title "Flux Android ${VERSION_NAME}" \
             --notes "Developer-signed native Android candidate at ${SOURCE_SHA}. Flux testing release; no store or F-Droid submission."
