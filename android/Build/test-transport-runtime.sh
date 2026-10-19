@@ -7,20 +7,29 @@ GRADLEW="${ANDROID_DIR}/gradlew"
 TEST_PACKAGE="de.circledev.fluxnews.nativeapp.transport"
 TEST_CA="${ANDROID_DIR}/app/src/androidTest/resources/flux-test-user-ca.crt"
 USER_CA_DIR="/data/misc/user/0/cacerts-added"
-ARGUMENT_SERIAL="${1:-}"
+ARGUMENT_SERIAL=""
+MANUAL_PHASE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --phase)
+      [[ $# -ge 2 && ( "$2" == "absent" || "$2" == "present" ) ]] || { echo "Expected --phase absent|present" >&2; exit 2; }
+      MANUAL_PHASE="$2"; shift 2 ;;
+    -h|--help) ARGUMENT_SERIAL="--help"; shift ;;
+    -*) echo "Unknown option: $1" >&2; exit 2 ;;
+    *) [[ -z "$ARGUMENT_SERIAL" ]] || { echo "Only one device serial is allowed" >&2; exit 2; }; ARGUMENT_SERIAL="$1"; shift ;;
+  esac
+done
 
 usage() {
-  echo "Usage: test-transport-runtime.sh [device-serial]"
+  echo "Usage: test-transport-runtime.sh [device-serial] [--phase absent|present]"
   echo
   echo "Runs the E1-C Android transport proof twice on one device: once with the TEST ONLY"
   echo "instrumentation CA absent from the Android user trust store, and once with it installed."
   echo "The public/system CA gate needs outbound internet access on the device."
+  echo "For non-rooted devices use --phase absent, install test CA via Android Settings,"
+  echo "then --phase present; remove the test CA afterward."
 }
 
-[[ $# -le 1 ]] || {
-  usage >&2
-  exit 2
-}
 case "${ARGUMENT_SERIAL}" in
   --help|-h)
     usage
@@ -126,6 +135,22 @@ run_phase() {
 # drive that dialog, so this script performs the equivalent one-time test preparation through adb
 # on a development device. It is a test fixture, never a product code path: nothing in src/main
 # installs, reads or bypasses a trust anchor.
+if [[ -n "$MANUAL_PHASE" ]]; then
+  installed=false
+  if device_has_test_ca; then installed=true; fi
+  if [[ "$MANUAL_PHASE" == "absent" && "$installed" == true ]]; then
+    echo "TEST ONLY CA is installed; remove it in Android Settings before the absent phase." >&2
+    exit 1
+  fi
+  if [[ "$MANUAL_PHASE" == "present" && "$installed" == false ]]; then
+    echo "TEST ONLY CA not found; install ${TEST_CA} via Android Settings before the present phase." >&2
+    exit 1
+  fi
+  if [[ "$MANUAL_PHASE" == "absent" ]]; then run_phase false; else run_phase true; fi
+  echo "Manual E1-C phase ${MANUAL_PHASE} completed on ${SERIAL}."
+  exit 0
+fi
+
 adb_root_available || {
   echo "This device does not allow adb root, so the TEST ONLY CA cannot be installed into the" >&2
   echo "Android user trust store automatically. Install ${TEST_CA} through" >&2
