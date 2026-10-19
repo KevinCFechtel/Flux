@@ -2,9 +2,16 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use html5ever::{parse_document, tendril::TendrilSink};
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use symphonia::core::common::Limit;
+use symphonia::core::formats::{FormatOptions, TrackType, probe::Hint};
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::{
+    Chapter, ChapterGroup, ChapterGroupItem, MetadataOptions, StandardTag, StandardVisualKey,
+};
+use symphonia::core::units::Time;
 
 use crate::domain::{MediaChapter, MediaChapterSource};
+use crate::html_dom::{Dom, Handle, NodeData};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AnalyzedMedia {
@@ -100,58 +107,18 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
     }
     let bytes = bounded_file_prefix(path);
     let structured_chapters = bytes.as_deref().map(parse_id3_chapters).unwrap_or_default();
-    // Legacy Flutter files are imported with a .audio suffix, which is not a
-    // supported extension in lofty. Detect the actual format from the bytes.
-    // Preserve the normal path-based fallback for otherwise valid files.
-    let tagged = lofty::probe::Probe::open(path)
-        .ok()
-        .and_then(|probe| probe.guess_file_type().ok())
-        .and_then(|probe| probe.read().ok())
-        .or_else(|| lofty::read_from_path(path).ok());
-    let (duration_ms, artwork, text_chapters) = if let Some(tagged) = tagged {
-        use lofty::file::{AudioFile, TaggedFileExt};
-        let duration_ms = (tagged.properties().duration().as_millis() > 0)
-            .then(|| tagged.properties().duration().as_millis() as u64);
-        let artwork = tagged
-            .primary_tag()
-            .and_then(|tag| tag.pictures().first())
-            .map(|picture| picture.data().to_vec())
-            .filter(|data| !data.is_empty() && data.len() <= 10 * 1024 * 1024)
-            .or_else(|| bytes.as_deref().and_then(parse_id3_artwork));
-        let chapters = tagged
-            .tags()
-            .iter()
-            .flat_map(|tag| tag.items())
-            .filter_map(|item| {
-                let lofty::tag::ItemKey::Unknown(key) = item.key() else {
-                    return None;
-                };
-                if !key.to_ascii_uppercase().starts_with("CHAPTER") {
-                    return None;
-                }
-                let lofty::tag::ItemValue::Text(value) = item.value() else {
-                    return None;
-                };
-                let (timestamp, title) = value.split_once(' ')?;
-                Some(MediaChapterInput {
-                    title: title.trim().to_string(),
-                    start_ms: parse_timestamp(timestamp)?,
-                    end_ms: None,
-                })
-            })
-            .collect();
-        (duration_ms, artwork, chapters)
-    } else {
-        // Some old or truncated MP3s still contain a perfectly valid APIC
-        // frame even if their audio stream cannot be parsed by lofty.
-        (
-            None,
-            bytes.as_deref().and_then(parse_id3_artwork),
-            Vec::new(),
-        )
-    };
+    // Probe bytes rather than the filename so legacy Flutter downloads with a
+    // `.audio` suffix retain format-independent duration and metadata support.
+    let probed = probe_media(path).unwrap_or_default();
+    let duration_ms = probed.duration_ms;
+    // Truncated old MP3s can still contain a valid APIC frame even when no
+    // complete media stream can be probed. Keep the bounded parser as fallback.
+    let artwork = probed
+        .artwork
+        .or_else(|| bytes.as_deref().and_then(parse_id3_artwork))
+        .or_else(|| bytes.as_deref().and_then(probe_mp4_artwork));
     let mut embedded_chapters = if structured_chapters.is_empty() {
-        text_chapters
+        probed.embedded_chapters
     } else {
         structured_chapters
     };
@@ -161,6 +128,124 @@ pub(crate) fn analyze_file(path: &Path) -> AnalyzedMedia {
         artwork,
         embedded_chapters,
     }
+}
+
+fn probe_media(path: &Path) -> Option<AnalyzedMedia> {
+    const MAX_ARTWORK_BYTES: usize = 10 * 1024 * 1024;
+
+    let source = std::fs::File::open(path).ok()?;
+    let stream = MediaSourceStream::new(Box::new(source), Default::default());
+    let metadata_options = MetadataOptions::default()
+        .limit_tag_bytes(Limit::Maximum(1024 * 1024))
+        .limit_visual_bytes(Limit::Maximum(MAX_ARTWORK_BYTES));
+    // An empty hint is intentional: callers may supply a legacy `.audio`
+    // suffix, so the file signature must remain authoritative.
+    let mut format = symphonia::default::get_probe()
+        .probe(
+            &Hint::new(),
+            stream,
+            FormatOptions::default(),
+            metadata_options,
+        )
+        .ok()?;
+
+    let duration_ms = duration_ms(format.as_ref());
+    let chapters = format.chapters().map(format_chapters).unwrap_or_default();
+
+    let mut front_cover = None;
+    let mut first_visual = None;
+    let mut metadata = format.metadata();
+    loop {
+        if let Some(revision) = metadata.current() {
+            for visual in revision.media.visuals.iter().chain(
+                revision
+                    .per_track
+                    .iter()
+                    .flat_map(|track| &track.metadata.visuals),
+            ) {
+                if visual.data.is_empty() || visual.data.len() > MAX_ARTWORK_BYTES {
+                    continue;
+                }
+                let data = visual.data.to_vec();
+                if visual.usage == Some(StandardVisualKey::FrontCover) {
+                    front_cover.get_or_insert(data);
+                } else {
+                    first_visual.get_or_insert(data);
+                }
+            }
+        }
+        if metadata.pop().is_none() {
+            break;
+        }
+    }
+
+    Some(AnalyzedMedia {
+        duration_ms,
+        artwork: front_cover.or(first_visual),
+        embedded_chapters: chapters,
+    })
+}
+
+fn duration_ms(format: &dyn symphonia::core::formats::FormatReader) -> Option<u64> {
+    let media = format.media_info();
+    let time = media
+        .time_base
+        .zip(media.duration)
+        .and_then(|(time_base, duration)| time_base.calc_duration(duration))
+        .or_else(|| {
+            let track = format.default_track(TrackType::Audio)?;
+            track
+                .time_base
+                .zip(track.duration)
+                .and_then(|(time_base, duration)| time_base.calc_duration(duration))
+        })?;
+    positive_millis(time)
+}
+
+fn positive_millis(time: Time) -> Option<u64> {
+    let millis = time.as_millis();
+    (millis > 0).then(|| u64::try_from(millis).ok()).flatten()
+}
+
+fn format_chapters(group: &ChapterGroup) -> Vec<MediaChapterInput> {
+    let mut chapters = Vec::new();
+    collect_format_chapters(group, &mut chapters);
+    chapters
+}
+
+fn collect_format_chapters(group: &ChapterGroup, output: &mut Vec<MediaChapterInput>) {
+    for item in &group.items {
+        match item {
+            ChapterGroupItem::Group(group) => collect_format_chapters(group, output),
+            ChapterGroupItem::Chapter(chapter) => {
+                if let Some(chapter) = format_chapter(chapter) {
+                    output.push(chapter);
+                }
+            }
+        }
+    }
+}
+
+fn format_chapter(chapter: &Chapter) -> Option<MediaChapterInput> {
+    let title = chapter.tags.iter().find_map(|tag| match &tag.std {
+        Some(StandardTag::ChapterTitle(title)) | Some(StandardTag::TrackTitle(title)) => {
+            Some(title.trim().to_string())
+        }
+        _ => None,
+    })?;
+    if title.is_empty() {
+        return None;
+    }
+    Some(MediaChapterInput {
+        title,
+        start_ms: positive_or_zero_millis(chapter.start_time)?,
+        end_ms: chapter.end_time.and_then(positive_or_zero_millis),
+    })
+}
+
+fn positive_or_zero_millis(time: Time) -> Option<u64> {
+    let millis = time.as_millis();
+    (millis >= 0).then(|| u64::try_from(millis).ok()).flatten()
 }
 
 fn bounded_file_prefix(path: &Path) -> Option<Vec<u8>> {
@@ -482,7 +567,7 @@ fn article_chapter_text(value: &str) -> String {
         return value.replace("&nbsp;", " ");
     }
     let Ok(dom) = std::panic::catch_unwind(|| {
-        parse_document(RcDom::default(), Default::default())
+        parse_document(Dom::default(), Default::default())
             .from_utf8()
             .one(value.as_bytes())
     }) else {
@@ -525,7 +610,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_audio_suffix_still_exposes_embedded_id3_cover() {
+    fn legacy_audio_suffix_uses_bytes_for_duration_cover_and_chapters() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("enclosure-42.audio");
         let picture = [0xff, 0xd8, 0xff, 0xd9];
@@ -537,8 +622,40 @@ mod tests {
         frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         frame.extend_from_slice(&[0, 0]);
         frame.extend_from_slice(&payload);
-        std::fs::write(&path, id3_fixture(&frame)).unwrap();
+        frame.extend(chapter_frame("intro", 0, 0, Some(100), "Intro"));
+        let mut fixture = id3_fixture(&frame);
+        fixture.extend(silent_mp3_frames(20));
+        std::fs::write(&path, fixture).unwrap();
+
+        let analyzed = analyze_file(&path);
+        assert_eq!(analyzed.artwork, Some(picture.to_vec()));
+        assert!(
+            analyzed.duration_ms.is_some_and(|value| value >= 200),
+            "{analyzed:?}"
+        );
+        assert_eq!(analyzed.embedded_chapters[0].title, "Intro");
+        assert_eq!(analyzed.embedded_chapters[0].start_ms, 0);
+    }
+
+    #[test]
+    fn mp4_cover_fallback_and_corrupt_media_fail_softly() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("podcast.audio");
+        let picture = [0xff, 0xd8, 0xff, 0xd9];
+        let mut data = Vec::new();
+        data.extend_from_slice(&((16 + picture.len()) as u32).to_be_bytes());
+        data.extend_from_slice(b"data");
+        data.extend_from_slice(&[0; 8]);
+        data.extend_from_slice(&picture);
+        let mut cover = Vec::new();
+        cover.extend_from_slice(&((8 + data.len()) as u32).to_be_bytes());
+        cover.extend_from_slice(b"covr");
+        cover.extend_from_slice(&data);
+        std::fs::write(&path, cover).unwrap();
         assert_eq!(analyze_file(&path).artwork, Some(picture.to_vec()));
+
+        std::fs::write(&path, b"not a media stream").unwrap();
+        assert_eq!(analyze_file(&path), AnalyzedMedia::default());
     }
 
     #[test]
@@ -676,5 +793,13 @@ mod tests {
         ]);
         fixture.extend_from_slice(frames);
         fixture
+    }
+
+    fn silent_mp3_frames(count: usize) -> Vec<u8> {
+        // MPEG-1 Layer III, 128 kbit/s, 44.1 kHz. The demuxer only needs
+        // structurally valid frames to determine duration; audio is not decoded.
+        let mut frame = vec![0; 417];
+        frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+        frame.repeat(count)
     }
 }

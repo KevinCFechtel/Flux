@@ -2886,6 +2886,7 @@ Builds:
     versionCode: 2026101801
     commit: FLUX_NATIVE_COMMIT
     subdir: android
+    submodules: true
     sudo:
       - apt-get update
       - apt-get install -y rustup
@@ -2893,12 +2894,8 @@ Builds:
       - production
     output: app/build/outputs/apk/production/release/app-production-release-unsigned.apk
     prebuild:
-      - rustup default 1.98.0
+      - rustup default 1.99.1
       - rustup target add aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
-    # settings.gradle.kts uses a Cargo-lock-pinned local Maven AAR repository.
-    # fdroidserver 2.4.5 mistakes the Kotlin expression for a remote URL.
-    scanignore:
-      - android/settings.gradle.kts
     gradleprops:
       - fluxBuildVersionCode=2026101801
       - fluxBuildVersionName=3.0.0

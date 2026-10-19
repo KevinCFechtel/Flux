@@ -29,6 +29,12 @@ enum SyncPlan {
     BackgroundNeedsFull,
 }
 
+struct ProtectedFetchState<'a> {
+    snapshot: &'a mut crate::miniflux::RemoteSnapshot,
+    known_articles: &'a mut HashSet<i64>,
+    known_enclosures: &'a mut HashSet<i64>,
+}
+
 fn sync_plan(store: &Store, reason: SyncReason) -> Result<SyncPlan, CoreError> {
     match reason {
         SyncReason::Background => {
@@ -191,9 +197,11 @@ fn run_full_cancellable(
                 store,
                 article_id,
                 protected_fetch_reason(article_id, &protected_requirements, &download_requirements),
-                &mut snapshot,
-                &mut known_articles,
-                &mut known_enclosures,
+                &mut ProtectedFetchState {
+                    snapshot: &mut snapshot,
+                    known_articles: &mut known_articles,
+                    known_enclosures: &mut known_enclosures,
+                },
                 cancellation,
             )? {
                 Cancellable::Completed(()) => {}
@@ -221,9 +229,11 @@ fn run_full_cancellable(
                         &protected_requirements,
                         &download_requirements,
                     ),
-                    &mut snapshot,
-                    &mut known_articles,
-                    &mut known_enclosures,
+                    &mut ProtectedFetchState {
+                        snapshot: &mut snapshot,
+                        known_articles: &mut known_articles,
+                        known_enclosures: &mut known_enclosures,
+                    },
                     cancellation,
                 )? {
                     Cancellable::Completed(()) => {}
@@ -480,9 +490,7 @@ fn fetch_protected_article_cancellable(
     store: &Store,
     article_id: i64,
     reason: &str,
-    snapshot: &mut crate::miniflux::RemoteSnapshot,
-    known_articles: &mut HashSet<i64>,
-    known_enclosures: &mut HashSet<i64>,
+    state: &mut ProtectedFetchState<'_>,
     cancellation: &SyncCancellation,
 ) -> Result<Cancellable<()>, CoreError> {
     if cancellation.is_cancelled() {
@@ -513,10 +521,12 @@ fn fetch_protected_article_cancellable(
         }
         Err(error) => return Err(error),
     };
-    known_articles.insert(protected.article.id);
-    known_enclosures.extend(protected.enclosures.iter().map(|enclosure| enclosure.id));
-    snapshot.articles.push(protected.article);
-    snapshot.enclosures.extend(protected.enclosures);
+    state.known_articles.insert(protected.article.id);
+    state
+        .known_enclosures
+        .extend(protected.enclosures.iter().map(|enclosure| enclosure.id));
+    state.snapshot.articles.push(protected.article);
+    state.snapshot.enclosures.extend(protected.enclosures);
     Ok(Cancellable::Completed(()))
 }
 
@@ -1335,9 +1345,9 @@ mod tests {
         ];
         store
             .reconcile_with_enclosures(
-                &[category.clone()],
-                &[feed.clone()],
-                &[article.clone()],
+                std::slice::from_ref(&category),
+                std::slice::from_ref(&feed),
+                std::slice::from_ref(&article),
                 &enclosures,
             )
             .unwrap();

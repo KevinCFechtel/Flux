@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 
 use html5ever::{parse_document, tendril::TendrilSink};
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
+
+use crate::html_dom::{Dom, Handle, NodeData};
 
 pub const PROCESSING_VERSION: i64 = 1;
 pub const PREVIEW_LIMIT: usize = 1000;
@@ -57,7 +58,7 @@ pub fn process(
     }
     let base = url::Url::parse(article_url).ok();
     let dom = match std::panic::catch_unwind(|| {
-        parse_document(RcDom::default(), Default::default())
+        parse_document(Dom::default(), Default::default())
             .from_utf8()
             .one(html.as_bytes())
     }) {
@@ -87,12 +88,12 @@ fn append_text(out: &mut String, node: &Handle) {
             }
             if tag == "br" {
                 out.push('\n');
-            } else if tag == "img" {
-                if let Some(alt) = attr(attrs, "alt") {
-                    out.push(' ');
-                    out.push_str(&alt);
-                    out.push(' ');
-                }
+            } else if tag == "img"
+                && let Some(alt) = attr(attrs, "alt")
+            {
+                out.push(' ');
+                out.push_str(&alt);
+                out.push(' ');
             }
             if BLOCKS.contains(&tag) {
                 out.push('\n');
@@ -141,7 +142,7 @@ fn truncate(value: &str) -> String {
 }
 fn first_image(node: &Handle, base: Option<&url::Url>) -> Option<String> {
     if let NodeData::Element { name, attrs, .. } = &node.data {
-        let tag = name.local.as_ref();
+        let tag: &str = name.local.as_ref();
         if (tag == "img" || tag == "source") && !tiny(attrs) {
             for key in IMAGE_ATTRS {
                 let candidate = attr(attrs, key).unwrap_or_default();
@@ -214,7 +215,7 @@ fn attr(attrs: &RefCell<Vec<html5ever::Attribute>>, key: &str) -> Option<String>
     attrs
         .borrow()
         .iter()
-        .find(|attr| attr.name.local.as_ref() == key)
+        .find(|attr| <_ as AsRef<str>>::as_ref(&attr.name.local) == key)
         .map(|attr| attr.value.trim().to_string())
 }
 

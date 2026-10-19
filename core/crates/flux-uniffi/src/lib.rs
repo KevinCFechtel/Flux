@@ -770,7 +770,7 @@ pub enum ErrorKind {
     Data,
     Internal,
 }
-#[uniffi::export(with_foreign)]
+#[uniffi::export(rust, foreign)]
 pub trait EventListener: Send + Sync {
     fn on_event(&self, event: CoreEvent);
 }
@@ -788,7 +788,7 @@ pub struct DiagnosticRecord {
     pub target: String,
     pub message: String,
 }
-#[uniffi::export(with_foreign)]
+#[uniffi::export(rust, foreign)]
 pub trait DiagnosticListener: Send + Sync {
     fn on_diagnostic(&self, record: DiagnosticRecord);
 }

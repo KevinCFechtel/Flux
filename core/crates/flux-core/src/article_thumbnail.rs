@@ -260,7 +260,11 @@ impl ArticleThumbnailService {
 
 fn resource_key(article_id: i64, image_url: &str) -> String {
     let hash = Sha256::digest(image_url.as_bytes());
-    format!("{article_id}-{:x}", hash)
+    let hash = hash
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{article_id}-{hash}")
 }
 fn normalize(bytes: &[u8]) -> Result<Vec<u8>, CoreError> {
     let image = image::load_from_memory(bytes)

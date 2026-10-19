@@ -154,11 +154,10 @@ running/completed transfers retain correct semantics on both network types.
 ### A4 — Dedicated Rust regression gate in CI
 
 **Implemented:** `.github/workflows/rust.yml` runs the separate Rust workspace
-tests and Clippy on Core/workflow changes, plus a formatting audit on Rust
-1.98.0. **Important remaining gap:** `cargo fmt --check` currently uses
-`continue-on-error: true` for pre-existing formatting debt, so formatting
-is **not yet a blocking gate**. Required-check branch settings and strict
-warning handling must be assessed separately. Do not call A4 fully complete.
+tests and Clippy on Core/workflow changes, plus a blocking formatting audit on
+Rust 1.99.1. The workflow verifies the installed compiler version explicitly
+and uses the committed lockfile for tests and Clippy. Required-check branch
+settings and strict warning handling remain repository-administration choices.
 
 **Original implementation/validation scope:**
 

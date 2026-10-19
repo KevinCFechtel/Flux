@@ -2,8 +2,6 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-#[cfg(any(target_vendor = "apple", target_os = "android"))]
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -488,29 +486,33 @@ impl MinifluxClient {
                 _ => unreachable!("URL normalization only returns URL errors"),
             })?;
         let api_base = format!("{installation_base}/v1");
-        let mut agent_builder = ureq::AgentBuilder::new()
+        let mut agent_builder = ureq::Agent::config_builder()
             // Keep slow-but-progressing API transfers viable while failing a dead
             // route much earlier. This especially limits stalls when DNS returns
             // an unusable address family before a working alternative.
-            .timeout(REQUEST_TIMEOUT)
-            .timeout_connect(CONNECT_TIMEOUT)
-            .timeout_read(READ_TIMEOUT)
-            .timeout_write(WRITE_TIMEOUT)
-            .redirects(10);
-        let mut media_probe_builder = ureq::AgentBuilder::new()
-            .timeout(MEDIA_PROBE_TIMEOUT)
-            .timeout_connect(MEDIA_PROBE_CONNECT_TIMEOUT)
-            .timeout_read(MEDIA_PROBE_READ_TIMEOUT)
-            .timeout_write(MEDIA_PROBE_READ_TIMEOUT)
-            .redirects(5);
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_recv_response(Some(READ_TIMEOUT))
+            .timeout_recv_body(Some(READ_TIMEOUT))
+            .timeout_send_request(Some(WRITE_TIMEOUT))
+            .timeout_send_body(Some(WRITE_TIMEOUT))
+            .max_redirects(10);
+        let mut media_probe_builder = ureq::Agent::config_builder()
+            .timeout_global(Some(MEDIA_PROBE_TIMEOUT))
+            .timeout_connect(Some(MEDIA_PROBE_CONNECT_TIMEOUT))
+            .timeout_recv_response(Some(MEDIA_PROBE_READ_TIMEOUT))
+            .timeout_recv_body(Some(MEDIA_PROBE_READ_TIMEOUT))
+            .timeout_send_request(Some(MEDIA_PROBE_READ_TIMEOUT))
+            .timeout_send_body(Some(MEDIA_PROBE_READ_TIMEOUT))
+            .max_redirects(5);
         #[cfg(any(target_vendor = "apple", target_os = "android"))]
         {
             agent_builder = agent_builder.tls_config(platform_tls_config());
             media_probe_builder = media_probe_builder.tls_config(platform_tls_config());
         }
         Ok(Self {
-            agent: agent_builder.build(),
-            media_probe_agent: media_probe_builder.build(),
+            agent: agent_builder.build().into(),
+            media_probe_agent: media_probe_builder.build().into(),
             installation_base,
             api_base,
             api_key: api_key.to_string(),
@@ -518,11 +520,14 @@ impl MinifluxClient {
             request_lock: Mutex::new(()),
         })
     }
-    fn authenticated_request(&self, mut request: ureq::Request) -> ureq::Request {
+    fn authenticated_request<B>(
+        &self,
+        mut request: ureq::RequestBuilder<B>,
+    ) -> ureq::RequestBuilder<B> {
         for header in &self.custom_headers {
-            request = request.set(&header.name, &header.value);
+            request = request.header(&header.name, &header.value);
         }
-        request.set("X-Auth-Token", &self.api_key)
+        request.header("X-Auth-Token", &self.api_key)
     }
     pub fn installation_base(&self) -> &str {
         &self.installation_base
@@ -558,17 +563,17 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         let response = match self
             .authenticated_request(self.agent.get(&url))
-            .set("Accept", "application/json")
+            .header("Accept", "application/json")
             .call()
             .map_err(map_http_error)
         {
             Ok(response) => response,
             Err(error) => {
-                log_request_failure(&path, &error, started.elapsed());
+                log_request_failure(path, &error, started.elapsed());
                 return Err(error);
             }
         };
-        let decoded = serde_json::from_reader(response.into_reader())
+        let decoded = serde_json::from_reader(response.into_body().into_reader())
             .map_err(|e| CoreError::data(format!("invalid Miniflux response: {e}")));
         match decoded {
             Ok(value) => {
@@ -590,8 +595,8 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
             .authenticated_request(self.agent.put(&self.api_url(path)))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
+            .header("Content-Type", "application/json")
+            .send(&body)
             .map_err(map_http_error)
         {
             Ok(_) => {
@@ -618,15 +623,15 @@ impl MinifluxClient {
             .map_err(|error| CoreError::internal(format!("encode Miniflux request: {error}")))?;
         let response = self
             .authenticated_request(self.agent.post(&self.api_url(path)))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
+            .header("Content-Type", "application/json")
+            .send(&body)
             .map_err(map_http_error)?;
-        if expected.contains(&response.status()) {
+        if expected.contains(&response.status().as_u16()) {
             Ok(())
         } else {
             Err(CoreError::data(format!(
                 "Miniflux returned unexpected HTTP {}",
-                response.status()
+                response.status().as_u16()
             )))
         }
     }
@@ -640,25 +645,20 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
             .authenticated_request(self.agent.post(&self.api_url(&path)))
-            .call()
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send_empty()
         {
-            Ok(response) if response.status() == 202 => {
+            Ok(response) if response.status().as_u16() == 202 => {
                 tracing::debug!(target: "miniflux", "request completed endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
                 Ok(SaveToServiceResult::Saved)
             }
-            Ok(response) => {
-                let error = CoreError::data(format!(
-                    "Miniflux returned unexpected HTTP {}",
-                    response.status()
-                ))
-                .with_http_status(response.status());
-                log_request_failure(&path, &error, started.elapsed());
-                Err(error)
-            }
-            Err(ureq::Error::Status(400, response)) => {
-                let configured = serde_json::from_reader::<_, ErrorDto>(response.into_reader())
-                    .map(|body| body.error_message != "no third-party integration enabled")
-                    .unwrap_or(true);
+            Ok(response) if response.status().as_u16() == 400 => {
+                let configured =
+                    serde_json::from_reader::<_, ErrorDto>(response.into_body().into_reader())
+                        .map(|body| body.error_message != "no third-party integration enabled")
+                        .unwrap_or(true);
                 if configured {
                     let error = CoreError::invalid_configuration("Miniflux returned HTTP 400")
                         .with_http_status(400);
@@ -668,6 +668,11 @@ impl MinifluxClient {
                     tracing::debug!(target: "miniflux", "request completed without configured integration endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
                     Ok(SaveToServiceResult::NoIntegrationConfigured)
                 }
+            }
+            Ok(response) => {
+                let error = map_http_error(ureq::Error::StatusCode(response.status().as_u16()));
+                log_request_failure(&path, &error, started.elapsed());
+                Err(error)
             }
             Err(error) => {
                 let error = map_http_error(error);
@@ -692,8 +697,8 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         let response = match self
             .authenticated_request(self.agent.post(&self.api_url(path)))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
+            .header("Content-Type", "application/json")
+            .send(&body)
             .map_err(map_http_error)
         {
             Ok(response) => response,
@@ -702,16 +707,16 @@ impl MinifluxClient {
                 return Err(error);
             }
         };
-        if response.status() != expected_status {
+        if response.status().as_u16() != expected_status {
             let error = CoreError::data(format!(
                 "Miniflux returned unexpected HTTP {}",
-                response.status()
+                response.status().as_u16()
             ))
-            .with_http_status(response.status());
+            .with_http_status(response.status().as_u16());
             log_request_failure(path, &error, started.elapsed());
             return Err(error);
         }
-        let decoded = serde_json::from_reader(response.into_reader())
+        let decoded = serde_json::from_reader(response.into_body().into_reader())
             .map_err(|error| CoreError::data(format!("invalid Miniflux response: {error}")));
         match decoded {
             Ok(value) => {
@@ -1063,18 +1068,20 @@ impl MinifluxClient {
         let response = self
             .media_probe_agent
             .get(url)
-            .set(
+            .header(
                 "Accept",
                 "audio/*,video/*,application/octet-stream;q=0.8,*/*;q=0.1",
             )
-            .set("Range", range)
+            .header("Range", range)
             .call()
             .map_err(map_http_error)?;
 
-        let status = response.status();
+        let status = response.status().as_u16();
         if status != 206 {
             let length = response
-                .header("Content-Length")
+                .headers()
+                .get("Content-Length")
+                .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse::<usize>().ok());
             if status != 200 || length.is_none_or(|length| length > max_bytes) {
                 return Err(CoreError::data(
@@ -1084,14 +1091,19 @@ impl MinifluxClient {
         }
 
         if response
-            .header("Content-Length")
+            .headers()
+            .get("Content-Length")
+            .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<usize>().ok())
             .is_some_and(|length| length > max_bytes)
         {
             return Err(CoreError::data("media probe response exceeds byte budget"));
         }
 
-        let mut reader = response.into_reader().take((max_bytes + 1) as u64);
+        let mut reader = response
+            .into_body()
+            .into_reader()
+            .take((max_bytes + 1) as u64);
         let mut bytes = Vec::with_capacity(max_bytes.min(256 * 1024));
         reader.read_to_end(&mut bytes).map_err(|error| {
             CoreError::connectivity(format!("media probe read failed: {error}"))
@@ -1130,18 +1142,27 @@ impl MinifluxClient {
         let response = self
             .agent
             .get(url)
-            .set("Accept", "image/*")
+            .header("Accept", "image/*")
             .call()
             .map_err(map_image_http_error)?;
         if response
-            .header("Content-Length")
+            .headers()
+            .get("Content-Length")
+            .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<usize>().ok())
             .is_some_and(|length| length > max_bytes)
         {
             return Err(CoreError::data("article image exceeds maximum payload"));
         }
-        let content_type = response.header("Content-Type").map(str::to_owned);
-        let mut reader = response.into_reader().take((max_bytes + 1) as u64);
+        let content_type = response
+            .headers()
+            .get("Content-Type")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let mut reader = response
+            .into_body()
+            .into_reader()
+            .take((max_bytes + 1) as u64);
         let mut bytes = Vec::with_capacity(max_bytes.min(64 * 1024));
         reader.read_to_end(&mut bytes).map_err(|error| {
             CoreError::connectivity(format!("article image download failed: {error}"))
@@ -1318,14 +1339,14 @@ impl MinifluxClient {
         })?;
         let response = client
             .authenticated_request(client.agent.get(&client.api_url("/v1/version")))
-            .set("Accept", "application/json")
+            .header("Accept", "application/json")
             .call()
             .map_err(|error| AccountValidationFailure {
                 error: map_account_validation_error(&error),
                 diagnostic: account_validation_diagnostic(&error, &secret_values),
             })?;
-        let response: VersionDto =
-            serde_json::from_reader(response.into_reader()).map_err(|_| {
+        let response: VersionDto = serde_json::from_reader(response.into_body().into_reader())
+            .map_err(|_| {
                 AccountValidationFailure::without_diagnostic(
                     AccountValidationError::InvalidResponse,
                 )
@@ -1351,10 +1372,10 @@ impl MinifluxClient {
 /// Android verifier bootstrap before the first request. Every other target keeps the
 /// `ureq` default TLS configuration.
 #[cfg(any(target_vendor = "apple", target_os = "android"))]
-fn platform_tls_config() -> Arc<rustls::ClientConfig> {
-    use rustls_platform_verifier::ConfigVerifierExt;
-
-    Arc::new(rustls::ClientConfig::with_platform_verifier())
+fn platform_tls_config() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build()
 }
 
 #[derive(Debug)]
@@ -1565,14 +1586,14 @@ impl RemoteSource for MinifluxClient {
 
 fn map_http_error(error: ureq::Error) -> CoreError {
     match error {
-        ureq::Error::Status(status @ (401 | 403), _) => {
+        ureq::Error::StatusCode(status @ (401 | 403)) => {
             CoreError::authentication("Miniflux rejected credentials").with_http_status(status)
         }
-        ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
+        ureq::Error::StatusCode(status) if status == 429 || status >= 500 => {
             CoreError::server_transient(format!("Miniflux server returned HTTP {status}"))
                 .with_http_status(status)
         }
-        ureq::Error::Status(status, _) => {
+        ureq::Error::StatusCode(status) => {
             CoreError::invalid_configuration(format!("Miniflux returned HTTP {status}"))
                 .with_http_status(status)
         }
@@ -1588,15 +1609,15 @@ fn log_request_failure(path: &str, error: &CoreError, elapsed: std::time::Durati
 }
 fn map_account_validation_error(error: &ureq::Error) -> AccountValidationError {
     match error {
-        ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => {
+        ureq::Error::StatusCode(401) | ureq::Error::StatusCode(403) => {
             AccountValidationError::Unauthorized
         }
-        ureq::Error::Status(404, _) => AccountValidationError::IncompatibleServer,
-        ureq::Error::Status(status, _) if *status == 429 || *status >= 500 => {
+        ureq::Error::StatusCode(404) => AccountValidationError::IncompatibleServer,
+        ureq::Error::StatusCode(status) if *status == 429 || *status >= 500 => {
             AccountValidationError::ServerUnavailable
         }
-        ureq::Error::Status(_, _) => AccountValidationError::IncompatibleServer,
-        ureq::Error::Transport(_) => AccountValidationError::Network,
+        ureq::Error::StatusCode(_) => AccountValidationError::IncompatibleServer,
+        _ => AccountValidationError::Network,
     }
 }
 
@@ -1605,49 +1626,33 @@ fn account_validation_diagnostic(
     secret_values: &[String],
 ) -> Option<AccountValidationDiagnostic> {
     match error {
-        ureq::Error::Transport(transport) => {
-            let message = transport.message().unwrap_or_default();
-            let source = std::error::Error::source(transport)
-                .map(ToString::to_string)
-                .unwrap_or_default();
-            let detail = sanitize_transport_detail(
-                &format!(
-                    "ureq kind: {}; {}{}",
-                    transport.kind(),
-                    message,
-                    if source.is_empty() {
-                        String::new()
-                    } else {
-                        format!("; source: {source}")
-                    }
-                ),
-                secret_values,
-            );
+        error if !matches!(error, ureq::Error::StatusCode(_)) => {
+            let detail = sanitize_transport_detail(&error.to_string(), secret_values);
             let lower = detail.to_ascii_lowercase();
-            let category = if lower.contains("tls")
+            let category = if matches!(error, ureq::Error::Tls(_) | ureq::Error::Rustls(_))
+                || lower.contains("tls")
                 || lower.contains("certificate")
                 || lower.contains("cert ")
             {
                 "TLS/certificate"
-            } else if matches!(transport.kind(), ureq::ErrorKind::Dns) {
+            } else if matches!(error, ureq::Error::HostNotFound) {
                 "DNS resolution"
-            } else if lower.contains("timeout") || lower.contains("timed out") {
+            } else if matches!(error, ureq::Error::Timeout(_))
+                || lower.contains("timeout")
+                || lower.contains("timed out")
+            {
                 "Timeout"
-            } else if matches!(transport.kind(), ureq::ErrorKind::ConnectionFailed) {
+            } else if matches!(error, ureq::Error::ConnectionFailed | ureq::Error::Io(_)) {
                 "Connection failed"
             } else {
                 "Transport"
             };
             Some(AccountValidationDiagnostic {
                 category: category.to_string(),
-                detail: if detail.is_empty() {
-                    transport.kind().to_string()
-                } else {
-                    detail
-                },
+                detail,
             })
         }
-        ureq::Error::Status(status, _) if *status == 429 || *status >= 500 => {
+        ureq::Error::StatusCode(status) if *status == 429 || *status >= 500 => {
             Some(AccountValidationDiagnostic {
                 category: "HTTP server unavailable".to_string(),
                 detail: format!("HTTP status {status}"),
@@ -1676,10 +1681,10 @@ fn sanitize_transport_detail(value: &str, secrets: &[String]) -> String {
 }
 fn map_image_http_error(error: ureq::Error) -> CoreError {
     match error {
-        ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
+        ureq::Error::StatusCode(status) if status == 429 || status >= 500 => {
             CoreError::server_transient(format!("article image server returned HTTP {status}"))
         }
-        ureq::Error::Status(status, _) => {
+        ureq::Error::StatusCode(status) => {
             CoreError::data(format!("article image returned HTTP {status}"))
         }
         other => CoreError::connectivity(format!("article image request failed: {other}")),
@@ -2446,12 +2451,10 @@ mod tests {
         (address, worker)
     }
 
-    fn json_server(
-        responses: Vec<(u16, String)>,
-    ) -> (
-        SocketAddr,
-        thread::JoinHandle<Vec<(String, String, serde_json::Value)>>,
-    ) {
+    type JsonRequest = (String, String, serde_json::Value);
+    type JsonServer = (SocketAddr, thread::JoinHandle<Vec<JsonRequest>>);
+
+    fn json_server(responses: Vec<(u16, String)>) -> JsonServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let worker = thread::spawn(move || {
@@ -2468,7 +2471,9 @@ mod tests {
                     if header == "\r\n" {
                         break;
                     }
-                    if let Some(value) = header.strip_prefix("Content-Length: ") {
+                    if let Some((name, value)) = header.split_once(':')
+                        && name.eq_ignore_ascii_case("Content-Length")
+                    {
                         content_length = value.trim().parse().unwrap();
                     }
                 }

@@ -47,6 +47,26 @@ class PublicCertificateAuthorityTransportTest {
         )
     }
 
+    @Test
+    fun hostnameMismatchIsRejectedAfterChainValidation() {
+        val attempt = validateMinifluxAccountWithDiagnostic(
+            HOSTNAME_MISMATCH_HTTPS_HOST,
+            "flux-e1c-hostname-probe",
+            emptyList(),
+        )
+
+        assertNull(
+            "A certificate for another hostname must never validate as a Miniflux server",
+            attempt.result,
+        )
+        assertTrue(
+            "Expected hostname validation to reject TLS, got ${attempt.error} / " +
+                "${attempt.diagnostic}",
+            attempt.error is AccountValidationException.Network &&
+                attempt.diagnostic?.category == "TLS/certificate",
+        )
+    }
+
     private companion object {
         /**
          * IANA's reserved documentation host. It serves a publicly trusted certificate and answers
@@ -54,5 +74,8 @@ class PublicCertificateAuthorityTransportTest {
          * not Miniflux" evidence this gate needs.
          */
         const val PUBLIC_HTTPS_HOST = "https://example.com"
+
+        /** Publicly trusted chain deliberately presented for the wrong DNS name. */
+        const val HOSTNAME_MISMATCH_HTTPS_HOST = "https://wrong.host.badssl.com"
     }
 }

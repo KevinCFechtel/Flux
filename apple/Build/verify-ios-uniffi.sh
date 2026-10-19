@@ -7,6 +7,7 @@ XCFRAMEWORK="${PACKAGE_DIR}/FluxUniFFI.xcframework"
 SOURCES="${PACKAGE_DIR}/Sources/flux_uniffi.swift"
 
 [[ -f "${SOURCES}" ]] || { echo "Missing generated Swift bindings: ${SOURCES}" >&2; exit 1; }
+[[ -f "${XCFRAMEWORK}/Info.plist" ]] || { echo "Missing XCFramework metadata: ${XCFRAMEWORK}/Info.plist" >&2; exit 1; }
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/flux-uniffi-ios-proof.XXXXXX")"
 trap 'rm -rf -- "${work_dir}"' EXIT
@@ -33,7 +34,7 @@ verify_slice() {
   [[ -f "${library}" ]] || { echo "Missing iOS UniFFI framework binary: ${library}" >&2; exit 1; }
   [[ -f "${headers}/module.modulemap" ]] || { echo "Missing iOS UniFFI module map: ${headers}/module.modulemap" >&2; exit 1; }
 
-  xcrun swiftc \
+  xcrun --sdk "${sdk}" swiftc \
     -target "${target}" \
     -sdk "$(xcrun --sdk "${sdk}" --show-sdk-path)" \
     -F "$(dirname -- "${framework_dir}")" \
@@ -44,7 +45,7 @@ verify_slice() {
     -o "${output}"
 }
 
-verify_slice iphoneos arm64-apple-ios15.0 ios-arm64
-verify_slice iphonesimulator arm64-apple-ios15.0-simulator ios-arm64-simulator
+verify_slice iphoneos arm64-apple-ios17.0 ios-arm64
+verify_slice iphonesimulator arm64-apple-ios17.0-simulator ios-arm64-simulator
 
 echo "iOS UniFFI Swift compile/link proof passed"

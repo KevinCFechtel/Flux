@@ -28,9 +28,11 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Verify pinned Rust compiler
+        run: rustc --version | grep -F 'rustc 1.99.1 '
       - name: Run macOS gate
         run: ./apple/macos/Build/test.sh
 
@@ -39,8 +41,10 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Verify pinned Rust compiler
+        run: rustc --version | grep -F 'rustc 1.99.1 '
       - name: Run iOS gate
         run: ./apple/ios/Build/test.sh

@@ -7,6 +7,7 @@ pub mod config_backup;
 pub mod diagnostics;
 pub mod domain;
 mod feed_icon;
+mod html_dom;
 mod media_metadata;
 pub mod miniflux;
 pub mod mutations;
@@ -972,17 +973,18 @@ impl FluxCore {
             else {
                 return Ok(false);
             };
-            if let Some(total) = id3_probe_total_bytes(&bytes) {
-                if total > bytes.len() && total <= REMOTE_MEDIA_MAX_ID3_BYTES {
-                    let start = bytes.len();
-                    let end = total.saturating_sub(1);
-                    if let Ok(remainder) = self.remote.fetch_media_range(
-                        url,
-                        &format!("bytes={start}-{end}"),
-                        total.saturating_sub(start),
-                    ) {
-                        bytes.extend_from_slice(&remainder);
-                    }
+            if let Some(total) = id3_probe_total_bytes(&bytes)
+                && total > bytes.len()
+                && total <= REMOTE_MEDIA_MAX_ID3_BYTES
+            {
+                let start = bytes.len();
+                let end = total.saturating_sub(1);
+                if let Ok(remainder) = self.remote.fetch_media_range(
+                    url,
+                    &format!("bytes={start}-{end}"),
+                    total.saturating_sub(start),
+                ) {
+                    bytes.extend_from_slice(&remainder);
                 }
             }
             probe_id3_artwork(&bytes)
@@ -4352,17 +4354,17 @@ mod tests {
         assert_eq!(core.core_settings().unwrap(), settings);
         assert_eq!(core.feed_preferences(10).unwrap(), preferences);
         assert!(core.store.pending_mutations().unwrap().is_empty());
-        assert_eq!(
-            core.query_articles(ArticleQuery {
-                limit: 0,
-                ..Default::default()
-            })
-            .unwrap()
-            .iter()
-            .find(|article| article.id == 1)
-            .unwrap()
-            .is_read,
-            false
+        assert!(
+            !core
+                .query_articles(ArticleQuery {
+                    limit: 0,
+                    ..Default::default()
+                })
+                .unwrap()
+                .iter()
+                .find(|article| article.id == 1)
+                .unwrap()
+                .is_read
         );
         assert!(core.last_successful_sync_at().unwrap().is_some());
     }
