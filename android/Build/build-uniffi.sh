@@ -217,7 +217,7 @@ mkdir -p "${BINDINGS_DIR}"
   cd "${CORE_DIR}"
   cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
     generate "${OUTPUT_DIR}/arm64-v8a/libflux_uniffi.so" \
-    --library --crate flux_uniffi --language kotlin --config "${UNIFFI_CONFIG}" --out-dir "${BINDINGS_DIR}"
+    --crate flux_uniffi --language kotlin --out-dir "${BINDINGS_DIR}"
 )
 
 BINDING_FILE="${BINDINGS_DIR}/uniffi/flux_uniffi/flux_uniffi.kt"

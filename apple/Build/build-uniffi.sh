@@ -57,7 +57,7 @@ mkdir -p \
   cd "${REPOSITORY_DIR}/core"
   cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
     generate "${REPOSITORY_DIR}/core/target/aarch64-apple-darwin/release/libflux_uniffi.dylib" \
-    --library --crate flux_uniffi --language swift --out-dir "${headers_dir}"
+    --crate flux_uniffi --language swift --out-dir "${headers_dir}"
 )
 
 lipo -create \
