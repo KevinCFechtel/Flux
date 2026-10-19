@@ -22,10 +22,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 symphonia = { version = "0.6.1", default-features = false, features = ["all-formats", "all-meta", "flac", "mp3"] }
-rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
 rustls-platform-verifier = "0.7.1"
 thiserror = "2.0.21"
-ureq = { version = "2.12", default-features = false, features = ["tls", "native-certs"] }
+ureq = { version = "3.4.2", default-features = false, features = ["rustls", "platform-verifier"] }
 url = "2.5.8"
 uniffi = { version = "0.29", features = ["cli"] }
 tempfile = "3.27.0"
