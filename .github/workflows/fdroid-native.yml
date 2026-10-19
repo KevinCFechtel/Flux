@@ -11,6 +11,11 @@ on:
       - ".github/workflows/fdroid-native.yml"
       - "fdroid/**"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
 
 concurrency:
   group: fdroid-native-${{ github.event.pull_request.number || github.ref }}
@@ -30,7 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: true
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -64,17 +70,16 @@ jobs:
           echo "${RUNNER_TEMP}/fdroid-venv/bin" >> "${GITHUB_PATH}"
       - name: Prepare isolated F-Droid metadata workspace
         env:
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          source_sha="${PR_HEAD_SHA:-$GITHUB_SHA}"
+          source_sha="${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}"
           python3 fdroid/test_prepare_native_recipe.py
           python3 fdroid/prepare_native_recipe.py --source-sha "${source_sha}" --output fdroid-ci/metadata/de.circle_dev.flux_news.yml
           echo "FDROID_SOURCE_SHA=${source_sha}" >> "${GITHUB_ENV}"
-          echo "F-Droid source commit: ${PR_HEAD_SHA:-$GITHUB_SHA}"
+          echo "F-Droid source commit: ${source_sha}"
           # fdroidserver 2.4.5 reads SOURCE_DATE_EPOCH before it checks out sources.
           git clone --no-checkout https://github.com/KevinCFechtel/Flux.git fdroid-ci/build/de.circle_dev.flux_news
-          git -C fdroid-ci/build/de.circle_dev.flux_news checkout --detach "${PR_HEAD_SHA:-$GITHUB_SHA}"
+          git -C fdroid-ci/build/de.circle_dev.flux_news checkout --detach "${source_sha}"
           git -C fdroid-ci/build/de.circle_dev.flux_news log -1 --format=%ct | grep -Eq '^[0-9]+$'
           printf "sdk_path: '%s'\n" "${ANDROID_HOME}" > fdroid-ci/config.yml
           printf "gradle: '%s'\n" "$(command -v gradle)" >> fdroid-ci/config.yml
@@ -91,15 +96,14 @@ jobs:
           import yaml
           from pathlib import Path
           data = yaml.safe_load(Path("metadata/de.circle_dev.flux_news.yml").read_text())
-          builds = [b for b in data["Builds"] if b["versionCode"] == 2026101801]
-          assert len(builds) == 1, "Expected exactly one native build recipe"
-          # Committed Android version is authoritative; historical metadata is immutable.
           version_file = Path("../Build/versions/android.properties")
           versions = dict(line.split("=", 1) for line in version_file.read_text().splitlines()
                           if line and not line.startswith("#"))
+          builds = [b for b in data["Builds"] if b["versionCode"] == int(versions["BUILD_NUMBER"])]
+          assert len(builds) == 1, "Expected exactly one native build recipe"
+          # Committed Android version is authoritative; historical metadata is immutable.
           assert builds[0]["versionCode"] == int(versions["BUILD_NUMBER"]), "Android versionCode and F-Droid recipe differ"
           assert builds[0]["versionName"] == versions["VERSION_NAME"], "Android versionName and F-Droid recipe differ"
-          assert builds[0]["versionName"] == "3.0.0"
           assert builds[0]["commit"] == __import__("os").environ["FDROID_SOURCE_SHA"]
           assert "scanignore" not in builds[0], "Native recipe must not suppress scanner findings"
           app_gradle = Path("../android/app/build.gradle.kts").read_text()
@@ -158,5 +162,6 @@ jobs:
             fdroid-ci/fdroid-scanner.log
             fdroid-ci/logs/
             fdroid-ci/tmp/*.apk
+            fdroid-ci/metadata/de.circle_dev.flux_news.yml
           if-no-files-found: ignore
           retention-days: 7
