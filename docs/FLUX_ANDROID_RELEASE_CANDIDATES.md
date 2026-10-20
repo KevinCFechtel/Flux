@@ -31,3 +31,23 @@ The full release mode requires a successful exact same-SHA reproducibility compa
 ## Automated workflow contract
 
 `Release script contracts` validates the release-related workflow YAML with pinned `actionlint` v1.7.12 and runs `Build/test-release-workflow-contract.py`. These checks are intentionally build-free: they cover the four scopes, selective gates, one Rust gate, Android F-Droid reproducibility/signing dependencies, tag sets, restricted write permissions, signing secret names, and partial-promotion fail-closed behavior without starting Android, F-Droid, or Apple builds.
+
+## Verified Android release — 20 October 2026
+
+The **Flux** pre-cutover release workflow completed successfully for Android 3.0.0. This is a verified GitHub release in Flux, **not** an official F-Droid submission, Google Play publication, or FluxNews repository cutover.
+
+- Successful workflow: [Flux scoped release #39410044142](https://github.com/KevinCFechtel/Flux/actions/runs/39410044142).
+- Source SHA and workflow revision: `75022c001b5ad0d0f3935c0846fb5c59f5faac87`; version `3.0.0`, Android build number `2026101801`.
+- Passed jobs: preflight, Rust tests, Android tests, both independent F-Droid source builds, byte-for-byte comparison, APK developer signing, and GitHub publication. iOS/macOS jobs were correctly skipped for Android scope.
+- Published GitHub release: [android/v3.0.0](https://github.com/KevinCFechtel/Flux/releases/tag/android/v3.0.0). The release job completed successfully; this does not assert acceptance by the official F-Droid repository.
+- Signing uses the developer certificate SHA-256 `fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb`. An isolated signing verification had already passed in [#39382484009](https://github.com/KevinCFechtel/Flux/actions/runs/39382484009).
+
+### Failed attempt and corrective action
+
+[Release run #39406899392](https://github.com/KevinCFechtel/Flux/actions/runs/39406899392) used workflow revision `75022c00` but an older **source_sha** `11f7b35e5052ee6e6e9b1a9bad93c1d5a9b3eafd`. Rust, Android, both F-Droid builds and comparison passed, but signing failed with `Wrong developer signing certificate`: the signing job checks out **source_sha**, so it ran the older fingerprint parser from that source commit. The parser fix is included in `75022c00`, and using that SHA for the successful release resolved the mismatch. Do not confuse the workflow revision (`head_sha`) with the dispatched `source_sha`; verify both before starting a release.
+
+The temporary `.github/workflows/signing-diagnostics.yml` was removed from `main` in [`1e51a6e`](https://github.com/KevinCFechtel/Flux/commit/1e51a6e96ff43f09d84d25de0c8723815cc07153) after successful end-to-end verification. The regular `.github/workflows/release.yml` remains in place. No diagnostic workflow should be run for routine releases.
+
+### Remaining boundaries
+
+The successful Flux release demonstrates same-SHA reproducibility, signing and GitHub promotion for this candidate. It **does not** close F-Droid's historical Flutter-to-native signature/update acceptance, official upstream submission, or FluxNews cutover. Consult [FDROID_OPEN_GATES.md](FDROID_OPEN_GATES.md) before declaring official F-Droid readiness. A follow-up hardening task is to prevent a stale source SHA from silently selecting an outdated release signing script; do not change the source SHA of an existing immutable tag.
