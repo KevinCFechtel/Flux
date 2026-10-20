@@ -20,7 +20,9 @@ chmod 600 "$ks"
 "$buildtools/apksigner" verify --verbose --print-certs "$apk" > "${RUNNER_TEMP:-/tmp}/flux-apk-signing-verify.txt"
 fingerprint="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "${RUNNER_TEMP:-/tmp}/flux-apk-signing-verify.txt" | head -1 | tr 'A-F' 'a-f')"
 expected="fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb"
-[[ "$fingerprint" == "$expected" ]] || { echo "Wrong developer signing certificate" >&2; exit 1; }
+echo "Actual APK signing certificate SHA-256: ${fingerprint:-<unavailable>}"
+echo "Expected APK signing certificate SHA-256: $expected"
+[[ -n "$fingerprint" && "$fingerprint" == "$expected" ]] || { echo "::error::Wrong developer signing certificate" >&2; exit 1; }
 line="$("$buildtools/aapt" dump badging "$apk" | grep '^package:')"
 [[ "$line" == *"name='de.circle_dev.flux_news'"* && "$line" == *"versionCode='$code'"* && "$line" == *"versionName='$version'"* ]] || { echo "Signed APK identity mismatch" >&2; exit 1; }
 (cd dist/android/github && sha256sum *.apk > SHA256SUMS)
