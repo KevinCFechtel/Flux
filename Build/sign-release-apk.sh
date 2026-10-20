@@ -18,7 +18,10 @@ chmod 600 "$ks"
   --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
   --out "$apk" "$src"
 "$buildtools/apksigner" verify --verbose --print-certs "$apk" > "${RUNNER_TEMP:-/tmp}/flux-apk-signing-verify.txt"
-fingerprint="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "${RUNNER_TEMP:-/tmp}/flux-apk-signing-verify.txt" | head -1 | tr 'A-F' 'a-f')"
+verify_output="${RUNNER_TEMP:-/tmp}/flux-apk-signing-verify.txt"
+echo "APK signer certificate diagnostics:"
+grep -Ei 'certificate (SHA-256|SHA256) digest:' "$verify_output" || true
+fingerprint="$(sed -nE 's/^[[:space:]]*Signer #[0-9]+ certificate SHA-?256 digest:[[:space:]]*([[:xdigit:]:]+).*$/\1/p' "$verify_output" | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
 expected="fee5401bc9d59cf5a8a461ba9698c482e87ed8ffb9258786a3d01d0356ea2ebb"
 echo "Actual APK signing certificate SHA-256: ${fingerprint:-<unavailable>}"
 echo "Expected APK signing certificate SHA-256: $expected"
