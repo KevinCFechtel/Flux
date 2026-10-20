@@ -1,0 +1,87 @@
+name: Android signing diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Existing release workflow run ID containing the F-Droid APK"
+        type: string
+        required: true
+        default: "39372703574"
+      source_sha:
+        description: "Full source SHA used to build the APK"
+        type: string
+        required: true
+        default: "11f7b35e5052ee6e6e9b1a9bad93c1d5a9b3eafd"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  signing-diagnostics:
+    runs-on: ubuntu-24.04
+    environment: release-testing
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+    steps:
+      - name: Verify artifact provenance
+        env:
+          RUN_ID: ${{ inputs.artifact_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo '::error::Invalid run ID or source SHA'
+            exit 1
+          }
+          actual_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.head_sha')"
+          [[ "$actual_sha" == "$SOURCE_SHA" ]] || {
+            echo '::error::Artifact run source SHA mismatch'
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+          name: fdroid-native-recipe-diagnostics
+          path: unsigned
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;37.0.0'
+
+      - name: Sign existing APK and report certificate fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(unsigned/tmp/*.apk)
+          [[ ${#apks[@]} -eq 1 ]] || {
+            echo '::error::Expected exactly one APK in the source artifact'
+            exit 1
+          }
+          apk="${apks[0]}"
+          metadata="$("$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging "$apk" | grep '^package:')"
+          version="$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<< "$metadata")"
+          code="$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<< "$metadata")"
+          [[ -n "$version" && "$code" =~ ^[1-9][0-9]*$ ]] || {
+            echo '::error::Unable to read APK version metadata'
+            exit 1
+          }
+          bash Build/sign-release-apk.sh "$apk" "$version" "$code"
