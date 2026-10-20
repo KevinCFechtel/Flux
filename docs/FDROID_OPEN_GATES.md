@@ -1,6 +1,6 @@
 # F-Droid: Status und verbindliche offene Abnahmen
 
-> Stand: 19. Oktober 2026. **Vorbereitung ist mergefähig; Veröffentlichung
+> Stand: 20. Oktober 2026. **Vorbereitung ist mergefähig; Veröffentlichung
 > ist gesperrt.** Diese Liste ist die einzige operative Restpunkt-Übersicht
 > für die erste native F-Droid-Veröffentlichung. Der Merge von PR #66 erzeugt
 > weder eine Veröffentlichung noch eine F-Droid-Einreichung.
@@ -44,7 +44,7 @@
 | ID | Muss erledigt werden | Konkretes Abnahmekriterium |
 | --- | --- | --- |
 | FD-01 – Android-TLS-Laufzeitabnahme | Der Quellbuild, die Versions-/SHA-Prüfung sowie die Migration auf JNI 0.22 sind implementiert und kompilieren. Offen bleibt die erneute Laufzeitabnahme der aktualisierten Bibliotheken auf einem Gerät/Emulator mit dem reproduzierbaren Zweiphasentest `android/Build/test-transport-runtime.sh`. | Öffentliche System-CA erfolgreich; dieselbe private Test-CA ohne Installation abgelehnt und nach Installation im Android-Benutzerspeicher akzeptiert; falscher Hostname und nicht vertrauenswürdige Kette weiterhin abgelehnt |
-| FD-03 – Reproduzierbarkeit | Zwei unabhängige saubere Builds **derselben** Release-Commit-SHA mit demselben dokumentierten Toolchain-Vertrag. | Bitidentisches bzw. im anerkannten F-Droid-Repro-Verfahren eindeutig bestätigtes APK; SHA-256 und Logs dokumentiert |
+| FD-03 – Reproduzierbarkeit | **Für den Flux-Kandidaten 3.0.0 / SHA `75022c00` technisch nachgewiesen:** zwei unabhängige Builds derselben SHA und erfolgreicher APK-Bytevergleich im Release-Workflow [#39410044142](https://github.com/KevinCFechtel/Flux/actions/runs/39410044142). | Für spätere FluxNews-/offizielle F-Droid-Kandidaten erneut an deren exakter Release-SHA prüfen; offizieller F-Droid-Build und historische Update-Signaturen sind dadurch nicht abgenommen |
 | FD-04 – Signatur & Upgrade | Bestehende Flutter-F-Droid-Installationen beider überlieferten Signaturpfade identifizieren; native Upgrade-Pfade auf Geräten prüfen. | Update mit gleicher Package-ID, monotonem `versionCode`, passendem Signaturschlüssel und erhaltenen Nutzerdaten für jeden tatsächlich unterstützten Kanal nachgewiesen |
 | FD-05 – Repository-Cutover | Nach nativer Übernahme von Flux nach **FluxNews** die alte Flutter-Workflows ersetzen und das endgültige F-Droid-`Repo` auf FluxNews umstellen. Import-Commit ist **kein Release-Commit**. | Historische Flutter-Tags/Builds bleiben erreichbar; neues Rezept baut die **spätere** explizit freigegebene FluxNews-Release-SHA |
 | FD-06 – Release-Gate/Publish | Erst nach FD-01 bis FD-05 finale Android-Version, F-Droid-Quellbuild und Release-SHA freigeben. | Die Release-Orchestrierung läuft **nur in FluxNews**; separater autorisierter Publikationsschritt. Kein vorzeitiger Tag, Store-Upload oder automatischer GitLab-MR |
@@ -61,7 +61,7 @@
 - Keine Apple-Builds oder Apple-Tests, keine vollständige GitHub-Actions-
   Matrix und keine Veröffentlichung.
 
-FD-03/04 bleiben externe beziehungsweise reale Abnahmeprüfungen und werden
+FD-03 ist für den genannten Flux-Release-Kandidaten technisch erfüllt, nicht pauschal für künftige FluxNews-/offizielle F-Droid-Releases. FD-04 bleibt eine reale Abnahmeprüfung und werden
 nicht durch `cargo audit`, `cargo test`, Scanner oder einen einzelnen
 F-Droid-Rezept-Build ersetzt. FD-05/06 folgen erst beim expliziten
 FluxNews-Cutover beziehungsweise einer später genehmigten Veröffentlichung.
@@ -74,3 +74,9 @@ Ressourcen:
 
 **Kein Punkt dieser Liste ist ein Grund, die erfolgreiche technische
 Vorarbeit in einem dauerhaft offenen F-Droid-Branch zu halten.**
+
+## Nachtrag: erfolgreicher Flux-Android-Release (20. Oktober 2026)
+
+Der [Release-Workflow #39410044142](https://github.com/KevinCFechtel/Flux/actions/runs/39410044142) für Android 3.0.0 / Build `2026101801` / Quell-SHA `75022c001b5ad0d0f3935c0846fb5c59f5faac87` ist vollständig grün: Rust- und Android-Tests, zwei unabhängige F-Droid-Rezept-Builds, APK-Bytevergleich, Entwickler-Signierung und [GitHub-Release `android/v3.0.0`](https://github.com/KevinCFechtel/Flux/releases/tag/android/v3.0.0). Dies belegt die Reproduzierbarkeit **dieses** Kandidaten. Es erfolgte **keine** offizielle F-Droid-Einreichung und **kein** FluxNews-Cutover. Die historische Signatur-/Upgrade-Abnahme (FD-04) und weitere oben genannte Schritte bleiben separat.
+
+Der temporäre Signierungsdiagnose-Workflow wurde mit Commit [`1e51a6e`](https://github.com/KevinCFechtel/Flux/commit/1e51a6e96ff43f09d84d25de0c8723815cc07153) entfernt. Details zum fehlgeschlagenen Versuch mit veralteter Source-SHA und zum erfolgreichen Release stehen in [FLUX_ANDROID_RELEASE_CANDIDATES.md](FLUX_ANDROID_RELEASE_CANDIDATES.md).
