@@ -541,9 +541,11 @@ that cutover, release automation or native publication has occurred.
 
 ### Hybrid platform tags and selective CI gates (decision: 18 October 2026)
 
-> **Approved design, not implemented.** The release orchestrator, tag creation
-> and any Store/F-Droid publication remain disabled until explicitly built,
-> validated and authorized. PR #67 documents the design only.
+> **Pre-cutover implementation under validation (19 October 2026).** PR #81
+> implements this contract in **Flux** so the release workflow can be exercised
+> before repository cutover. GitHub Releases created in Flux are explicitly
+> allowed for this validation. This does not change eventual FluxNews release
+> ownership and does not authorize Store publication or official F-Droid submission.
 
 After the cutover, FluxNews owns development, CI, release orchestration
 and all GitHub Releases; Flux is not a release controller. The release
@@ -624,11 +626,13 @@ unless grouping is explicitly designed later.
   Only the final publisher needs `contents: write`; ordinary checks
   remain read-only and hold no store publishing credentials.
 
-**Still to implement:** reusable platform-specific CI jobs; candidate
-input and SHA validation; the F-Droid prerequisite for Android-bearing
-releases; deterministic, idempotent multi-tag/single-release promotion;
-and negative tests for failed/skipped gates, mismatched SHA/version,
-existing tags and duplicate triggers. This document changes no CI behavior.
+**Implementation validation status (19 October 2026):** PR #81 provides the
+manual scoped orchestrator, full-SHA/version preflight, selective platform gates,
+the mandatory Android F-Droid source-build path, developer signing verification,
+multi-tag/single-release promotion, and cheap workflow/contract validation.
+It remains unaccepted until those checks are green and controlled `validate`
+and `release` dispatches have been exercised from `main`. Official F-Droid
+submission and the FluxNews cutover remain separate later steps.
 
 Release workflows should generally be manual or release/tag-driven and should:
 
