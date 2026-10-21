@@ -394,6 +394,7 @@ internal fun AndroidArticleTimeline(
                         hasAudio = hasAudio,
                         configuration = loadedArticlePreferences.swipeConfiguration,
                         mediaActionsEnabled = true,
+                        mediaState = state.mediaActionStates[article.id],
                         rowWidth = maxWidth,
                         onOpen = { onOpenArticle(presentedArticle) },
                         onSwipeAction = { action -> performSwipeAction(presentedArticle, action) },

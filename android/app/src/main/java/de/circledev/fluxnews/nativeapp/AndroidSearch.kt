@@ -822,6 +822,7 @@ internal fun AndroidSearchDestination(
                                     hasAudio = hasAudio,
                                     configuration = preferences.swipeConfiguration,
                                     mediaActionsEnabled = true,
+                                    mediaState = state.mediaActionStates[article.id],
                                     rowWidth = maxWidth,
                                     onOpen = { openNormal(article) },
                                     onSwipeAction = { performSwipe(article, it) },

@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.DownloadState
 
 class AndroidArticleActionsTest {
     @Test
@@ -186,6 +187,50 @@ class AndroidArticleActionsTest {
                 fullSwipeArmed = false,
             ),
         )
+    }
+
+    @Test
+    fun everySwipeActionHasAnIndependentSemanticColor() {
+        assertEquals(
+            AndroidArticleSwipeAction.entries.size,
+            AndroidArticleSwipeAction.entries.map(::swipeActionHue).toSet().size,
+        )
+    }
+
+    @Test
+    fun reversibleSwipeActionsUseDifferentIconsForOppositeStates() {
+        val article = article()
+        assertTrue(
+            swipeActionIcon(AndroidArticleSwipeAction.ReadUnread, article) !=
+                swipeActionIcon(AndroidArticleSwipeAction.ReadUnread, article.copy(isRead = true)),
+        )
+        assertTrue(
+            swipeActionIcon(AndroidArticleSwipeAction.StarUnstar, article) !=
+                swipeActionIcon(AndroidArticleSwipeAction.StarUnstar, article.copy(isStarred = true)),
+        )
+        assertTrue(
+            swipeActionIcon(
+                AndroidArticleSwipeAction.ListeningList,
+                article,
+                AndroidArticleMediaActionState(hasAudio = true, isInListeningList = false),
+            ) != swipeActionIcon(
+                AndroidArticleSwipeAction.ListeningList,
+                article,
+                AndroidArticleMediaActionState(hasAudio = true, isInListeningList = true),
+            ),
+        )
+    }
+
+    @Test
+    fun downloadSwipeIconsDescribeEachDownloadState() {
+        val states = listOf(
+            DownloadState.NOT_DOWNLOADED,
+            DownloadState.REQUESTED,
+            DownloadState.DOWNLOADED,
+            DownloadState.FAILED,
+            DownloadState.DELETE_REQUESTED,
+        )
+        assertEquals(states.size, states.map(::swipeDownloadActionIcon).toSet().size)
     }
 
     @Test
