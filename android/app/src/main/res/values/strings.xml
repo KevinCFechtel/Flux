@@ -406,6 +406,8 @@
     <string name="audit_unread">Unread</string>
     <string name="audit_share">Share</string>
     <string name="audit_save">Save</string>
+    <string name="audit_listening_add">Add to Listening List</string>
+    <string name="audit_listening_remove">Remove from Listening List</string>
     <string name="audit_listening">Listening</string>
     <string name="pref_original_link">Original link</string>
     <string name="pref_reader">Reader</string>

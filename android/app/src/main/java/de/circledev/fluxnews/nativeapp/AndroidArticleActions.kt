@@ -49,6 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -207,7 +209,11 @@ private fun localizedContextActionLabel(action: AndroidArticleContextAction, art
 }
 
 @Composable
-private fun localizedSwipeActionLabel(action: AndroidArticleSwipeAction, article: ArticleSummary): String = when (action) {
+private fun localizedSwipeActionLabel(
+    action: AndroidArticleSwipeAction,
+    article: ArticleSummary,
+    mediaState: AndroidArticleMediaActionState?,
+): String = when (action) {
     AndroidArticleSwipeAction.ReadUnread -> stringResource(if (article.isRead) R.string.audit_unread else R.string.audit_read)
     AndroidArticleSwipeAction.StarUnstar -> stringResource(if (article.isStarred) R.string.audit_unstar else R.string.audit_star)
     AndroidArticleSwipeAction.OpenOriginal -> stringResource(R.string.audit_original)
@@ -215,8 +221,14 @@ private fun localizedSwipeActionLabel(action: AndroidArticleSwipeAction, article
     AndroidArticleSwipeAction.Comments -> stringResource(R.string.article_comments)
     AndroidArticleSwipeAction.Share -> stringResource(R.string.audit_share)
     AndroidArticleSwipeAction.SaveToService -> stringResource(R.string.audit_save)
-    AndroidArticleSwipeAction.ListeningList -> stringResource(R.string.audit_listening)
-    AndroidArticleSwipeAction.DownloadAudio -> stringResource(R.string.audit_download)
+    AndroidArticleSwipeAction.ListeningList -> stringResource(
+        if (mediaState?.isInListeningList == true) R.string.audit_listening_remove else R.string.audit_listening_add,
+    )
+    AndroidArticleSwipeAction.DownloadAudio -> {
+        val enclosure = mediaState?.audioEnclosures?.singleOrNull()
+        if (enclosure == null) stringResource(R.string.article_choose_audio)
+        else localizedDownloadActionLabel(mediaState.downloads[enclosure.id]?.state)
+    }
 }
 
 internal fun androidMediaDownloadActionLabel(state: DownloadState?): String = when (state) {
@@ -394,6 +406,7 @@ internal fun AndroidArticleSwipeContainer(
     hasAudio: Boolean,
     configuration: AndroidArticleSwipeConfiguration,
     mediaActionsEnabled: Boolean = false,
+    mediaState: AndroidArticleMediaActionState? = null,
     rowWidth: Dp,
     onOpen: () -> Unit = {},
     onSwipeAction: (AndroidArticleSwipeAction) -> Unit,
@@ -465,6 +478,7 @@ internal fun AndroidArticleSwipeContainer(
                 side = visibleSide,
                 resolved = visibleResolved,
                 article = article,
+                mediaState = mediaState,
                 fullSwipeArmed = fullSwipeArmed,
                 revealProgress = (abs(offsetPx) / revealWidthPx).coerceIn(0f, 1f),
                 actionWidth = actionWidth,
@@ -658,6 +672,7 @@ private fun SwipeActionBackground(
     side: AndroidArticleSwipeSide,
     resolved: AndroidResolvedSwipeSide,
     article: ArticleSummary,
+    mediaState: AndroidArticleMediaActionState?,
     fullSwipeArmed: Boolean,
     revealProgress: Float,
     actionWidth: androidx.compose.ui.unit.Dp,
@@ -674,7 +689,9 @@ private fun SwipeActionBackground(
     val dominantAction = resolved.full ?: displayedActions.first()
     val dominantColors = swipeActionColors(dominantAction)
     val backgroundColor by animateColorAsState(
-        targetValue = dominantColors.container,
+        // Keep the area behind partially revealed buttons neutral. Otherwise the Full Swipe
+        // color bleeds under the second action and makes both buttons look identical.
+        targetValue = if (fullSwipeArmed) dominantColors.container else MaterialTheme.colorScheme.surface,
         label = "article-swipe-background",
     )
     val density = LocalDensity.current
@@ -715,8 +732,8 @@ private fun SwipeActionBackground(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        painter = painterResource(swipeActionIcon(action, article)),
-                        contentDescription = localizedSwipeActionLabel(action, article),
+                        painter = painterResource(swipeActionIcon(action, article, mediaState)),
+                        contentDescription = localizedSwipeActionLabel(action, article, mediaState),
                         tint = if (fullSwipeArmed) dominantColors.content else colors.content,
                         modifier = Modifier
                             .size(if (fullSwipeArmed) 30.dp else 28.dp)
@@ -736,42 +753,47 @@ private data class AndroidSwipeActionColors(
     val content: Color,
 )
 
-@Composable
-private fun swipeActionColors(action: AndroidArticleSwipeAction): AndroidSwipeActionColors =
-    when (action) {
-        AndroidArticleSwipeAction.ReadUnread -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
-        )
-        AndroidArticleSwipeAction.StarUnstar -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer,
-        )
-        AndroidArticleSwipeAction.OpenOriginal,
-        AndroidArticleSwipeAction.OpenMiniflux,
-        AndroidArticleSwipeAction.Comments,
-        AndroidArticleSwipeAction.Share,
-        -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-        AndroidArticleSwipeAction.SaveToService -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer,
-        )
-        AndroidArticleSwipeAction.ListeningList -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
-        )
-        AndroidArticleSwipeAction.DownloadAudio -> AndroidSwipeActionColors(
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-    }
+// Distinct semantic hues, shared across both swipe directions. The Material color scheme
+// controls the light/dark tone, foreground contrast and a subtle dynamic-color harmonization.
+internal fun swipeActionHue(action: AndroidArticleSwipeAction): Float = when (action) {
+    AndroidArticleSwipeAction.ReadUnread -> 210f       // blue
+    AndroidArticleSwipeAction.StarUnstar -> 43f        // amber
+    AndroidArticleSwipeAction.OpenOriginal -> 186f     // teal
+    AndroidArticleSwipeAction.OpenMiniflux -> 278f     // violet
+    AndroidArticleSwipeAction.Comments -> 121f         // green
+    AndroidArticleSwipeAction.Share -> 333f           // pink
+    AndroidArticleSwipeAction.SaveToService -> 20f     // orange
+    AndroidArticleSwipeAction.ListeningList -> 240f    // indigo
+    AndroidArticleSwipeAction.DownloadAudio -> 159f   // sea green
+}
 
-private fun swipeActionIcon(
+@Composable
+private fun swipeActionColors(action: AndroidArticleSwipeAction): AndroidSwipeActionColors {
+    val scheme = MaterialTheme.colorScheme
+    val dark = scheme.background.luminance() < 0.5f
+    val semanticColor = Color.hsv(
+        swipeActionHue(action),
+        saturation = if (dark) 0.58f else 0.49f,
+        value = if (dark) 0.44f else 0.89f,
+    )
+    return AndroidSwipeActionColors(
+        container = lerp(semanticColor, scheme.primaryContainer, 0.1f),
+        content = scheme.onSurface,
+    )
+}
+
+internal fun swipeDownloadActionIcon(state: DownloadState?): Int = when (state) {
+    null, DownloadState.NOT_DOWNLOADED -> R.drawable.ic_download
+    DownloadState.REQUESTED -> R.drawable.ic_close
+    DownloadState.DOWNLOADED -> R.drawable.ic_delete
+    DownloadState.FAILED -> R.drawable.ic_refresh
+    DownloadState.DELETE_REQUESTED -> R.drawable.ic_hourglass
+}
+
+internal fun swipeActionIcon(
     action: AndroidArticleSwipeAction,
     article: ArticleSummary,
+    mediaState: AndroidArticleMediaActionState? = null,
 ): Int = when (action) {
     AndroidArticleSwipeAction.ReadUnread ->
         if (article.isRead) R.drawable.ic_mark_unread else R.drawable.ic_mark_read
@@ -783,6 +805,12 @@ private fun swipeActionIcon(
     AndroidArticleSwipeAction.Comments -> R.drawable.ic_comment
     AndroidArticleSwipeAction.Share -> R.drawable.ic_share
     AndroidArticleSwipeAction.SaveToService -> R.drawable.ic_save
-    AndroidArticleSwipeAction.ListeningList -> R.drawable.ic_headphones
-    AndroidArticleSwipeAction.DownloadAudio -> R.drawable.ic_download
+    AndroidArticleSwipeAction.ListeningList ->
+        if (mediaState?.isInListeningList == true) R.drawable.ic_headphones_remove else R.drawable.ic_headphones
+    AndroidArticleSwipeAction.DownloadAudio -> {
+        val downloadState = mediaState?.let { state ->
+            state.audioEnclosures.singleOrNull()?.let { enclosure -> state.downloads[enclosure.id]?.state }
+        }
+        swipeDownloadActionIcon(downloadState)
+    }
 }
