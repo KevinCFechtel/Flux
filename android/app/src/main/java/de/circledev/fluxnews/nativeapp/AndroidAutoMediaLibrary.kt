@@ -156,6 +156,18 @@ internal object AndroidAutoMediaLibraryProjection {
                 ?.contains(normalized, ignoreCase = true) == true
     }
 
+    // Pure title projection: the regular JVM tests can validate car browse indicators
+    // without instantiating Android's Bundle (used only by Media3 completion extras).
+    internal fun automotiveBrowseTitle(
+        item: ListeningListItem,
+        selected: ListeningListEnclosure,
+        originalTitle: String,
+    ): String = when {
+        selected.playbackState?.status == PlaybackStatus.COMPLETED -> "✓ $originalTitle"
+        isUnplayedListeningListItem(item) -> "● $originalTitle"
+        else -> originalTitle
+    }
+
     @OptIn(UnstableApi::class)
     fun mediaItem(
         item: ListeningListItem,
@@ -168,11 +180,7 @@ internal object AndroidAutoMediaLibraryProjection {
         // Car hosts may ignore the supported completion-status extras. Keep a small,
         // visible mark in the browse title without changing canonical enclosure IDs.
         val browseTitle = if (includeAndroidAutoProgressExtras) {
-            when {
-                selected.playbackState?.status == PlaybackStatus.COMPLETED -> "✓ $originalTitle"
-                isUnplayedListeningListItem(item) -> "● $originalTitle"
-                else -> originalTitle
-            }
+            automotiveBrowseTitle(item, selected, originalTitle)
         } else {
             originalTitle
         }
