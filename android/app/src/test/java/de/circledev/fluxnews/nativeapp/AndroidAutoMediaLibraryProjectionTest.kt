@@ -55,22 +55,22 @@ class AndroidAutoMediaLibraryProjectionTest {
     }
 
     @Test
-    fun automotiveBrowseItemsShowVisibleUnplayedAndCompletedMarkers() {
-        val newItem = item(activeEnclosureId = 61L, enclosureIds = listOf(61L))
-        val unplayed = requireNotNull(
-            AndroidAutoMediaLibraryProjection.mediaItem(
-                item = newItem,
-                includeAndroidAutoProgressExtras = true,
-            ),
-        )
-        assertEquals("● Episode", unplayed.mediaMetadata.title.toString())
-        assertEquals("61", unplayed.mediaId)
+    fun automotiveBrowseTitlesShowVisibleUnplayedAndCompletedMarkers() {
+        // Android Auto's completion extras use android.os.Bundle, which requires
+        // Android runtime or Robolectric. Test the same pure browse-title policy
+        // that mediaItem() calls, without constructing Bundle in a JVM unit test.
+        fun browseTitle(item: ListeningListItem): String {
+            val selected = requireNotNull(AndroidAutoMediaLibraryProjection.selectedEnclosure(item))
+            return AndroidAutoMediaLibraryProjection.automotiveBrowseTitle(item, selected, "Episode")
+        }
 
-        // Other consumers retain the canonical title, including regular media metadata.
-        assertEquals(
-            "Episode",
-            AndroidAutoMediaLibraryProjection.mediaItem(newItem)?.mediaMetadata?.title?.toString(),
-        )
+        val newItem = item(activeEnclosureId = 61L, enclosureIds = listOf(61L))
+        assertEquals("● Episode", browseTitle(newItem))
+
+        // Normal media metadata retains the original title and canonical enclosure ID.
+        val regular = requireNotNull(AndroidAutoMediaLibraryProjection.mediaItem(newItem))
+        assertEquals("Episode", regular.mediaMetadata.title?.toString())
+        assertEquals("61", regular.mediaId)
 
         val completedItem = item(
             activeEnclosureId = 61L,
@@ -83,14 +83,7 @@ class AndroidAutoMediaLibraryProjectionTest {
                 updatedAt = null,
             ),
         )
-        val completed = requireNotNull(
-            AndroidAutoMediaLibraryProjection.mediaItem(
-                item = completedItem,
-                includeAndroidAutoProgressExtras = true,
-            ),
-        )
-        assertEquals("✓ Episode", completed.mediaMetadata.title.toString())
-        assertEquals("61", completed.mediaId)
+        assertEquals("✓ Episode", browseTitle(completedItem))
 
         val partiallyPlayedItem = item(
             activeEnclosureId = 61L,
@@ -103,13 +96,7 @@ class AndroidAutoMediaLibraryProjectionTest {
                 updatedAt = null,
             ),
         )
-        assertEquals(
-            "Episode",
-            AndroidAutoMediaLibraryProjection.mediaItem(
-                item = partiallyPlayedItem,
-                includeAndroidAutoProgressExtras = true,
-            )?.mediaMetadata?.title?.toString(),
-        )
+        assertEquals("Episode", browseTitle(partiallyPlayedItem))
 
         // A multi-audio item is not "unplayed" after any enclosure has progressed.
         val mixed = item(
@@ -123,13 +110,7 @@ class AndroidAutoMediaLibraryProjectionTest {
                 updatedAt = null,
             ),
         )
-        assertEquals(
-            "Episode",
-            AndroidAutoMediaLibraryProjection.mediaItem(
-                item = mixed,
-                includeAndroidAutoProgressExtras = true,
-            )?.mediaMetadata?.title?.toString(),
-        )
+        assertEquals("Episode", browseTitle(mixed))
     }
 
     @Test
