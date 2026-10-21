@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreVert
@@ -312,6 +313,15 @@ internal fun AndroidListeningListDestination(
         }
 }
 
+// "Not started" means never played, not necessarily newly published or added.
+internal fun isUnplayedListeningListItem(item: ListeningListItem): Boolean =
+    item.audioEnclosures.isNotEmpty() && item.audioEnclosures.all { audio ->
+        audio.enclosure.remoteMediaProgressionSeconds == 0uL &&
+            (audio.playbackState == null ||
+                (audio.playbackState.status == PlaybackStatus.NOT_STARTED &&
+                    audio.playbackState.positionMs == 0uL))
+    }
+
 @Composable
 private fun AndroidListeningListRow(
     item: ListeningListItem,
@@ -356,6 +366,11 @@ private fun AndroidListeningListRow(
         persistedStatus
     }
     val isCompleted = displayedStatus == PlaybackStatus.COMPLETED
+    val isUnplayed = !isCompleted &&
+        isUnplayedListeningListItem(item) &&
+        (nowPlayingEnclosure == null ||
+            (playback.status != AndroidMediaPlaybackPresentationStatus.Playing &&
+                playback.positionMs == 0L))
 
     Column(
         modifier = Modifier
@@ -398,6 +413,13 @@ private fun AndroidListeningListRow(
                             contentDescription = stringResource(R.string.audit_playback_completed),
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(18.dp),
+                        )
+                    } else if (isUnplayed) {
+                        Icon(
+                            Icons.Rounded.FiberManualRecord,
+                            contentDescription = stringResource(R.string.audit_playback_not_started),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(12.dp),
                         )
                     }
                 }

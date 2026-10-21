@@ -60,6 +60,10 @@ struct IOSListeningListView: View {
             runtime: playbackState
         )
         let isCompleted = playbackProgress?.status == .completed
+        let isUnplayed = !isCompleted && IOSListeningListPresentation.isUnplayed(
+            item,
+            runtime: playbackState
+        )
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
@@ -90,6 +94,11 @@ struct IOSListeningListView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.green)
                                 .accessibilityLabel(String(localized: "Completed"))
+                        } else if isUnplayed {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(String(localized: "Not played yet"))
                         }
                     }
 

@@ -67,6 +67,11 @@ private struct ListeningListRow: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(.green)
                                 .accessibilityLabel(Text("Completed"))
+                        } else if ListeningListPresentation.isUnplayed(item, runtime: playbackState) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(Text("Not played yet"))
                         }
                     }
                     HStack(spacing: 5) {

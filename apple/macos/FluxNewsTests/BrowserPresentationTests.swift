@@ -384,6 +384,18 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ListeningListPresentation.progress(completed)?.status, .completed)
     }
 
+    func testListeningListUnplayedIndicatorRequiresEveryAudioToBeUnstarted() {
+        let first = listeningEnclosure(id: 1, positionMs: 0, durationMs: nil, status: .notStarted)
+        let second = listeningEnclosure(id: 2, positionMs: 0, durationMs: nil, status: .notStarted)
+        let partial = listeningEnclosure(id: 2, positionMs: 1_000, durationMs: 10_000, status: .inProgress)
+        let finished = listeningEnclosure(id: 1, positionMs: 10_000, durationMs: 10_000, status: .completed)
+
+        XCTAssertTrue(ListeningListPresentation.isUnplayed(listeningItem(enclosures: [first, second], activeID: nil)))
+        XCTAssertFalse(ListeningListPresentation.isUnplayed(listeningItem(enclosures: [first, partial], activeID: nil)))
+        XCTAssertFalse(ListeningListPresentation.isUnplayed(listeningItem(enclosures: [finished], activeID: 1)))
+        XCTAssertFalse(ListeningListPresentation.isUnplayed(listeningItem(enclosures: [], activeID: nil)))
+    }
+
     func testListeningListProgressClampsInconsistentPositionAndIgnoresZeroDuration() {
         let inconsistent = listeningItem(enclosures: [listeningEnclosure(id: 1, positionMs: 90_000, durationMs: 42_000, status: .inProgress)], activeID: 1)
         XCTAssertEqual(ListeningListPresentation.progress(inconsistent)?.positionMs, 42_000)
