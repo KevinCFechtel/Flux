@@ -689,7 +689,9 @@ private fun SwipeActionBackground(
     val dominantAction = resolved.full ?: displayedActions.first()
     val dominantColors = swipeActionColors(dominantAction)
     val backgroundColor by animateColorAsState(
-        targetValue = dominantColors.container,
+        // Keep the area behind partially revealed buttons neutral. Otherwise the Full Swipe
+        // color bleeds under the second action and makes both buttons look identical.
+        targetValue = if (fullSwipeArmed) dominantColors.container else MaterialTheme.colorScheme.surface,
         label = "article-swipe-background",
     )
     val density = LocalDensity.current
