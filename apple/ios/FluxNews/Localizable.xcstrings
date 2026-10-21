@@ -536,6 +536,17 @@
         }
       }
     },
+    "Completed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgeschlossen"
+          }
+        }
+      }
+    },
     "Custom HTTP Headers": {
       "localizations": {
         "de": {

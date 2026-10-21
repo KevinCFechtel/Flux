@@ -56,11 +56,19 @@ private struct ListeningListRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if ListeningListPresentation.progress(item, runtime: playbackState)?.status == .completed {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.green)
+                                .accessibilityLabel(Text("Completed"))
+                        }
+                    }
                     HStack(spacing: 5) {
                         FeedIconSlot(feedID: item.feedId, store: store)
                         Text(ListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed")))
