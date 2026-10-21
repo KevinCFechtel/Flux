@@ -164,8 +164,20 @@ internal object AndroidAutoMediaLibraryProjection {
         context: Context? = null,
     ): MediaItem? {
         val selected = selectedEnclosure(item) ?: return null
+        val originalTitle = item.title.ifBlank { context?.getString(R.string.auto_untitled_news) ?: "Untitled News" }
+        // Car hosts may ignore the supported completion-status extras. Keep a small,
+        // visible mark in the browse title without changing canonical enclosure IDs.
+        val browseTitle = if (includeAndroidAutoProgressExtras) {
+            when {
+                selected.playbackState?.status == PlaybackStatus.COMPLETED -> "✓ $originalTitle"
+                isUnplayedListeningListItem(item) -> "● $originalTitle"
+                else -> originalTitle
+            }
+        } else {
+            originalTitle
+        }
         val metadata = MediaMetadata.Builder()
-            .setTitle(item.title.ifBlank { context?.getString(R.string.auto_untitled_news) ?: "Untitled News" })
+            .setTitle(browseTitle)
             .setArtist(item.feedTitle.ifBlank { context?.getString(R.string.auto_unknown_feed) ?: "Unknown Feed" })
             .setAlbumTitle(item.feedTitle.ifBlank { context?.getString(R.string.auto_unknown_feed) ?: "Unknown Feed" })
             .setMediaType(MediaMetadata.MEDIA_TYPE_NEWS)
