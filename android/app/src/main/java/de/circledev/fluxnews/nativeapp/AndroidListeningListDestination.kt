@@ -17,9 +17,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreVert
@@ -342,6 +344,24 @@ private fun AndroidListeningListRow(
         playback.status != AndroidMediaPlaybackPresentationStatus.Stopped
     val isPlaying = isNowPlaying &&
         playback.status == AndroidMediaPlaybackPresentationStatus.Playing
+    val persistedStatus = selected?.playbackState?.status ?: PlaybackStatus.NOT_STARTED
+    val displayedStatus = if (selectedId != null && playback.enclosureId == selectedId) {
+        when (playback.status) {
+            AndroidMediaPlaybackPresentationStatus.Completed -> PlaybackStatus.COMPLETED
+            AndroidMediaPlaybackPresentationStatus.Playing -> PlaybackStatus.IN_PROGRESS
+            AndroidMediaPlaybackPresentationStatus.Paused,
+            AndroidMediaPlaybackPresentationStatus.Stopped,
+            AndroidMediaPlaybackPresentationStatus.Idle -> persistedStatus
+        }
+    } else {
+        persistedStatus
+    }
+    val isCompleted = displayedStatus == PlaybackStatus.COMPLETED
+    val isUnplayed = !isCompleted &&
+        isUnplayedListeningListItem(item) &&
+        (nowPlayingEnclosure == null ||
+            (playback.status != AndroidMediaPlaybackPresentationStatus.Playing &&
+                playback.positionMs == 0L))
 
     Column(
         modifier = Modifier
@@ -365,13 +385,35 @@ private fun AndroidListeningListRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Text(
-                    item.title.ifBlank { stringResource(R.string.audit_untitled_news) },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        item.title.ifBlank { stringResource(R.string.audit_untitled_news) },
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (isCompleted) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = stringResource(R.string.audit_playback_completed),
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else if (isUnplayed) {
+                        Icon(
+                            Icons.Rounded.FiberManualRecord,
+                            contentDescription = stringResource(R.string.audit_playback_not_started),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -423,18 +465,7 @@ private fun AndroidListeningListRow(
                 } else {
                     progress.durationMs?.toLong()
                 },
-                status = if (playback.enclosureId == selectedId) {
-                    when (playback.status) {
-                        AndroidMediaPlaybackPresentationStatus.Completed -> PlaybackStatus.COMPLETED
-                        AndroidMediaPlaybackPresentationStatus.Playing,
-                        AndroidMediaPlaybackPresentationStatus.Paused,
-                        AndroidMediaPlaybackPresentationStatus.Stopped,
-                        -> PlaybackStatus.IN_PROGRESS
-                        AndroidMediaPlaybackPresentationStatus.Idle -> progress.status
-                    }
-                } else {
-                    progress.status
-                },
+                status = displayedStatus,
             )
         }
 
@@ -726,7 +757,13 @@ private fun AndroidListeningListProgress(
     status: PlaybackStatus,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (durationMs != null && durationMs > 0L) {
+        if (status == PlaybackStatus.COMPLETED) {
+            LinearProgressIndicator(
+                progress = { 1f },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        } else if (durationMs != null && durationMs > 0L) {
             LinearProgressIndicator(
                 progress = {
                     (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)

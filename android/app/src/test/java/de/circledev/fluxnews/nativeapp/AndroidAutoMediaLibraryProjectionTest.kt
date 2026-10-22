@@ -55,6 +55,65 @@ class AndroidAutoMediaLibraryProjectionTest {
     }
 
     @Test
+    fun automotiveBrowseTitlesShowVisibleUnplayedAndCompletedMarkers() {
+        // Android Auto's completion extras use android.os.Bundle, which requires
+        // Android runtime or Robolectric. Test the same pure browse-title policy
+        // that mediaItem() calls, without constructing Bundle in a JVM unit test.
+        fun browseTitle(item: ListeningListItem): String {
+            val selected = requireNotNull(AndroidAutoMediaLibraryProjection.selectedEnclosure(item))
+            return AndroidAutoMediaLibraryProjection.automotiveBrowseTitle(item, selected, "Episode")
+        }
+
+        val newItem = item(activeEnclosureId = 61L, enclosureIds = listOf(61L))
+        assertEquals("● Episode", browseTitle(newItem))
+
+        // Normal media metadata retains the original title and canonical enclosure ID.
+        val regular = requireNotNull(AndroidAutoMediaLibraryProjection.mediaItem(newItem))
+        assertEquals("Episode", regular.mediaMetadata.title?.toString())
+        assertEquals("61", regular.mediaId)
+
+        val completedItem = item(
+            activeEnclosureId = 61L,
+            enclosureIds = listOf(61L),
+            playbackState = PlaybackState(
+                enclosureId = 61L,
+                positionMs = 60_000uL,
+                durationMs = 60_000uL,
+                status = PlaybackStatus.COMPLETED,
+                updatedAt = null,
+            ),
+        )
+        assertEquals("✓ Episode", browseTitle(completedItem))
+
+        val partiallyPlayedItem = item(
+            activeEnclosureId = 61L,
+            enclosureIds = listOf(61L),
+            playbackState = PlaybackState(
+                enclosureId = 61L,
+                positionMs = 10_000uL,
+                durationMs = 60_000uL,
+                status = PlaybackStatus.IN_PROGRESS,
+                updatedAt = null,
+            ),
+        )
+        assertEquals("Episode", browseTitle(partiallyPlayedItem))
+
+        // A multi-audio item is not "unplayed" after any enclosure has progressed.
+        val mixed = item(
+            activeEnclosureId = 62L,
+            enclosureIds = listOf(61L, 62L),
+            playbackState = PlaybackState(
+                enclosureId = 61L,
+                positionMs = 10_000uL,
+                durationMs = 60_000uL,
+                status = PlaybackStatus.IN_PROGRESS,
+                updatedAt = null,
+            ),
+        )
+        assertEquals("Episode", browseTitle(mixed))
+    }
+
+    @Test
     fun firstEnclosureIsDeterministicFallbackWhenNoActiveEnclosureExists() {
         val item = item(
             activeEnclosureId = null,

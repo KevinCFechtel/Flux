@@ -219,6 +219,7 @@
       <trans-unit id="No results" xml:space="preserve"><source>No results</source></trans-unit>
       <trans-unit id="No third-party integration is configured in Miniflux" xml:space="preserve"><source>No third-party integration is configured in Miniflux</source></trans-unit>
       <trans-unit id="No unread news" xml:space="preserve"><source>No unread news</source></trans-unit>
+      <trans-unit id="Not played yet" xml:space="preserve"><source>Not played yet</source></trans-unit>
       <trans-unit id="Off" xml:space="preserve"><source>Off</source></trans-unit>
       <trans-unit id="Oldest First" xml:space="preserve"><source>Oldest First</source></trans-unit>
       <trans-unit id="On" xml:space="preserve"><source>On</source></trans-unit>

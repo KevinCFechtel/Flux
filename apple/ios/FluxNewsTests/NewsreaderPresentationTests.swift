@@ -6285,6 +6285,131 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(progress?.fraction, 0.25)
     }
 
+    @MainActor
+    func testListeningListUnplayedIndicatorUsesPlaybackStateAcrossEnclosures() {
+        let enclosure = Enclosure(
+            id: 77,
+            articleId: 101,
+            url: "https://example.test/episode.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        let newAudio = ListeningListEnclosure(
+            enclosure: enclosure,
+            remotePresent: true,
+            playbackState: nil,
+            download: nil,
+            durationMs: 60_000
+        )
+        func item(_ audio: [ListeningListEnclosure]) -> ListeningListItem {
+            ListeningListItem(
+                articleId: 101,
+                feedId: 10,
+                title: "Episode",
+                feedTitle: "Feed",
+                publishedAt: "2026-09-25T00:00:00Z",
+                addedAt: "2026-09-25T00:00:00Z",
+                remotePresent: true,
+                audioEnclosures: audio,
+                activeEnclosureId: nil
+            )
+        }
+        let runtime = IOSMediaPlaybackPresentationState()
+        XCTAssertTrue(IOSListeningListPresentation.isUnplayed(item([newAudio]), runtime: runtime))
+        XCTAssertFalse(IOSListeningListPresentation.isUnplayed(item([]), runtime: runtime))
+        let startedAudio = ListeningListEnclosure(
+            enclosure: enclosure,
+            remotePresent: true,
+            playbackState: PlaybackState(
+                enclosureId: 77,
+                positionMs: 10_000,
+                durationMs: 60_000,
+                status: .inProgress,
+                updatedAt: nil
+            ),
+            download: nil,
+            durationMs: 60_000
+        )
+        XCTAssertFalse(IOSListeningListPresentation.isUnplayed(item([newAudio, startedAudio]), runtime: runtime))
+        runtime.setLoadedMedia(
+            enclosure: enclosure,
+            feedTitle: "Feed",
+            mediaTitle: "Episode",
+            artworkSource: nil,
+            chapters: [],
+            positionMs: 10_000,
+            durationMs: 60_000
+        )
+        runtime.setStatus(.playing)
+        XCTAssertFalse(IOSListeningListPresentation.isUnplayed(item([newAudio]), runtime: runtime))
+    }
+
+    @MainActor
+    func testCarPlayPlaybackIndicatorMapsUnplayedAndCompletedState() {
+        let enclosure = Enclosure(
+            id: 99,
+            articleId: 101,
+            url: "https://example.test/episode.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        func entry(_ playback: PlaybackState?) -> ListeningListItem {
+            ListeningListItem(
+                articleId: 101,
+                feedId: 10,
+                title: "Episode",
+                feedTitle: "Feed",
+                publishedAt: "2026-10-21T00:00:00Z",
+                addedAt: "2026-10-21T00:00:00Z",
+                remotePresent: true,
+                audioEnclosures: [
+                    ListeningListEnclosure(
+                        enclosure: enclosure,
+                        remotePresent: true,
+                        playbackState: playback,
+                        download: nil,
+                        durationMs: 60_000
+                    )
+                ],
+                activeEnclosureId: 99
+            )
+        }
+
+        let runtime = IOSMediaPlaybackPresentationState()
+        XCTAssertEqual(
+            IOSCarPlayPlaybackIndicator.indicator(for: entry(nil), runtime: runtime),
+            .unplayed
+        )
+        let partial = PlaybackState(
+            enclosureId: 99, positionMs: 10_000, durationMs: 60_000,
+            status: .inProgress, updatedAt: nil
+        )
+        XCTAssertNil(IOSCarPlayPlaybackIndicator.indicator(for: entry(partial), runtime: runtime))
+        let finished = PlaybackState(
+            enclosureId: 99, positionMs: 60_000, durationMs: 60_000,
+            status: .completed, updatedAt: nil
+        )
+        XCTAssertEqual(
+            IOSCarPlayPlaybackIndicator.indicator(for: entry(finished), runtime: runtime),
+            .completed
+        )
+        runtime.setLoadedMedia(
+            enclosure: enclosure,
+            feedTitle: "Feed",
+            mediaTitle: "Episode",
+            artworkSource: nil,
+            chapters: [],
+            positionMs: 0,
+            durationMs: 60_000
+        )
+        runtime.setStatus(.playing)
+        XCTAssertNil(IOSCarPlayPlaybackIndicator.indicator(for: entry(nil), runtime: runtime))
+    }
+
     func testListeningListDownloadSummarySeparatesDownloadedAndPending() {
         func enclosure(
             id: Int64,

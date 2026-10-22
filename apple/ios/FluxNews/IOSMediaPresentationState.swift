@@ -341,6 +341,25 @@ final class IOSNowPlayingCoordinator {
     }
 }
 
+enum IOSCarPlayPlaybackIndicator: Equatable {
+    case unplayed
+    case completed
+
+    @MainActor
+    static func indicator(
+        for item: ListeningListItem,
+        runtime: IOSMediaPlaybackPresentationState
+    ) -> Self? {
+        if IOSListeningListPresentation.progress(item, runtime: runtime)?.status == .completed {
+            return .completed
+        }
+        if IOSListeningListPresentation.isUnplayed(item, runtime: runtime) {
+            return .unplayed
+        }
+        return nil
+    }
+}
+
 @MainActor
 final class IOSCarPlayCoordinator {
     private weak var interfaceController: CPInterfaceController?
@@ -526,6 +545,7 @@ final class IOSCarPlayCoordinator {
             let detail = item.audioEnclosures.count > 1 ? String(localized: "Multiple audio files") : feedTitle
             let listItem = CPListItem(text: title, detailText: detail)
             listItem.isEnabled = false
+            listItem.setAccessoryImage(playbackIndicatorImage(for: item))
             return listItem
         }
 
@@ -566,6 +586,23 @@ final class IOSCarPlayCoordinator {
         return "\(feedTitle) · \(positionLabel) / \(durationLabel)"
     }
 
+    private func playbackIndicatorImage(for item: ListeningListItem) -> UIImage? {
+        switch IOSCarPlayPlaybackIndicator.indicator(
+            for: item,
+            runtime: mediaRuntime.playbackPresentationState
+        ) {
+        case .unplayed:
+            return UIImage(
+                systemName: "circle.fill",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+            )
+        case .completed:
+            return UIImage(systemName: "checkmark.circle.fill")
+        case nil:
+            return nil
+        }
+    }
+
     private func applyPlaybackPresentation(
         to listItem: CPListItem,
         item: ListeningListItem,
@@ -584,6 +621,9 @@ final class IOSCarPlayCoordinator {
             listItem.playbackProgress = 0
         }
         listItem.setDetailText(detailText(for: item, selected: selected))
+        // A trailing symbol complements native CarPlay playback progress / Now Playing.
+        // No custom row type or driver interaction is introduced.
+        listItem.setAccessoryImage(playbackIndicatorImage(for: item))
     }
 
     private func refreshPlaybackIndicators() {

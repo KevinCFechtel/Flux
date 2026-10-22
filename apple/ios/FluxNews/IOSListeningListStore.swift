@@ -275,6 +275,28 @@ enum IOSListeningListPresentation {
     }
 
     @MainActor
+    static func isUnplayed(
+        _ item: ListeningListItem,
+        runtime: IOSMediaPlaybackPresentationState
+    ) -> Bool {
+        guard !item.audioEnclosures.isEmpty,
+              item.audioEnclosures.allSatisfy({ audio in
+                  guard audio.enclosure.remoteMediaProgressionSeconds == 0 else {
+                      return false
+                  }
+                  guard let playback = audio.playbackState else { return true }
+                  return playback.status == .notStarted && playback.positionMs == 0
+              }) else {
+            return false
+        }
+        if let loadedID = runtime.loadedEnclosure?.id,
+           item.audioEnclosures.contains(where: { $0.enclosure.id == loadedID }) {
+            return runtime.status != .playing && runtime.positionMs == 0
+        }
+        return true
+    }
+
+    @MainActor
     static func progress(
         _ item: ListeningListItem,
         runtime: IOSMediaPlaybackPresentationState

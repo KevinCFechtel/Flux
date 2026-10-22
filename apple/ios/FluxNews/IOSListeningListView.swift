@@ -55,6 +55,16 @@ struct IOSListeningListView: View {
 
     @ViewBuilder
     private func row(_ item: ListeningListItem) -> some View {
+        let playbackProgress = IOSListeningListPresentation.progress(
+            item,
+            runtime: playbackState
+        )
+        let isCompleted = playbackProgress?.status == .completed
+        let isUnplayed = !isCompleted && IOSListeningListPresentation.isUnplayed(
+            item,
+            runtime: playbackState
+        )
+
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 let artworkEnclosure = artworkEnclosure(item)
@@ -66,17 +76,31 @@ struct IOSListeningListView: View {
                 .frame(width: 80, height: 80)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(
-                        IOSListeningListPresentation.textOrFallback(
-                            item.title,
-                            fallback: String(localized: "Untitled News")
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(
+                            IOSListeningListPresentation.textOrFallback(
+                                item.title,
+                                fallback: String(localized: "Untitled News")
+                            )
                         )
-                    )
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+
+                        if isCompleted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.green)
+                                .accessibilityLabel(String(localized: "Completed"))
+                        } else if isUnplayed {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(String(localized: "Not played yet"))
+                        }
+                    }
 
                     HStack(spacing: 6) {
                         FeedIconView(
@@ -128,15 +152,15 @@ struct IOSListeningListView: View {
 
             }
 
-            if let progress = IOSListeningListPresentation.progress(
-                item,
-                runtime: playbackState
-            ) {
+            if let playbackProgress {
                 VStack(alignment: .leading, spacing: 4) {
-                    if let fraction = progress.fraction {
+                    if isCompleted {
+                        ProgressView(value: 1)
+                            .tint(.green)
+                    } else if let fraction = playbackProgress.fraction {
                         ProgressView(value: fraction)
                     }
-                    Text(progressLabel(progress))
+                    Text(progressLabel(playbackProgress))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -629,6 +653,9 @@ struct IOSListeningListView: View {
     private func progressLabel(
         _ progress: IOSListeningListPresentation.Progress
     ) -> String {
+        if progress.status == .completed {
+            return String(localized: "Completed")
+        }
         let position = IOSMediaTimePresentation.label(progress.positionMs)
         guard let duration = progress.durationMs else {
             return position
