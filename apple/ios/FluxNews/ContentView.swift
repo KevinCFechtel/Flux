@@ -781,11 +781,19 @@ struct ContentView: View {
         systemUsesAdaptiveToolbar: Bool,
         systemPrefersVerticalToolbar: Bool
     ) -> some View {
-        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(
-            for: articleListChromeMode,
-            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
-            systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
-        )
+        let actionPlacement: IOSArticleListActionPlacement = if
+            UIDevice.current.userInterfaceIdiom == .pad,
+            articleListChromeMode == .persistentSplit
+                || articleListChromeMode == .persistentSplitCollapsed
+        {
+            .topBarTrailing
+        } else {
+            IOSArticleListChromePresentation.actionPlacement(
+                for: articleListChromeMode,
+                systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
+                systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
+            )
+        }
         let usesNativeTopEdgeEffect = IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
