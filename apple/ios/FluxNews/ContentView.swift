@@ -804,11 +804,11 @@ struct ContentView: View {
         )
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
             .toolbar(
-                IOSArticleListChromePresentation.showsTopNavigationBar(
+                IOSArticleListChromePresentation.navigationBarVisibility(
                     for: articleListChromeMode,
                     systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
                     systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
-                ) ? .visible : .hidden,
+                ),
                 for: .navigationBar
             )
             // A collapsed split view pushes the detail and offers a back button.
