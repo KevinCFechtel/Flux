@@ -678,36 +678,42 @@ struct ContentView: View {
 
     @ViewBuilder
     private var adaptiveDetail: some View {
-        articleList
-            .inspector(isPresented: readerInspectorBinding) {
-                Group {
-                    if usesReaderInspector, let article = readerArticle?.article {
+        Group {
+            if usesReaderInspector, let article = readerArticle?.article {
+                articleList
+                    .inspector(isPresented: readerInspectorBinding) {
                         NavigationStack { readerView(for: article) }
-                    } else if usesReaderInspector {
-                        Color.clear.onAppear { dismissReader() }
                     }
+            } else {
+                // Do not install an inactive Inspector presentation hierarchy.
+                // On regular-width layouts (including iPhone Duo's inner display)
+                // the reader uses an Inspector only while a reader article is
+                // actually open. Keeping a dormant Inspector attached to the
+                // NavigationSplitView detail needlessly participates in every
+                // startup/layout pass.
+                articleList
+            }
+        }
+        .toolbar {
+            if !adaptivePresentation.usesPersistentSplitNavigation,
+               !capsuleCarriesScopeAction {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { navigationPresented = true } label: {
+                        Image(IOSNavigationButtonPresentation.imageName)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(
+                                width: IOSNavigationButtonPresentation.glyphSize,
+                                height: IOSNavigationButtonPresentation.glyphSize
+                            )
+                    }
+                    .accessibilityLabel(
+                        IOSNavigationButtonPresentation.accessibilityLabel
+                    )
                 }
             }
-            .toolbar {
-                if !adaptivePresentation.usesPersistentSplitNavigation,
-                   !capsuleCarriesScopeAction {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { navigationPresented = true } label: {
-                            Image(IOSNavigationButtonPresentation.imageName)
-                                .renderingMode(.template)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(
-                                    width: IOSNavigationButtonPresentation.glyphSize,
-                                    height: IOSNavigationButtonPresentation.glyphSize
-                                )
-                        }
-                        .accessibilityLabel(
-                            IOSNavigationButtonPresentation.accessibilityLabel
-                        )
-                    }
-                }
-            }
+        }
     }
 
     private var listeningListView: some View {
