@@ -109,12 +109,15 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             return .visible
         case .persistentSplit, .persistentSplitCollapsed:
-            // On iOS 27.1+ let NavigationSplitView own bar visibility and axis.
-            // Forcing .visible while the Duo inner display changes between its
-            // horizontal and vertical bar presentations adds a competing chrome
-            // policy during layout. Older SDK paths keep the established behavior.
-            return systemUsesAdaptiveToolbar ? .automatic
-                : (systemPrefersVerticalToolbar ? .visible : .hidden)
+            // On iOS 27.1+ keep horizontal regular layouts fully system-adaptive
+            // (important for Duo portrait startup), but pin the navigation bar
+            // when the system moves toolbar controls to a vertical edge. In that
+            // landscape presentation the native sidebar toggle and passive title
+            // capsule are essential navigation/context and must not scroll away.
+            if systemUsesAdaptiveToolbar {
+                return systemPrefersVerticalToolbar ? .visible : .automatic
+            }
+            return systemPrefersVerticalToolbar ? .visible : .hidden
         }
     }
 
