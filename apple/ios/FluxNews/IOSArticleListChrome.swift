@@ -229,7 +229,7 @@ enum IOSArticleNavigationPresentation {
 
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
 @available(iOS 27.1, *)
-struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
+struct IOSArticleListVerticalToolbarCapabilityEnvironment<Content: View>: View {
     @Environment(\.toolbarVerticalEdge) private var toolbarVerticalEdge
     private let content: (_ systemUsesAdaptiveToolbar: Bool, _ systemPrefersVerticalToolbar: Bool) -> Content
 
