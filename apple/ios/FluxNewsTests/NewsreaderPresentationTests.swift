@@ -799,6 +799,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .navigationTopLeading)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplit), .hidden)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplitCollapsed), .floatingTopLeading)
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: true
+            ),
+            .navigationTopLeading
+        )
         XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactPortrait))
         XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactLandscape))
         XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplit))
