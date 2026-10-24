@@ -255,6 +255,7 @@ private struct ArticleListTitleCapsule: View {
     let layout: ArticleListTitleCapsuleLayout
     var action: (() -> Void)?
     var showsBrandMark = false
+    var reservesInlineMinimumWidth = true
     var usesSystemToolbarGlass = false
     // Read so the derived glyph height is recomputed when the text size changes.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -436,7 +437,9 @@ private struct ArticleListTitleCapsule: View {
             // an app-level maximum would only cause premature truncation on wide
             // landscape phones.
             .frame(
-                minWidth: IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth,
+                minWidth: reservesInlineMinimumWidth
+                    ? IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth
+                    : 0,
                 alignment: .leading
             )
         }
@@ -749,6 +752,7 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             layout: chromeMode == .persistentSplitCollapsed ? .inline : .compactStacked,
                             action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
                             showsBrandMark: chromeMode == .persistentSplitCollapsed,
+                            reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
                             usesSystemToolbarGlass: true
                         )
                     }
