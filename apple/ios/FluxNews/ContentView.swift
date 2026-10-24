@@ -766,16 +766,32 @@ struct ContentView: View {
                 }
             }
         } else {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                articleList(
+                    systemUsesAdaptiveToolbar: false,
+                    systemPrefersVerticalToolbar: false
+                )
+                .toolbar(.visible, for: .navigationBar)
+            } else {
+                articleList(
+                    systemUsesAdaptiveToolbar: false,
+                    systemPrefersVerticalToolbar: false
+                )
+            }
+        }
+#else
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            articleList(
+                systemUsesAdaptiveToolbar: false,
+                systemPrefersVerticalToolbar: false
+            )
+            .toolbar(.visible, for: .navigationBar)
+        } else {
             articleList(
                 systemUsesAdaptiveToolbar: false,
                 systemPrefersVerticalToolbar: false
             )
         }
-#else
-        articleList(
-            systemUsesAdaptiveToolbar: false,
-            systemPrefersVerticalToolbar: false
-        )
 #endif
     }
 
