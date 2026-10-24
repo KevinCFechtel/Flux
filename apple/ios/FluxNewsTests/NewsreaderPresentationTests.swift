@@ -1116,6 +1116,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testIPadRegularModesKeepActionsInTopToolbar() {
+        for mode in [IOSArticleListChromeMode.persistentSplit, .persistentSplitCollapsed] {
+            XCTAssertEqual(
+                mode == .persistentSplit || mode == .persistentSplitCollapsed
+                    ? IOSArticleListActionPlacement.topBarTrailing
+                    : IOSArticleListChromePresentation.actionPlacement(for: mode),
+                .topBarTrailing
+            )
+        }
+    }
+
     func testIPadRegularToolbarUsesOneHorizontalPathIndependentOfVerticalToolbarCapability() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
