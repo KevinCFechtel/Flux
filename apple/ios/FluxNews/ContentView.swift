@@ -737,21 +737,34 @@ struct ContentView: View {
     private var articleList: some View {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
         if #available(iOS 27.1, *) {
-            IOSArticleListVerticalToolbarEnvironment { systemPrefersVerticalToolbar in
-                articleList(systemPrefersVerticalToolbar: systemPrefersVerticalToolbar)
+            IOSArticleListVerticalToolbarEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
+                articleList(
+                    systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
+                    systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+                )
             }
         } else {
-            articleList(systemPrefersVerticalToolbar: false)
+            articleList(
+                systemUsesAdaptiveToolbar: false,
+                systemPrefersVerticalToolbar: false
+            )
         }
 #else
-        articleList(systemPrefersVerticalToolbar: false)
+        articleList(
+            systemUsesAdaptiveToolbar: false,
+            systemPrefersVerticalToolbar: false
+        )
 #endif
     }
 
-    private func articleList(systemPrefersVerticalToolbar: Bool) -> some View {
+    private func articleList(
+        systemUsesAdaptiveToolbar: Bool,
+        systemPrefersVerticalToolbar: Bool
+    ) -> some View {
         let actionPlacement = IOSArticleListChromePresentation.actionPlacement(
             for: articleListChromeMode,
-            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
+            systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
         )
         let usesNativeTopEdgeEffect = IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
             for: articleListChromeMode,
@@ -767,6 +780,7 @@ struct ContentView: View {
             onSelectScope: presentArticleListNavigation,
             chromeMode: articleListChromeMode,
             actionPlacement: actionPlacement,
+            systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
             topActions: {
                 articleListActionButtons(directCapacity: directActionCapacity)
@@ -792,7 +806,8 @@ struct ContentView: View {
             .toolbar(
                 IOSArticleListChromePresentation.showsTopNavigationBar(
                     for: articleListChromeMode,
-                    systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+                    systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
+                    systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
                 ) ? .visible : .hidden,
                 for: .navigationBar
             )
