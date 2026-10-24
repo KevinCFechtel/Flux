@@ -27,16 +27,21 @@ enum IOSArticleListChromePresentation {
         verticalSizeClass: UserInterfaceSizeClass?,
         splitColumnVisibility: NavigationSplitViewVisibility
     ) -> IOSArticleListChromeMode {
-        // Actual visible split chrome wins over the nominal size-class mode. This
-        // prevents duplicate scope UI during a transient/system-driven split
-        // transition: if a sidebar is visible, the title capsule must disappear.
-        if splitColumnVisibility != .detailOnly {
-            return .persistentSplit
+        // Size-class adaptation wins when the app has become compact. During a
+        // Duo/fold or rotation transition SwiftUI can publish the new size
+        // classes one render pass before NavigationSplitView writes its updated
+        // column visibility. Treating that stale .all value as a visible sidebar
+        // briefly selects persistent-split chrome on a compact phone canvas.
+        guard presentation.usesPersistentSplitNavigation else {
+            return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
         }
-        if presentation.usesPersistentSplitNavigation {
-            return .persistentSplitCollapsed
-        }
-        return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
+
+        // In a genuinely regular presentation the split visibility is the
+        // authoritative user/system state: a visible sidebar suppresses duplicate
+        // scope chrome, while detailOnly restores the collapsed-split controls.
+        return splitColumnVisibility == .detailOnly
+            ? .persistentSplitCollapsed
+            : .persistentSplit
     }
 
     static func actionPlacement(
