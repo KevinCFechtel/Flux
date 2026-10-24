@@ -1081,6 +1081,58 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testIOS271AdaptiveToolbarStaysNativeAcrossDuoPortraitLandscapeRotation() {
+        for mode in [IOSArticleListChromeMode.persistentSplit, .persistentSplitCollapsed] {
+            XCTAssertEqual(
+                IOSArticleListChromePresentation.actionPlacement(
+                    for: mode,
+                    systemPrefersVerticalToolbar: false,
+                    systemUsesAdaptiveToolbar: true
+                ),
+                .topBarTrailing
+            )
+            XCTAssertEqual(
+                IOSArticleListChromePresentation.actionPlacement(
+                    for: mode,
+                    systemPrefersVerticalToolbar: true,
+                    systemUsesAdaptiveToolbar: true
+                ),
+                .topBarTrailing
+            )
+            XCTAssertTrue(
+                IOSArticleListChromePresentation.showsTopNavigationBar(
+                    for: mode,
+                    systemPrefersVerticalToolbar: false,
+                    systemUsesAdaptiveToolbar: true
+                )
+            )
+            XCTAssertTrue(
+                IOSArticleListChromePresentation.showsTopNavigationBar(
+                    for: mode,
+                    systemPrefersVerticalToolbar: true,
+                    systemUsesAdaptiveToolbar: true
+                )
+            )
+        }
+
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: false,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .navigationTopLeading
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: true,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .navigationTopLeading
+        )
+    }
+
     func testActionFeedbackClearsBottomActionBarChrome() {
         XCTAssertEqual(
             IOSActionFeedbackPresentation.bottomPadding(
