@@ -164,6 +164,9 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// long scope/feed title in the remaining inline iPad presentation.
     static let inlineTitlePriority: Double = 1
     static let inlineCountPriority: Double = 2
+    /// Keep enough room for a meaningful regular-toolbar title. The count is
+    /// optional under pressure; the scope title is not.
+    static let regularToolbarTitleMinimumWidth: CGFloat = 96
 
     /// Compact-height iPhone landscape uses the same two-line information
     /// hierarchy as portrait, but trims the capsule itself so the separate
@@ -415,23 +418,33 @@ private struct ArticleListTitleCapsule: View {
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority)
         case .regularToolbar:
-            VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.primary)
+                    if let subtitle {
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(subtitle)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(.primary)
-                    .layoutPriority(2)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(.secondary)
-                        .layoutPriority(1)
-                }
             }
-            .frame(minWidth: 0, alignment: .leading)
+            .frame(
+                minWidth: IOSArticleListTitleCapsuleMetrics.regularToolbarTitleMinimumWidth,
+                alignment: .leading
+            )
         case .inline:
             HStack(spacing: 4) {
                 Text(title)
