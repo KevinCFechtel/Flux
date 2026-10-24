@@ -168,6 +168,21 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// optional under pressure; the scope title is not.
     static let regularToolbarTitleMinimumWidth: CGFloat = 96
 
+    static func regularToolbarIdealContentWidth(
+        title: String,
+        subtitle: String?,
+        showsBrandMark: Bool
+    ) -> CGFloat {
+        let titleFont = UIFont.preferredFont(forTextStyle: .subheadline)
+        let subtitleFont = UIFont.preferredFont(forTextStyle: .caption2)
+        let titleWidth = ceil((title as NSString).size(withAttributes: [.font: titleFont]).width)
+        let subtitleWidth = subtitle.map {
+            ceil(("· " + $0 as NSString).size(withAttributes: [.font: subtitleFont]).width)
+        } ?? 0
+        let brandWidth = showsBrandMark ? titleFont.lineHeight + 8 : 0
+        return brandWidth + titleWidth + subtitleWidth + 32
+    }
+
     /// Compact-height iPhone landscape uses the same two-line information
     /// hierarchy as portrait, but trims the capsule itself so the separate
     /// floating row does not consume unnecessary landscape height.
@@ -444,6 +459,11 @@ private struct ArticleListTitleCapsule: View {
             // higher-priority trailing actions can still make it compress.
             .frame(
                 minWidth: IOSArticleListTitleCapsuleMetrics.regularToolbarTitleMinimumWidth,
+                idealWidth: IOSArticleListTitleCapsuleMetrics.regularToolbarIdealContentWidth(
+                    title: title,
+                    subtitle: subtitle,
+                    showsBrandMark: showsBrandMark
+                ),
                 alignment: .leading
             )
         case .inline:
