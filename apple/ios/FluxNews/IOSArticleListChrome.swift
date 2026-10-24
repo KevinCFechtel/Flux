@@ -418,33 +418,30 @@ private struct ArticleListTitleCapsule: View {
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority)
         case .regularToolbar:
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 4) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
-                    if let subtitle {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+                    .layoutPriority(2)
+                if let subtitle {
+                    HStack(spacing: 4) {
                         Text("·")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text(subtitle)
                             .font(.caption2)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                             .foregroundStyle(.secondary)
                     }
+                    .layoutPriority(1)
                 }
-                // Ask for the full intrinsic title/count width first. The toolbar
-                // can grant it whenever room remains after the native sidebar
-                // toggle and trailing actions. Only genuine pressure should make
-                // ViewThatFits select the compact fallback below.
-                .fixedSize(horizontal: true, vertical: false)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.primary)
             }
+            // Report a normal flexible intrinsic width to the toolbar. This lets
+            // the capsule expand to fit title/count when space exists, while the
+            // higher-priority trailing actions can still make it compress.
             .frame(
                 minWidth: IOSArticleListTitleCapsuleMetrics.regularToolbarTitleMinimumWidth,
                 alignment: .leading
