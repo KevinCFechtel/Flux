@@ -740,21 +740,19 @@ struct ContentView: View {
 
     @ViewBuilder
     private var articleList: some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Keep iPadOS 27.0 and 27.1+ on one stable horizontal regular path.
+            // The 27.1 toolbarVerticalEdge adaptation exists for Duo/foldable
+            // layouts and must not change iPad chrome semantics by OS version.
+            articleList(
+                systemUsesAdaptiveToolbar: false,
+                systemPrefersVerticalToolbar: false
+            )
+            .toolbar(.visible, for: .navigationBar)
+        } else {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
-        if #available(iOS 27.1, *) {
-            IOSArticleListVerticalToolbarEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
-                if UIDevice.current.userInterfaceIdiom == .pad {
-                    articleList(
-                        systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
-                        systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
-                    )
-                    // iPad keeps the regular navigation bar present so the native
-                    // sidebar toggle and trailing actions remain available. Do
-                    // not apply this to Duo portrait: forcing .visible there was
-                    // the trigger for the startup layout/RAM loop.
-                    .toolbar(.visible, for: .navigationBar)
-                    .toolbarMinimizationBehavior(.never, for: .navigationBar)
-                } else {
+            if #available(iOS 27.1, *) {
+                IOSArticleListVerticalToolbarEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
                     articleList(
                         systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
                         systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
@@ -764,35 +762,19 @@ struct ContentView: View {
                         for: .navigationBar
                     )
                 }
-            }
-        } else {
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                articleList(
-                    systemUsesAdaptiveToolbar: false,
-                    systemPrefersVerticalToolbar: false
-                )
-                .toolbar(.visible, for: .navigationBar)
             } else {
                 articleList(
                     systemUsesAdaptiveToolbar: false,
                     systemPrefersVerticalToolbar: false
                 )
             }
-        }
 #else
-        if UIDevice.current.userInterfaceIdiom == .pad {
             articleList(
                 systemUsesAdaptiveToolbar: false,
                 systemPrefersVerticalToolbar: false
             )
-            .toolbar(.visible, for: .navigationBar)
-        } else {
-            articleList(
-                systemUsesAdaptiveToolbar: false,
-                systemPrefersVerticalToolbar: false
-            )
-        }
 #endif
+        }
     }
 
     private func articleList(
