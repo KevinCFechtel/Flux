@@ -88,9 +88,10 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             .navigationTopLeading
         case .persistentSplitCollapsed:
-            systemUsesAdaptiveToolbar || systemPrefersVerticalToolbar
-                ? .navigationTopLeading
-                : .floatingTopLeading
+            // A collapsed regular split keeps the scope visible as non-interactive
+            // context above the Timeline. Navigation itself belongs exclusively
+            // to the native NavigationSplitView sidebar toggle.
+            .floatingTopLeading
         case .persistentSplit:
             .hidden
         }
@@ -706,7 +707,7 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             subtitle: capsuleSubtitle(landscapeSubtitle),
                             widthReservationSubtitle: nil,
                             layout: .inline,
-                            action: onSelectScope
+                            action: nil
                         )
                         Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
                         topAccessory()
@@ -721,7 +722,7 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                         subtitle: capsuleSubtitle(landscapeSubtitle),
                         widthReservationSubtitle: nil,
                         layout: .inline,
-                        action: onSelectScope
+                        action: nil
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
@@ -737,31 +738,14 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {
                     ToolbarItem(placement: .topBarLeading) {
-                        if systemPrefersVerticalToolbar,
-                           chromeMode == .persistentSplitCollapsed,
-                           let onSelectScope {
-                            Button(action: onSelectScope) {
-                                Image(IOSNavigationButtonPresentation.imageName)
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(
-                                        width: IOSNavigationButtonPresentation.glyphSize,
-                                        height: IOSNavigationButtonPresentation.glyphSize
-                                    )
-                            }
-                            .accessibilityLabel(title)
-                            .accessibilityHint(IOSNavigationButtonPresentation.accessibilityLabel)
-                        } else {
-                            ArticleListTitleCapsule(
-                                title: title,
-                                subtitle: capsuleSubtitle(landscapeSubtitle),
-                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                                layout: .compactStacked,
-                                action: onSelectScope,
-                                usesSystemToolbarGlass: true
-                            )
-                        }
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                            layout: .compactStacked,
+                            action: onSelectScope,
+                            usesSystemToolbarGlass: true
+                        )
                     }
                 }
 
