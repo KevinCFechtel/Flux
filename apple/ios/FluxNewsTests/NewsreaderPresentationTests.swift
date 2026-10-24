@@ -804,7 +804,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 for: .persistentSplitCollapsed,
                 systemPrefersVerticalToolbar: true
             ),
-            .floatingTopLeading
+            .navigationTopLeading
         )
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactPortrait), .hidden)
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactLandscape), .visible)
@@ -1133,7 +1133,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 systemPrefersVerticalToolbar: true,
                 systemUsesAdaptiveToolbar: true
             ),
-            .floatingTopLeading
+            .navigationTopLeading
         )
     }
 
