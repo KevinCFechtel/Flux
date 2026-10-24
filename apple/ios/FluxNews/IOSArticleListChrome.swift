@@ -248,6 +248,7 @@ struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
 private enum ArticleListTitleCapsuleLayout: Equatable {
     case stacked
     case compactStacked
+    case regularToolbar
     case inline
 }
 
@@ -272,7 +273,7 @@ private struct ArticleListTitleCapsule: View {
             let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
             guard subtitle != nil else { return titleHeight }
             return titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
-        case .compactStacked:
+        case .compactStacked, .regularToolbar:
             return UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
         case .inline:
             return UIFont.preferredFont(forTextStyle: .headline).lineHeight
@@ -354,7 +355,7 @@ private struct ArticleListTitleCapsule: View {
     private var verticalPadding: CGFloat {
         switch layout {
         case .stacked: IOSArticleListTitleCapsuleMetrics.stackedVerticalPadding
-        case .compactStacked: IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding
+        case .compactStacked, .regularToolbar: IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding
         case .inline: 5
         }
     }
@@ -413,6 +414,24 @@ private struct ArticleListTitleCapsule: View {
             )
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority)
+        case .regularToolbar:
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+                    .layoutPriority(2)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.secondary)
+                        .layoutPriority(1)
+                }
+            }
+            .frame(minWidth: 0, alignment: .leading)
         case .inline:
             HStack(spacing: 4) {
                 Text(title)
@@ -752,11 +771,11 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             title: title,
                             subtitle: capsuleSubtitle(landscapeSubtitle),
                             widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: chromeMode == .persistentSplitCollapsed ? .inline : .compactStacked,
+                            layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
                             action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
                             showsBrandMark: chromeMode == .persistentSplitCollapsed,
                             reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
-                            usesSystemToolbarGlass: true
+                            usesSystemToolbarGlass: chromeMode != .persistentSplitCollapsed
                         )
                     }
                 }
