@@ -747,6 +747,10 @@ struct ContentView: View {
                     systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
                     systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
                 )
+                .toolbarMinimizationBehavior(
+                    systemPrefersVerticalToolbar ? .never : .automatic,
+                    for: .navigationBar
+                )
             }
         } else {
             articleList(
