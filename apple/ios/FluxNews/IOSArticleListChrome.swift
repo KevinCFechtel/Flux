@@ -88,10 +88,11 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             .navigationTopLeading
         case .persistentSplitCollapsed:
-            // A collapsed regular split keeps the scope visible as non-interactive
-            // context above the Timeline. Navigation itself belongs exclusively
-            // to the native NavigationSplitView sidebar toggle.
-            .floatingTopLeading
+            // Horizontal regular layouts (iPad and Duo portrait) keep the passive
+            // scope capsule in the native top bar beside the system sidebar toggle.
+            // When the system moves controls to a vertical edge (Duo landscape),
+            // keep the textual capsule horizontal above the Timeline instead.
+            systemPrefersVerticalToolbar ? .floatingTopLeading : .navigationTopLeading
         case .persistentSplit:
             .hidden
         }
@@ -253,6 +254,7 @@ private struct ArticleListTitleCapsule: View {
     let widthReservationSubtitle: String?
     let layout: ArticleListTitleCapsuleLayout
     var action: (() -> Void)?
+    var showsBrandMark = false
     var usesSystemToolbarGlass = false
     // Read so the derived glyph height is recomputed when the text size changes.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -313,7 +315,7 @@ private struct ArticleListTitleCapsule: View {
 
     private var capsule: some View {
         HStack(spacing: horizontalSpacing) {
-            if action != nil {
+            if action != nil || showsBrandMark {
                 Image(IOSNavigationButtonPresentation.imageName)
                     .renderingMode(.template)
                     .resizable()
@@ -707,7 +709,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             subtitle: capsuleSubtitle(landscapeSubtitle),
                             widthReservationSubtitle: nil,
                             layout: .inline,
-                            action: nil
+                            action: nil,
+                            showsBrandMark: true
                         )
                         Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
                         topAccessory()
@@ -722,7 +725,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                         subtitle: capsuleSubtitle(landscapeSubtitle),
                         widthReservationSubtitle: nil,
                         layout: .inline,
-                        action: nil
+                        action: nil,
+                        showsBrandMark: true
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
@@ -742,8 +746,9 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             title: title,
                             subtitle: capsuleSubtitle(landscapeSubtitle),
                             widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: .compactStacked,
-                            action: onSelectScope,
+                            layout: chromeMode == .persistentSplitCollapsed ? .inline : .compactStacked,
+                            action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
+                            showsBrandMark: chromeMode == .persistentSplitCollapsed,
                             usesSystemToolbarGlass: true
                         )
                     }
