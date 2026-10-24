@@ -101,7 +101,7 @@ run_xcodebuild() {
       -destination "${DESTINATION}" \
       -derivedDataPath "${DERIVED_DATA}" \
       SWIFT_ACTIVE_COMPILATION_CONDITIONS=FLUX_PERFORMANCE_DIAGNOSTICS \
-      "${IOS_VERSION_SETTINGS[@]}" \
+      ${IOS_VERSION_SETTINGS[@]+"${IOS_VERSION_SETTINGS[@]}"} \
       "$@"
   else
     xcodebuild \
@@ -110,7 +110,7 @@ run_xcodebuild() {
       -configuration "${CONFIGURATION}" \
       -destination "${DESTINATION}" \
       -derivedDataPath "${DERIVED_DATA}" \
-      "${IOS_VERSION_SETTINGS[@]}" \
+      ${IOS_VERSION_SETTINGS[@]+"${IOS_VERSION_SETTINGS[@]}"} \
       "$@"
   fi
 }
