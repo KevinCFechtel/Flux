@@ -423,7 +423,6 @@ private struct ArticleListTitleCapsule: View {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                        .truncationMode(.tail)
                         .foregroundStyle(.primary)
                     if let subtitle {
                         Text("·")
@@ -435,6 +434,11 @@ private struct ArticleListTitleCapsule: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                // Ask for the full intrinsic title/count width first. The toolbar
+                // can grant it whenever room remains after the native sidebar
+                // toggle and trailing actions. Only genuine pressure should make
+                // ViewThatFits select the compact fallback below.
+                .fixedSize(horizontal: true, vertical: false)
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
