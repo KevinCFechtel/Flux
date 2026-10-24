@@ -767,6 +767,7 @@ struct ContentView: View {
             onSelectScope: presentArticleListNavigation,
             chromeMode: articleListChromeMode,
             actionPlacement: actionPlacement,
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
             topActions: {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
