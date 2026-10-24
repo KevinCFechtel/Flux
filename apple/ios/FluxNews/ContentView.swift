@@ -58,7 +58,7 @@ struct ContentView: View {
     @State private var listeningListPendingAfterNavigationSheet = false
     @State private var diagnosticsPresented = false
     @State private var settingsPresented = false
-    @State private var splitColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var splitColumnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var browser: IOSBrowserURL?
     @State private var articleOpenError: String?
     @State private var articleOpenGeneration = 0
