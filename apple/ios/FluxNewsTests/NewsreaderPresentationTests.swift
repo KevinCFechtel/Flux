@@ -984,14 +984,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testVisibleSidebarSuppressesCompactLandscapeCapsule() {
+    func testCompactPresentationIgnoresStaleSplitVisibilityDuringTransition() {
         XCTAssertEqual(
             IOSArticleListChromePresentation.mode(
                 for: .compact,
                 verticalSizeClass: .compact,
                 splitColumnVisibility: .all
             ),
-            .persistentSplit
+            .compactLandscape
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.mode(
+                for: .compact,
+                verticalSizeClass: .regular,
+                splitColumnVisibility: .all
+            ),
+            .compactPortrait
         )
     }
 
@@ -1027,6 +1035,50 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         XCTAssertEqual(collapsedPersistent, .persistentSplitCollapsed)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .floatingTopTrailing)
+    }
+
+    func testDuoRegularPoseChangesKeepSplitModeAndOnlyChangeToolbarAxis() {
+        let visibleSidebar = IOSArticleListChromePresentation.mode(
+            for: .regular,
+            verticalSizeClass: .regular,
+            splitColumnVisibility: .all
+        )
+        XCTAssertEqual(visibleSidebar, .persistentSplit)
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.actionPlacement(
+                for: visibleSidebar,
+                systemPrefersVerticalToolbar: false
+            ),
+            .floatingTopTrailing
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.actionPlacement(
+                for: visibleSidebar,
+                systemPrefersVerticalToolbar: true
+            ),
+            .topBarTrailing
+        )
+
+        let collapsedSidebar = IOSArticleListChromePresentation.mode(
+            for: .regular,
+            verticalSizeClass: .regular,
+            splitColumnVisibility: .detailOnly
+        )
+        XCTAssertEqual(collapsedSidebar, .persistentSplitCollapsed)
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: collapsedSidebar,
+                systemPrefersVerticalToolbar: false
+            ),
+            .floatingTopLeading
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: collapsedSidebar,
+                systemPrefersVerticalToolbar: true
+            ),
+            .navigationTopLeading
+        )
     }
 
     func testActionFeedbackClearsBottomActionBarChrome() {
