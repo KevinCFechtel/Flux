@@ -1116,6 +1116,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testIPadRegularToolbarKeepsNavigationChromeAvailable() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let contentSource = try String(
+            contentsOf: iosDirectory
+                .appendingPathComponent("FluxNews/ContentView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(contentSource.contains("UIDevice.current.userInterfaceIdiom == .pad"))
+        XCTAssertTrue(contentSource.contains(".toolbar(.visible, for: .navigationBar)"))
+        XCTAssertTrue(contentSource.contains(".toolbarMinimizationBehavior(.never, for: .navigationBar)"))
+    }
+
     func testIOS271AdaptiveToolbarStaysNativeAcrossDuoPortraitLandscapeRotation() {
         for mode in [IOSArticleListChromeMode.persistentSplit, .persistentSplitCollapsed] {
             XCTAssertEqual(
