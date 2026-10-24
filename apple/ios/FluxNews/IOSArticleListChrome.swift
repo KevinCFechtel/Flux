@@ -69,14 +69,17 @@ enum IOSArticleListChromePresentation {
         }
     }
 
-    static func titleCapsulePlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListTitleCapsulePlacement {
+    static func titleCapsulePlacement(
+        for mode: IOSArticleListChromeMode,
+        systemPrefersVerticalToolbar: Bool = false
+    ) -> IOSArticleListTitleCapsulePlacement {
         switch mode {
         case .compactPortrait:
             .floatingTopCenter
         case .compactLandscape:
             .navigationTopLeading
         case .persistentSplitCollapsed:
-            .floatingTopLeading
+            systemPrefersVerticalToolbar ? .navigationTopLeading : .floatingTopLeading
         case .persistentSplit:
             .hidden
         }
@@ -596,6 +599,7 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
     var actionPlacement: IOSArticleListActionPlacement
+    var systemPrefersVerticalToolbar = false
     @ViewBuilder let topActions: () -> TopActions
     @ViewBuilder let topAccessory: () -> TopAccessory
     @ViewBuilder let content: (CGFloat) -> Content
@@ -624,7 +628,10 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
         // does not make the compact landscape capsule breathe horizontally.
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
-        let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
+        let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(
+            for: chromeMode,
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+        )
         let naturalTopContentInset: CGFloat = if chromeMode == .compactPortrait {
             detachedTopChromeHeight > 0
                 ? detachedTopChromeHeight
@@ -707,14 +714,31 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {
                     ToolbarItem(placement: .topBarLeading) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(landscapeSubtitle),
-                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: .compactStacked,
-                            action: onSelectScope,
-                            usesSystemToolbarGlass: true
-                        )
+                        if systemPrefersVerticalToolbar,
+                           chromeMode == .persistentSplitCollapsed,
+                           let onSelectScope {
+                            Button(action: onSelectScope) {
+                                Image(IOSNavigationButtonPresentation.imageName)
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(
+                                        width: IOSNavigationButtonPresentation.glyphSize,
+                                        height: IOSNavigationButtonPresentation.glyphSize
+                                    )
+                            }
+                            .accessibilityLabel(title)
+                            .accessibilityHint(IOSNavigationButtonPresentation.accessibilityLabel)
+                        } else {
+                            ArticleListTitleCapsule(
+                                title: title,
+                                subtitle: capsuleSubtitle(landscapeSubtitle),
+                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                                layout: .compactStacked,
+                                action: onSelectScope,
+                                usesSystemToolbarGlass: true
+                            )
+                        }
                     }
                 }
 
