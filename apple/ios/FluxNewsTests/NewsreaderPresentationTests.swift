@@ -1274,7 +1274,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testAdaptiveShellTransitionNormalizesOnlyNavigationPresentation() {
         XCTAssertFalse(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .regular, wasPresented: true))
         XCTAssertTrue(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: true))
-        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular), .all)
+        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular), .automatic)
         XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact), .detailOnly)
     }
 
