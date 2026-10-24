@@ -1116,7 +1116,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testIPadRegularToolbarKeepsNavigationChromeAvailable() throws {
+    func testIPadRegularToolbarUsesOneHorizontalPathAcrossIOS27Versions() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
         let iosDirectory = testsDirectory.deletingLastPathComponent()
@@ -1126,9 +1126,20 @@ final class NewsreaderPresentationTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(contentSource.contains("UIDevice.current.userInterfaceIdiom == .pad"))
+        let ipadRoute = "if UIDevice.current.userInterfaceIdiom == .pad"
+        let adaptiveRoute = "if #available(iOS 27.1, *)"
+        guard let ipadRange = contentSource.range(of: ipadRoute),
+              let adaptiveRange = contentSource.range(of: adaptiveRoute) else {
+            return XCTFail("Expected iPad and adaptive toolbar routing")
+        }
+
+        XCTAssertLessThan(
+            contentSource.distance(from: contentSource.startIndex, to: ipadRange.lowerBound),
+            contentSource.distance(from: contentSource.startIndex, to: adaptiveRange.lowerBound)
+        )
+        XCTAssertTrue(contentSource.contains("systemUsesAdaptiveToolbar: false"))
+        XCTAssertTrue(contentSource.contains("systemPrefersVerticalToolbar: false"))
         XCTAssertTrue(contentSource.contains(".toolbar(.visible, for: .navigationBar)"))
-        XCTAssertTrue(contentSource.contains(".toolbarMinimizationBehavior(.never, for: .navigationBar)"))
     }
 
     func testIOS271AdaptiveToolbarStaysNativeAcrossDuoPortraitLandscapeRotation() {
