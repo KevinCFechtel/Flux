@@ -806,10 +806,10 @@ final class NewsreaderPresentationTests: XCTestCase {
             ),
             .navigationTopLeading
         )
-        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactPortrait))
-        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactLandscape))
-        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplit))
-        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplitCollapsed))
+        XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactPortrait), .hidden)
+        XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactLandscape), .visible)
+        XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .persistentSplit), .hidden)
+        XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .persistentSplitCollapsed), .hidden)
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactPortrait))
         XCTAssertFalse(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactLandscape))
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplit))
@@ -888,17 +888,19 @@ final class NewsreaderPresentationTests: XCTestCase {
             ),
             .topBarTrailing
         )
-        XCTAssertTrue(
-            IOSArticleListChromePresentation.showsTopNavigationBar(
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.navigationBarVisibility(
                 for: .persistentSplit,
                 systemPrefersVerticalToolbar: true
-            )
+            ),
+            .visible
         )
-        XCTAssertTrue(
-            IOSArticleListChromePresentation.showsTopNavigationBar(
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.navigationBarVisibility(
                 for: .persistentSplitCollapsed,
                 systemPrefersVerticalToolbar: true
-            )
+            ),
+            .visible
         )
         XCTAssertTrue(
             IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
@@ -1099,19 +1101,21 @@ final class NewsreaderPresentationTests: XCTestCase {
                 ),
                 .topBarTrailing
             )
-            XCTAssertTrue(
-                IOSArticleListChromePresentation.showsTopNavigationBar(
+            XCTAssertEqual(
+                IOSArticleListChromePresentation.navigationBarVisibility(
                     for: mode,
                     systemPrefersVerticalToolbar: false,
                     systemUsesAdaptiveToolbar: true
-                )
+                ),
+                .automatic
             )
-            XCTAssertTrue(
-                IOSArticleListChromePresentation.showsTopNavigationBar(
+            XCTAssertEqual(
+                IOSArticleListChromePresentation.navigationBarVisibility(
                     for: mode,
                     systemPrefersVerticalToolbar: true,
                     systemUsesAdaptiveToolbar: true
-                )
+                ),
+                .automatic
             )
         }
 
