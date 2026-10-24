@@ -46,7 +46,8 @@ enum IOSArticleListChromePresentation {
 
     static func actionPlacement(
         for mode: IOSArticleListChromeMode,
-        systemPrefersVerticalToolbar: Bool = false
+        systemPrefersVerticalToolbar: Bool = false,
+        systemUsesAdaptiveToolbar: Bool = false
     ) -> IOSArticleListActionPlacement {
         switch mode {
         case .compactPortrait:
@@ -54,7 +55,9 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             .topBarTrailing
         case .persistentSplit, .persistentSplitCollapsed:
-            systemPrefersVerticalToolbar ? .topBarTrailing : .floatingTopTrailing
+            systemUsesAdaptiveToolbar || systemPrefersVerticalToolbar
+                ? .topBarTrailing
+                : .floatingTopTrailing
         }
     }
 
@@ -76,7 +79,8 @@ enum IOSArticleListChromePresentation {
 
     static func titleCapsulePlacement(
         for mode: IOSArticleListChromeMode,
-        systemPrefersVerticalToolbar: Bool = false
+        systemPrefersVerticalToolbar: Bool = false,
+        systemUsesAdaptiveToolbar: Bool = false
     ) -> IOSArticleListTitleCapsulePlacement {
         switch mode {
         case .compactPortrait:
@@ -84,7 +88,9 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             .navigationTopLeading
         case .persistentSplitCollapsed:
-            systemPrefersVerticalToolbar ? .navigationTopLeading : .floatingTopLeading
+            systemUsesAdaptiveToolbar || systemPrefersVerticalToolbar
+                ? .navigationTopLeading
+                : .floatingTopLeading
         case .persistentSplit:
             .hidden
         }
@@ -92,10 +98,11 @@ enum IOSArticleListChromePresentation {
 
     static func showsTopNavigationBar(
         for mode: IOSArticleListChromeMode,
-        systemPrefersVerticalToolbar: Bool = false
+        systemPrefersVerticalToolbar: Bool = false,
+        systemUsesAdaptiveToolbar: Bool = false
     ) -> Bool {
         if mode == .compactLandscape { return true }
-        return systemPrefersVerticalToolbar && {
+        return (systemUsesAdaptiveToolbar || systemPrefersVerticalToolbar) && {
             switch mode {
             case .persistentSplit, .persistentSplitCollapsed:
                 true
@@ -212,14 +219,19 @@ enum IOSArticleNavigationPresentation {
 @available(iOS 27.1, *)
 struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
     @Environment(\.toolbarVerticalEdge) private var toolbarVerticalEdge
-    private let content: (Bool) -> Content
+    private let content: (_ systemUsesAdaptiveToolbar: Bool, _ systemPrefersVerticalToolbar: Bool) -> Content
 
-    init(@ViewBuilder content: @escaping (Bool) -> Content) {
+    init(
+        @ViewBuilder content: @escaping (
+            _ systemUsesAdaptiveToolbar: Bool,
+            _ systemPrefersVerticalToolbar: Bool
+        ) -> Content
+    ) {
         self.content = content
     }
 
     var body: some View {
-        content(toolbarVerticalEdge != nil)
+        content(true, toolbarVerticalEdge != nil)
     }
 }
 #endif
@@ -604,6 +616,7 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
     var actionPlacement: IOSArticleListActionPlacement
+    var systemUsesAdaptiveToolbar = false
     var systemPrefersVerticalToolbar = false
     @ViewBuilder let topActions: () -> TopActions
     @ViewBuilder let topAccessory: () -> TopAccessory
@@ -635,7 +648,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
 
         let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(
             for: chromeMode,
-            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar,
+            systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar
         )
         let naturalTopContentInset: CGFloat = if chromeMode == .compactPortrait {
             detachedTopChromeHeight > 0
