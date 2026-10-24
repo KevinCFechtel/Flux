@@ -96,20 +96,24 @@ enum IOSArticleListChromePresentation {
         }
     }
 
-    static func showsTopNavigationBar(
+    static func navigationBarVisibility(
         for mode: IOSArticleListChromeMode,
         systemPrefersVerticalToolbar: Bool = false,
         systemUsesAdaptiveToolbar: Bool = false
-    ) -> Bool {
-        if mode == .compactLandscape { return true }
-        return (systemUsesAdaptiveToolbar || systemPrefersVerticalToolbar) && {
-            switch mode {
-            case .persistentSplit, .persistentSplitCollapsed:
-                true
-            case .compactPortrait, .compactLandscape:
-                false
-            }
-        }()
+    ) -> Visibility {
+        switch mode {
+        case .compactPortrait:
+            return .hidden
+        case .compactLandscape:
+            return .visible
+        case .persistentSplit, .persistentSplitCollapsed:
+            // On iOS 27.1+ let NavigationSplitView own bar visibility and axis.
+            // Forcing .visible while the Duo inner display changes between its
+            // horizontal and vertical bar presentations adds a competing chrome
+            // policy during layout. Older SDK paths keep the established behavior.
+            return systemUsesAdaptiveToolbar ? .automatic
+                : (systemPrefersVerticalToolbar ? .visible : .hidden)
+        }
     }
 
     static func usesNativeTopEdgeEffect(
