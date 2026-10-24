@@ -857,7 +857,12 @@ struct ContentView: View {
                 }
 
                 if actionPlacement == .topBarTrailing {
-                    if #available(iOS 26.0, *) {
+                    if #available(iOS 27.0, *) {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            articleListActionButtons(directCapacity: directActionCapacity)
+                        }
+                        .visibilityPriority(.high)
+                    } else if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             articleListActionButtons(directCapacity: directActionCapacity)
                                 .layoutPriority(10)
