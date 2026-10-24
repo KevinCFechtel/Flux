@@ -845,6 +845,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testRegularCollapsedTitleUsesPassiveNavigationPlacement() {
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.titleCapsulePlacement(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: false,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .navigationTopLeading
+        )
+    }
+
     func testLandscapeCounterGermanLocalizationCatalog() throws {
         let german = try localizationBundle("de")
         XCTAssertEqual(String(localized: "\(79) unread", bundle: german), "79 ungelesen")
