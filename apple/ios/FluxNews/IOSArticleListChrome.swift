@@ -783,45 +783,23 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             }
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {
-                    if chromeMode == .persistentSplitCollapsed,
-                       !systemPrefersVerticalToolbar {
-                        ToolbarItem(placement: .principal) {
-                            HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
-                                ArticleListTitleCapsule(
-                                    title: title,
-                                    subtitle: capsuleSubtitle(landscapeSubtitle),
-                                    widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                                    layout: .regularToolbar,
-                                    action: nil,
-                                    showsBrandMark: true,
-                                    reservesInlineMinimumWidth: false,
-                                    usesSystemToolbarGlass: false
-                                )
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                topAccessory()
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    } else {
-                        ToolbarItem(placement: .topBarLeading) {
-                            ArticleListTitleCapsule(
-                                title: title,
-                                subtitle: capsuleSubtitle(landscapeSubtitle),
-                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                                layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
-                                action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
-                                showsBrandMark: chromeMode == .persistentSplitCollapsed,
-                                reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
-                                // Native leading toolbar items receive Liquid Glass.
-                                usesSystemToolbarGlass: true
-                            )
-                        }
+                    ToolbarItem(placement: .topBarLeading) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                            layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
+                            action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
+                            showsBrandMark: chromeMode == .persistentSplitCollapsed,
+                            reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
+                            // Native leading toolbar items receive Liquid Glass.
+                            usesSystemToolbarGlass: true
+                        )
                     }
                 }
 
                 if chromeMode == .persistentSplitCollapsed,
-                   actionPlacement == .topBarTrailing,
-                   systemPrefersVerticalToolbar {
+                   actionPlacement == .topBarTrailing {
                     ToolbarItem(placement: .principal) {
                         topAccessory()
                     }
