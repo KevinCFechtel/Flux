@@ -1081,7 +1081,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 for: collapsedSidebar,
                 systemPrefersVerticalToolbar: false
             ),
-            .floatingTopLeading
+            .navigationTopLeading
         )
         XCTAssertEqual(
             IOSArticleListChromePresentation.titleCapsulePlacement(
@@ -1124,7 +1124,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                     systemPrefersVerticalToolbar: true,
                     systemUsesAdaptiveToolbar: true
                 ),
-                .automatic
+                .visible
             )
         }
 
