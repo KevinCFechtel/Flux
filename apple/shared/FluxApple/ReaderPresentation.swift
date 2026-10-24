@@ -39,7 +39,7 @@ enum AdaptiveShellTransitionPolicy {
     }
 
     static func splitColumnVisibility(after presentation: AdaptivePresentation) -> NavigationSplitViewVisibility {
-        presentation.usesPersistentSplitNavigation ? .all : .detailOnly
+        presentation.usesPersistentSplitNavigation ? .automatic : .detailOnly
     }
 
     static func constrainedSplitColumnVisibility(
