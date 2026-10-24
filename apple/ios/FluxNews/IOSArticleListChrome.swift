@@ -792,9 +792,6 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             // Native leading toolbar items receive Liquid Glass.
                             usesSystemToolbarGlass: true
                         )
-                        .layoutPriority(
-                            chromeMode == .persistentSplitCollapsed ? 1 : 0
-                        )
                     }
                 }
 
