@@ -803,6 +803,12 @@ final class NewsreaderPresentationTests: XCTestCase {
             IOSArticleListTitleCapsuleMetrics.regularToolbarTitleMinimumWidth,
             96
         )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.configurableDirectActionCapacity(
+                for: .persistentSplitCollapsed
+            ),
+            3
+        )
     }
 
     func testArticleListTitleChromeSeparatesPortraitLandscapeAndSplitModes() {
