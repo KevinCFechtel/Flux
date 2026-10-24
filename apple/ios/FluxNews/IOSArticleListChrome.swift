@@ -88,11 +88,11 @@ enum IOSArticleListChromePresentation {
         case .compactLandscape:
             .navigationTopLeading
         case .persistentSplitCollapsed:
-            // Horizontal regular layouts (iPad and Duo portrait) keep the passive
-            // scope capsule in the native top bar beside the system sidebar toggle.
-            // When the system moves controls to a vertical edge (Duo landscape),
-            // keep the textual capsule horizontal above the Timeline instead.
-            systemPrefersVerticalToolbar ? .floatingTopLeading : .navigationTopLeading
+            // Collapsed regular layouts keep the passive scope capsule in the
+            // native top bar beside the system sidebar toggle. This applies to
+            // iPad and both Duo inner-display orientations; the system may move
+            // trailing actions to a vertical edge independently.
+            .navigationTopLeading
         case .persistentSplit:
             .hidden
         }
