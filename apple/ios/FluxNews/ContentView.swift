@@ -741,9 +741,9 @@ struct ContentView: View {
     @ViewBuilder
     private var articleList: some View {
         if UIDevice.current.userInterfaceIdiom == .pad {
-            // Keep iPadOS 27.0 and 27.1+ on one stable horizontal regular path.
-            // The 27.1 toolbarVerticalEdge adaptation exists for Duo/foldable
-            // layouts and must not change iPad chrome semantics by OS version.
+            // iPad always uses the stable horizontal regular toolbar path.
+            // Vertical-toolbar capability detection is reserved for layouts that
+            // can actually move system chrome to a vertical edge.
             articleList(
                 systemUsesAdaptiveToolbar: false,
                 systemPrefersVerticalToolbar: false
@@ -752,7 +752,7 @@ struct ContentView: View {
         } else {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
             if #available(iOS 27.1, *) {
-                IOSArticleListVerticalToolbarEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
+                IOSArticleListVerticalToolbarCapabilityEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
                     articleList(
                         systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
                         systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
