@@ -794,6 +794,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testRegularCollapsedToolbarCanReleaseTitleWidthForActions() {
+        XCTAssertGreaterThan(
+            IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth,
+            0
+        )
+        // The regular collapsed toolbar opts out of this minimum at the call
+        // site so native trailing actions win width before the title does.
+    }
+
     func testArticleListTitleChromeSeparatesPortraitLandscapeAndSplitModes() {
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactPortrait), .floatingTopCenter)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .navigationTopLeading)
