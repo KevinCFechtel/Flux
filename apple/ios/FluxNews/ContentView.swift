@@ -743,14 +743,27 @@ struct ContentView: View {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
         if #available(iOS 27.1, *) {
             IOSArticleListVerticalToolbarEnvironment { systemUsesAdaptiveToolbar, systemPrefersVerticalToolbar in
-                articleList(
-                    systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
-                    systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
-                )
-                .toolbarMinimizationBehavior(
-                    systemPrefersVerticalToolbar ? .never : .automatic,
-                    for: .navigationBar
-                )
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                    articleList(
+                        systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
+                        systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+                    )
+                    // iPad keeps the regular navigation bar present so the native
+                    // sidebar toggle and trailing actions remain available. Do
+                    // not apply this to Duo portrait: forcing .visible there was
+                    // the trigger for the startup layout/RAM loop.
+                    .toolbar(.visible, for: .navigationBar)
+                    .toolbarMinimizationBehavior(.never, for: .navigationBar)
+                } else {
+                    articleList(
+                        systemUsesAdaptiveToolbar: systemUsesAdaptiveToolbar,
+                        systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+                    )
+                    .toolbarMinimizationBehavior(
+                        systemPrefersVerticalToolbar ? .never : .automatic,
+                        for: .navigationBar
+                    )
+                }
             }
         } else {
             articleList(
