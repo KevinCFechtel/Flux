@@ -788,7 +788,9 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
                             showsBrandMark: chromeMode == .persistentSplitCollapsed,
                             reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
-                            usesSystemToolbarGlass: chromeMode != .persistentSplitCollapsed
+                            // Native toolbar items already receive Liquid Glass.
+                            // Do not nest a second custom glass capsule inside it.
+                            usesSystemToolbarGlass: true
                         )
                     }
                 }
