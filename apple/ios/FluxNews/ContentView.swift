@@ -634,7 +634,6 @@ struct ContentView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 sidebarMiniPlayer
             }
-            .toolbar(removing: .sidebarToggle)
         } detail: {
             adaptiveDetail
         }
