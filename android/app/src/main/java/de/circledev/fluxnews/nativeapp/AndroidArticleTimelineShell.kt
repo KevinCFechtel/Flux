@@ -249,7 +249,7 @@ internal fun NewsRootContent(
     // not consume a second row at the bottom of the timeline.
     val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
         (isLandscape || availableToolbarWidth >= (if (persistentNavigation) 520.dp else 950.dp))
-    val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible && !toolbarMiniPlayerVisible
+    val standaloneMiniPlayerVisible = miniPlayerVisible && !persistentNavigation && !bottomActionsVisible && !toolbarMiniPlayerVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
             32.dp +
