@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Headphones
@@ -21,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -246,62 +248,94 @@ internal fun AndroidToolbarMiniPlayer(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val artworkModel by produceState<Any?>(
+        initialValue = null,
+        key1 = playback.artworkSource,
+        key2 = playback.enclosureId,
+    ) {
+        value = when (val source = playback.artworkSource) {
+            is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
+            is MediaArtworkSource.RemoteUrl -> source.url
+            null -> null
+        }
+    }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onOpenPlayer),
+            Row(
+                modifier = Modifier.weight(1f).clickable(onClick = onOpenPlayer),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                Box(
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (artworkModel != null) {
+                        AsyncImage(
+                            model = artworkModel,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Headphones,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
                 Text(
                     playback.articleTitle?.takeIf { it.isNotBlank() }
                         ?: stringResource(R.string.article_audio),
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                playback.feedTitle?.takeIf { it.isNotBlank() }?.let { feed ->
-                    Text(
-                        feed,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
             IconButton(
                 onClick = {
-                    playback.enclosureId?.let { id ->
-                        scope.launch {
-                            if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                                coordinator.pause()
-                            } else {
-                                coordinator.play(id)
+                    if (!playback.isLoading) {
+                        playback.enclosureId?.let { id ->
+                            scope.launch {
+                                if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                    coordinator.pause()
+                                } else {
+                                    coordinator.play(id)
+                                }
                             }
                         }
                     }
                 },
             ) {
-                Icon(
-                    if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                        Icons.Rounded.Pause
-                    } else {
-                        Icons.Rounded.PlayArrow
-                    },
-                    contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                        "Pause"
-                    } else {
-                        "Play"
-                    },
-                )
+                if (playback.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                            Icons.Rounded.Pause
+                        } else {
+                            Icons.Rounded.PlayArrow
+                        },
+                        contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                            "Pause"
+                        } else {
+                            "Play"
+                        },
+                    )
+                }
             }
         }
     }
