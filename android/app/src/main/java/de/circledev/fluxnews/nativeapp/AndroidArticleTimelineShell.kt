@@ -920,9 +920,6 @@ private fun ScopeNavigationCapsule(
                     )
                 }
             }
-            if (trailingContent != null) {
-                trailingContent()
-            }
             if (opensNavigation) {
                 Icon(
                     painter = painterResource(R.drawable.ic_expand_more),
@@ -930,6 +927,9 @@ private fun ScopeNavigationCapsule(
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (trailingContent != null) {
+                trailingContent()
             }
         }
     }
