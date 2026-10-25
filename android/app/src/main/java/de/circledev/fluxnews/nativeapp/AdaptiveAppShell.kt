@@ -220,7 +220,7 @@ internal fun AdaptiveAppShell(
     NavHost(
         navController = navController,
         startDestination = ShellRoute.Timeline,
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         enterTransition = { AndroidMotion.topLevelEnter() },
         exitTransition = { AndroidMotion.topLevelExit() },
         popEnterTransition = { AndroidMotion.topLevelEnter() },
