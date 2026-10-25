@@ -44,6 +44,7 @@ enum IOSMiniPlayerStyle: Equatable {
     case portraitDock
     case compactTopBar
     case regularFloating
+    case regularToolbar
     case sidebarFooter
 }
 
@@ -122,7 +123,9 @@ struct IOSMiniPlayerView: View {
             case .compactTopBar:
                 compactTopBarContent
             case .regularFloating:
-                regularFloatingContent
+                regularFloatingContent(drawsOwnBackground: true)
+            case .regularToolbar:
+                regularFloatingContent(drawsOwnBackground: false)
             case .sidebarFooter:
                 sidebarFooterContent
             }
@@ -199,7 +202,9 @@ struct IOSMiniPlayerView: View {
         }
     }
 
-    private var regularFloatingContent: some View {
+    private func regularFloatingContent(
+        drawsOwnBackground: Bool
+    ) -> some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
                 openButton(
@@ -215,7 +220,11 @@ struct IOSMiniPlayerView: View {
         .padding(.vertical, 7)
         .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
         .background {
-            IOSMiniPlayerCapsuleBackground()
+            if drawsOwnBackground {
+                IOSMiniPlayerCapsuleBackground()
+            } else {
+                Color.clear
+            }
         }
     }
 
