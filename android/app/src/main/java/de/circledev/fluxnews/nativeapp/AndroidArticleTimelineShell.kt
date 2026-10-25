@@ -355,7 +355,7 @@ internal fun NewsRootContent(
                                                     playback = playbackState,
                                                     coordinator = mediaPlaybackCoordinator,
                                                     onOpenPlayer = { nowPlayingPresented = true },
-                                                    modifier = Modifier.weight(1f),
+                                                    modifier = Modifier.widthIn(min = 120.dp, max = 240.dp),
                                                 )
                                             }
                                         } else null,
@@ -932,7 +932,7 @@ private fun ScopeNavigationCapsule(
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column(
-                modifier = if (trailingContent != null) Modifier.widthIn(max = 150.dp) else Modifier,
+                modifier = if (trailingContent != null) Modifier.weight(1f, fill = false) else Modifier,
             ) {
                 Text(
                     scopeTitle(scope),
