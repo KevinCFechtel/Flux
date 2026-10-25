@@ -749,6 +749,7 @@ struct ContentView: View {
                 systemPrefersVerticalToolbar: false
             )
             .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
         } else {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
             if #available(iOS 27.1, *) {
@@ -802,6 +803,11 @@ struct ContentView: View {
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
         )
+        let compactPortraitBottomInset = IOSCompactPortraitBottomInsetPolicy.presentation(
+            chromeMode: articleListChromeMode,
+            actionPlacement: actionPlacement,
+            miniPlayerIsVisible: miniPlayerIsVisible
+        )
 
         return ArticleListNavigationChrome(
             store: newsreaderStore,
@@ -814,12 +820,15 @@ struct ContentView: View {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
             topAccessory: {
-                if miniPlayerPlacement == .compactTopBar,
-                   articleListChromeMode == .persistentSplitCollapsed {
-                    if systemPrefersVerticalToolbar {
-                        regularFloatingMiniPlayer
-                    } else {
+                if miniPlayerPlacement == .compactTopBar {
+                    if articleListChromeMode == .compactLandscape {
                         compactMiniPlayer
+                    } else if articleListChromeMode == .persistentSplitCollapsed {
+                        if systemPrefersVerticalToolbar {
+                            regularFloatingMiniPlayer
+                        } else {
+                            compactMiniPlayer
+                        }
                     }
                 }
             },
@@ -848,19 +857,14 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if articleListChromeMode == .compactPortrait,
-                   actionPlacement == .topBarTrailing,
-                   miniPlayerIsVisible {
-                    IOSMiniPlayerView(
+                switch compactPortraitBottomInset {
+                case .standaloneMiniPlayer:
+                    IOSStandalonePortraitMiniPlayerDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                        style: .portraitDock,
-                        onOpen: presentNowPlayingPlayer
+                        onOpenPlayer: presentNowPlayingPlayer
                     )
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 8)
-                } else if actionPlacement == .bottomBar,
-                          miniPlayerIsVisible {
+                case .combinedMiniPlayerAndActions:
                     IOSArticleListBottomDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -871,6 +875,8 @@ struct ContentView: View {
                             minimumHitTarget: 44
                         )
                     }
+                case .none:
+                    EmptyView()
                 }
             }
             .toolbar {
@@ -882,24 +888,12 @@ struct ContentView: View {
                         )
                     }
                 }
-                if miniPlayerPlacement == .compactTopBar,
-                   articleListChromeMode == .compactLandscape,
-                   miniPlayerIsVisible {
-                    ToolbarItem(placement: .principal) {
-                        compactMiniPlayer
-                    }
-                }
-
                 if actionPlacement == .topBarTrailing {
-                    if #available(iOS 27.0, *) {
+                    if #available(iOS 26.0, *) {
+                        // Keep all actions in one native group. The system owns
+                        // horizontal/vertical placement and overflow behavior.
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             articleListActionButtons(directCapacity: directActionCapacity)
-                        }
-                        .visibilityPriority(.high)
-                    } else if #available(iOS 26.0, *) {
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons(directCapacity: directActionCapacity)
-                                .layoutPriority(10)
                         }
                     } else {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -928,7 +922,11 @@ struct ContentView: View {
             IOSMiniPlayerView(
                 playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                style: .compactTopBar,
+                style: UIDevice.current.userInterfaceIdiom == .pad
+                    ? .regularToolbar
+                    : articleListChromeMode == .compactLandscape
+                        ? .expandedLandscapeTopBar
+                        : .compactTopBar,
                 onOpen: presentNowPlayingPlayer
             )
         }
@@ -970,6 +968,24 @@ struct ContentView: View {
         directCapacity: Int,
         minimumHitTarget: CGFloat? = nil
     ) -> some View {
+        IOSSyncToolbarButton(
+            state: IOSSyncButtonPresentation.resolve(
+                manualSyncState: newsreaderStore.manualSyncState,
+                transientState: syncPresentation
+            ),
+            action: performManualSyncControlAction
+        )
+        articleListConfigurableActionButtons(
+            directCapacity: directCapacity,
+            minimumHitTarget: minimumHitTarget
+        )
+    }
+
+    @ViewBuilder
+    private func articleListConfigurableActionButtons(
+        directCapacity: Int,
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
@@ -979,7 +995,6 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        articleListActionButton(.sync, minimumHitTarget: minimumHitTarget)
         ForEach(resolved.direct) { action in
             articleListActionButton(
                 action,
@@ -1000,17 +1015,13 @@ struct ContentView: View {
         Group {
             switch action {
         case .sync:
-            let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
-                manualSyncState: newsreaderStore.manualSyncState,
-                transientState: syncPresentation
+            IOSSyncToolbarButton(
+                state: IOSSyncButtonPresentation.resolve(
+                    manualSyncState: newsreaderStore.manualSyncState,
+                    transientState: syncPresentation
+                ),
+                action: performManualSyncControlAction
             )
-            Button { performManualSyncControlAction() } label: {
-                Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncButtonPresentation))
-                    .frame(width: 24, height: 24)
-            }
-            .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: syncButtonPresentation))
-            .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
-            .accessibilityIdentifier("articleList.sync")
 
         case .filterAndSort:
             Menu {
@@ -1967,5 +1978,20 @@ extension ContentView {
             return
         }
         UIApplication.shared.open(url, options: [:])
+    }
+}
+
+private struct IOSSyncToolbarButton: View {
+    let state: IOSSyncButtonPresentation.State
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: IOSSyncButtonPresentation.symbolName(for: state))
+                .frame(width: 24, height: 24)
+        }
+        .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: state))
+        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: state))
+        .accessibilityIdentifier("articleList.sync")
     }
 }

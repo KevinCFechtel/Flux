@@ -22,6 +22,37 @@ enum IOSMiniPlayerPlacementPolicy {
     }
 }
 
+enum IOSCompactPortraitBottomInsetPresentation: Equatable {
+    case none
+    case standaloneMiniPlayer
+    case combinedMiniPlayerAndActions
+}
+
+enum IOSCompactPortraitBottomInsetPolicy {
+    static func presentation(
+        chromeMode: IOSArticleListChromeMode,
+        actionPlacement: IOSArticleListActionPlacement,
+        miniPlayerIsVisible: Bool
+    ) -> IOSCompactPortraitBottomInsetPresentation {
+        guard chromeMode == .compactPortrait, miniPlayerIsVisible else {
+            return .none
+        }
+
+        switch actionPlacement {
+        case .topBarTrailing:
+            // Vertical toolbar actions remain in native navigation chrome. The
+            // player occupies the bottom inset independently.
+            return .standaloneMiniPlayer
+        case .bottomBar:
+            // Ordinary compact portrait keeps its established combined bottom
+            // dock when the system does not offer a vertical toolbar edge.
+            return .combinedMiniPlayerAndActions
+        case .floatingTopTrailing:
+            return .none
+        }
+    }
+}
+
 enum IOSMiniPlayerPresentation {
     static func isVisible(
         loadedEnclosureID: Int64?,
@@ -43,6 +74,7 @@ enum IOSMiniPlayerPresentation {
 enum IOSMiniPlayerStyle: Equatable {
     case portraitDock
     case compactTopBar
+    case expandedLandscapeTopBar
     case regularFloating
     case regularToolbar
     case sidebarFooter
@@ -52,7 +84,7 @@ enum IOSMiniPlayerMetrics {
     static let portraitArtworkSize: CGFloat = 38
     static let topBarArtworkSize: CGFloat = 26
     static let sidebarArtworkSize: CGFloat = 34
-    static let topBarExpandedWidth: CGFloat = 210
+    static let topBarExpandedWidth: CGFloat = 270
     static let topBarCompactWidth: CGFloat = 68
     static let regularFloatingArtworkSize: CGFloat = 34
     static let regularFloatingWidth: CGFloat = 320
@@ -122,6 +154,13 @@ struct IOSMiniPlayerView: View {
                 portraitDockContent
             case .compactTopBar:
                 compactTopBarContent
+            case .expandedLandscapeTopBar:
+                // Force the title-bearing width in folded landscape. Letting
+                // ViewThatFits negotiate inside a native toolbar item caused
+                // premature fallback to the 68pt icon-only player.
+                compactTopBarCandidate(showsTitle: true)
+                    .frame(width: IOSMiniPlayerMetrics.topBarExpandedWidth)
+                    .fixedSize(horizontal: true, vertical: false)
             case .regularFloating:
                 regularFloatingContent
             case .regularToolbar:
@@ -452,6 +491,28 @@ struct IOSMiniPlayerView: View {
             return
         }
         artworkImage = data.flatMap(UIImage.init(data:))
+    }
+}
+
+struct IOSStandalonePortraitMiniPlayerDock: View {
+    @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
+    let playbackCoordinator: IOSMediaPlaybackCoordinator
+    let onOpenPlayer: () -> Void
+
+    var body: some View {
+        IOSMiniPlayerView(
+            playbackState: playbackState,
+            playbackCoordinator: playbackCoordinator,
+            style: .portraitDock,
+            onOpen: onOpenPlayer
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background {
+            IOSMiniPlayerCapsuleBackground()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 

@@ -105,7 +105,12 @@ enum IOSArticleListChromePresentation {
     ) -> Visibility {
         switch mode {
         case .compactPortrait:
-            return .hidden
+            // On iOS 27.1+ a non-nil toolbarVerticalEdge reports the system's
+            // preferred vertical-bar edge even when that bar is currently hidden.
+            // Compact portrait actions move to .topBarTrailing in that context,
+            // and on iOS the top bar is the navigation bar. Keep that host visible
+            // so the system can actually render the actions on the vertical edge.
+            return systemPrefersVerticalToolbar ? .visible : .hidden
         case .compactLandscape:
             return .visible
         case .persistentSplit, .persistentSplitCollapsed:
@@ -788,17 +793,29 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {
                     ToolbarItem(placement: .topBarLeading) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(landscapeSubtitle),
-                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
-                            action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
-                            showsBrandMark: chromeMode == .persistentSplitCollapsed,
-                            reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
-                            // Native leading toolbar items receive Liquid Glass.
-                            usesSystemToolbarGlass: true
-                        )
+                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
+                            ArticleListTitleCapsule(
+                                title: title,
+                                subtitle: capsuleSubtitle(landscapeSubtitle),
+                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                                layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
+                                action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
+                                showsBrandMark: chromeMode == .persistentSplitCollapsed,
+                                reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
+                                // Native leading toolbar items receive Liquid Glass.
+                                usesSystemToolbarGlass: true
+                            )
+                            if chromeMode == .compactLandscape
+                                || (UIDevice.current.userInterfaceIdiom == .pad
+                                    && chromeMode == .persistentSplitCollapsed
+                                    && actionPlacement == .topBarTrailing) {
+                                // Keep the compact player beside the scope capsule in
+                                // the native leading toolbar allocation on Duo and iPad.
+                                // A separate .principal item can introduce full-width
+                                // navigation-bar chrome on iPad.
+                                topAccessory()
+                            }
+                        }
                     }
                 }
 
@@ -812,7 +829,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
 
                 if chromeMode == .persistentSplitCollapsed,
                    actionPlacement == .topBarTrailing,
-                   !systemPrefersVerticalToolbar {
+                   !systemPrefersVerticalToolbar,
+                   UIDevice.current.userInterfaceIdiom != .pad {
                     ToolbarItem(placement: .principal) {
                         topAccessory()
                     }
