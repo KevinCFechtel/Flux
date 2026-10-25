@@ -239,6 +239,7 @@ internal fun NewsRootContent(
     val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
+    val toolbarMiniPlayerEligible = persistentNavigation || collapsedPersistentNavigation || isLandscape
     val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
@@ -264,13 +265,24 @@ internal fun NewsRootContent(
                 )
             },
             topBar = {
-                Box(Modifier.fillMaxWidth()) {
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val toolbarPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
+                        maxWidth >= (if (persistentNavigation) 520.dp else 950.dp)
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                     if (persistentNavigation) {
                         TopAppBar(
-                            title = {},
+                            title = {
+                                if (toolbarPlayerVisible) {
+                                    AndroidToolbarMiniPlayer(
+                                        playback = playbackState,
+                                        coordinator = mediaPlaybackCoordinator,
+                                        onOpenPlayer = { nowPlayingPresented = true },
+                                        modifier = Modifier.widthIn(max = 250.dp),
+                                    )
+                                }
+                            },
                             actions = {
                                 AndroidArticleActionCapsule(
                                     selection = selection,
@@ -293,15 +305,29 @@ internal fun NewsRootContent(
                     } else if (scopeTitleLeading) {
                         TopAppBar(
                             title = {
-                                ScopeNavigationCapsule(
-                                    scope = scope,
-                                    showArticleCount = articlePreferences.showArticleCount,
-                                    timelineCount = timelineCount,
-                                    readFilter = timelineState.selection?.readFilter,
-                                    syncing = syncInProgress,
-                                    opensNavigation = !persistentNavigation,
-                                    onOpenNavigation = onOpenNavigation,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.weight(1f, fill = false)) {
+                                    ScopeNavigationCapsule(
+                                        scope = scope,
+                                        showArticleCount = articlePreferences.showArticleCount,
+                                        timelineCount = timelineCount,
+                                        readFilter = timelineState.selection?.readFilter,
+                                        syncing = syncInProgress,
+                                        opensNavigation = !persistentNavigation,
+                                        onOpenNavigation = onOpenNavigation,
+                                    )
+                                    }
+                                    if (toolbarPlayerVisible) {
+                                        AndroidToolbarMiniPlayer(
+                                            playback = playbackState,
+                                            coordinator = mediaPlaybackCoordinator,
+                                            onOpenPlayer = { nowPlayingPresented = true },
+                                            modifier = Modifier
+                                                .padding(start = 8.dp)
+                                                .widthIn(max = 220.dp),
+                                        )
+                                    }
+                                }
                             },
                             actions = {
                                 if (isLandscape || collapsedPersistentNavigation) {
@@ -445,7 +471,7 @@ internal fun NewsRootContent(
             }
         }
 
-        if (standaloneMiniPlayerVisible) {
+        if (standaloneMiniPlayerVisible && !((persistentNavigation || collapsedPersistentNavigation || isLandscape) && (if (persistentNavigation) true else false))) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
