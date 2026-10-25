@@ -20,6 +20,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
@@ -58,6 +60,7 @@ internal fun NewsNavigationContent(
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
 ) {
+    var addMenuExpanded by remember { mutableStateOf(false) }
     val projection = navigation.projection
     val timelineState by timelineStore.state.collectAsState()
     val feedIconVariant = if (isSystemInDarkTheme()) {
@@ -250,10 +253,36 @@ internal fun NewsNavigationContent(
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Start,
+            horizontalArrangement = Arrangement.Start,
         ) {
-            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
-            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
+            Box {
+                IconButton(onClick = { addMenuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.nav_add_feed_short) +
+                            " / " + stringResource(R.string.nav_add_category_short),
+                    )
+                }
+                DropdownMenu(
+                    expanded = addMenuExpanded,
+                    onDismissRequest = { addMenuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_feed_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddFeed()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_category_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddCategory()
+                        },
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
