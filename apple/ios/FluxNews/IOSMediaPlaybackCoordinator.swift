@@ -513,6 +513,16 @@ final class IOSMediaPlaybackCoordinator {
             let readable = FileManager.default.isReadableFile(atPath: localURL.path)
             logger.info("download source check exists=\(attributes != nil) readable=\(readable) bytes=\(size) legacy=\(localFile.hasPrefix("downloads/legacy/"))")
             if readable && size > 0 {
+                // Flutter migration used the generic .audio suffix. AVPlayer can
+                // reject otherwise valid MP3/MP4 content with AVErrorCannotOpen.
+                // Preserve the Core reference and original file; expose a
+                // format-specific hard link only when its header is recognized.
+                if localFile.hasPrefix("downloads/legacy/"),
+                   localURL.pathExtension == "audio",
+                   let playableURL = Self.legacyPlayableURL(for: localURL) {
+                    logger.info("using format-specific legacy media alias")
+                    return playableURL
+                }
                 logger.info("using downloaded local media file")
                 return localURL
             }
@@ -521,6 +531,35 @@ final class IOSMediaPlaybackCoordinator {
         guard let remoteURL = URL(string: preparation.enclosure.url), remoteURL.scheme == "http" || remoteURL.scheme == "https" else { throw IOSMediaPlaybackError.invalidMediaURL }
         return remoteURL
     }
+    private static func legacyPlayableURL(for source: URL) -> URL? {
+        guard let handle = try? FileHandle(forReadingFrom: source) else { return nil }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 16), let header else { return nil }
+        let bytes = [UInt8](header)
+        let ext: String
+        if bytes.starts(with: [0x49, 0x44, 0x33])
+            || (bytes.count >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+            ext = "mp3"
+        } else if bytes.count >= 12 && Array(bytes[4..<8]) == [0x66, 0x74, 0x79, 0x70] {
+            ext = "m4a"
+        } else if bytes.starts(with: [0x4F, 0x67, 0x67, 0x53]) {
+            ext = "ogg"
+        } else if bytes.starts(with: [0x66, 0x4C, 0x61, 0x43]) {
+            ext = "flac"
+        } else { return nil }
+        let alias = source.deletingPathExtension().appendingPathExtension(ext)
+        if FileManager.default.fileExists(atPath: alias.path) {
+            guard let originalSize = (try? source.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                  let aliasSize = (try? alias.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                  originalSize == aliasSize else { return nil }
+            return alias
+        }
+        do {
+            try FileManager.default.linkItem(at: source, to: alias)
+            return alias
+        } catch { return nil }
+    }
+
     private func checkpoint() async { guard let activeEnclosureID else { return }; await coreAccess.checkpoint(enclosureID: activeEnclosureID, positionMs: engine.currentPositionMs, durationMs: engine.durationMs ?? preparedDurationMs) }
     private func handleNaturalEnd() { guard let activeEnclosureID, !completionSent else { return }; Task { @MainActor [weak self] in guard let self else { return }; do { try await self.coreAccess.completed(enclosureID: activeEnclosureID, durationMs: self.engine.durationMs ?? self.preparedDurationMs); self.completionSent = true; self.preparedStatus = .completed; self.presentationState.setStatus(.paused); self.presentationState.setPosition(self.engine.currentPositionMs); self.stopCheckpointTimer(); self.onPlaybackUseChanged?() } catch { self.presentationState.setStatus(.paused); self.logger.error("media completion failed: \(String(reflecting: error))") } } }
     private func handleDuration(_ duration: UInt64) { guard lastObservedDurationMs != duration else { return }; lastObservedDurationMs = duration; preparedDurationMs = duration; presentationState.setDuration(duration); guard let activeEnclosureID else { return }; Task { @MainActor [weak self] in await self?.coreAccess.observeDuration(enclosureID: activeEnclosureID, durationMs: duration) } }
