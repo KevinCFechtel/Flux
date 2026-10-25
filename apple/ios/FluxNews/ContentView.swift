@@ -968,17 +968,24 @@ struct ContentView: View {
         directCapacity: Int,
         minimumHitTarget: CGFloat? = nil
     ) -> some View {
-        IOSSyncToolbarButton(
-            state: IOSSyncButtonPresentation.resolve(
-                manualSyncState: newsreaderStore.manualSyncState,
-                transientState: syncPresentation
-            ),
-            action: performManualSyncControlAction
-        )
-        articleListConfigurableActionButtons(
-            directCapacity: directCapacity,
-            minimumHitTarget: minimumHitTarget
-        )
+        Group {
+            IOSSyncToolbarButton(
+                state: IOSSyncButtonPresentation.resolve(
+                    manualSyncState: newsreaderStore.manualSyncState,
+                    transientState: syncPresentation
+                ),
+                action: performManualSyncControlAction
+            )
+            articleListConfigurableActionButtons(
+                directCapacity: directCapacity,
+                minimumHitTarget: minimumHitTarget
+            )
+        }
+        // Consistent semantic action color across native toolbars and the
+        // portrait mini-player dock; selected/destructive menu content keeps
+        // its own explicit styling.
+        .tint(.primary)
+        .foregroundStyle(.primary)
     }
 
     @ViewBuilder
