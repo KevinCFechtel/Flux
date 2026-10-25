@@ -56,6 +56,8 @@ enum IOSMiniPlayerMetrics {
     static let topBarCompactWidth: CGFloat = 68
     static let regularFloatingArtworkSize: CGFloat = 34
     static let regularFloatingWidth: CGFloat = 320
+    static let regularToolbarMinimumHeight: CGFloat = 58
+    static let regularToolbarVerticalPadding: CGFloat = 9
     static let dockCornerRadius: CGFloat = 26
     static let sidebarCornerRadius: CGFloat = 18
 }
@@ -217,8 +219,18 @@ struct IOSMiniPlayerView: View {
             progressWithTime
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
+        .padding(
+            .vertical,
+            drawsOwnBackground
+                ? 7
+                : IOSMiniPlayerMetrics.regularToolbarVerticalPadding
+        )
+        .frame(
+            width: IOSMiniPlayerMetrics.regularFloatingWidth,
+            minHeight: drawsOwnBackground
+                ? nil
+                : IOSMiniPlayerMetrics.regularToolbarMinimumHeight
+        )
         .background {
             if drawsOwnBackground {
                 IOSMiniPlayerCapsuleBackground()
