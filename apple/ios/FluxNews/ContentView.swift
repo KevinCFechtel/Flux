@@ -889,17 +889,7 @@ struct ContentView: View {
                 }
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 27.0, *) {
-                        // Keep Sync independently eligible for the vertical
-                        // system toolbar. The grouped items can otherwise lose
-                        // their first action when the bar changes sides.
-                        ToolbarItem(placement: .topBarTrailing) {
-                            articleListActionButton(.sync)
-                        }
-                        .visibilityPriority(.high)
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListConfigurableActionButtons(directCapacity: directActionCapacity)
-                        }
-                        .visibilityPriority(.high)
+                        articleListPrioritizedToolbarActions(directCapacity: directActionCapacity)
                     } else if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             articleListActionButtons(directCapacity: directActionCapacity)
@@ -998,8 +988,9 @@ struct ContentView: View {
         )
     }
 
-    @ViewBuilder
-    private func articleListConfigurableActionButtons(directCapacity: Int) -> some View {
+    @available(iOS 27.0, *)
+    @ToolbarContentBuilder
+    private func articleListPrioritizedToolbarActions(directCapacity: Int) -> some ToolbarContent {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
@@ -1008,10 +999,22 @@ struct ContentView: View {
             hasLoadedMedia: playbackState.loadedEnclosure != nil,
             playbackStatus: playbackState.status
         )
-        ForEach(resolved.direct) { action in
-            articleListActionButton(action)
+
+        ToolbarItem(placement: .topBarTrailing) {
+            articleListActionButton(.sync)
         }
-        articleListMoreMenu(overflowActions: resolved.overflow)
+        .visibilityPriority(.high)
+
+        ForEach(resolved.direct) { action in
+            ToolbarItem(placement: .topBarTrailing) {
+                articleListActionButton(action)
+            }
+        }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            articleListMoreMenu(overflowActions: resolved.overflow)
+        }
+        .visibilityPriority(.high)
     }
 
     @ViewBuilder
