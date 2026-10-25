@@ -922,10 +922,11 @@ struct ContentView: View {
             IOSMiniPlayerView(
                 playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                style: articleListChromeMode == .compactLandscape
-                    || UIDevice.current.userInterfaceIdiom == .pad
-                    ? .expandedLandscapeTopBar
-                    : .compactTopBar,
+                style: UIDevice.current.userInterfaceIdiom == .pad
+                    ? .regularToolbar
+                    : articleListChromeMode == .compactLandscape
+                        ? .expandedLandscapeTopBar
+                        : .compactTopBar,
                 onOpen: presentNowPlayingPlayer
             )
         }
