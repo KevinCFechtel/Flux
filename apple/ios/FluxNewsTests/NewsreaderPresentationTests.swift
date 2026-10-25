@@ -1116,6 +1116,26 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testRegularCollapsedMiniPlayerHasLargerFloatingStyle() {
+        XCTAssertEqual(IOSMiniPlayerMetrics.regularFloatingArtworkSize, 34)
+        XCTAssertEqual(IOSMiniPlayerMetrics.regularFloatingWidth, 320)
+        XCTAssertGreaterThan(
+            IOSMiniPlayerMetrics.regularFloatingWidth,
+            IOSMiniPlayerMetrics.topBarExpandedWidth
+        )
+    }
+
+    func testCollapsedRegularMiniPlayerPlacementRemainsTopChrome() {
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .persistentSplitCollapsed),
+            .compactTopBar
+        )
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .persistentSplit),
+            .sidebarFooter
+        )
+    }
+
     func testMediaPlayerFoldPolicyUsesTabletopOnlyForHorizontalDivision() {
         XCTAssertTrue(
             IOSMediaPlayerFoldLayoutPolicy.usesTabletopLayout(
