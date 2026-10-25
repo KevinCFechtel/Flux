@@ -336,7 +336,7 @@ internal fun NewsRootContent(
                                                     playback = playbackState,
                                                     coordinator = mediaPlaybackCoordinator,
                                                     onOpenPlayer = { nowPlayingPresented = true },
-                                                    modifier = Modifier.widthIn(max = if (wideActionLayout && !isLandscape && !collapsedPersistentNavigation) 150.dp else 220.dp),
+                                                    modifier = Modifier.widthIn(max = if (maxWidth >= 1100.dp) 340.dp else if (wideActionLayout && !isLandscape && !collapsedPersistentNavigation) 150.dp else 220.dp),
                                                 )
                                             }
                                         } else null,
