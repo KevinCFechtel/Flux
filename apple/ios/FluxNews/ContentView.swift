@@ -749,6 +749,7 @@ struct ContentView: View {
                 systemPrefersVerticalToolbar: false
             )
             .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
         } else {
 #if FLUX_HAS_VERTICAL_TOOLBAR_API
             if #available(iOS 27.1, *) {
