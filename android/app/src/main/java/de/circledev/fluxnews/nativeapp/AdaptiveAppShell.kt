@@ -379,7 +379,7 @@ private fun TimelineDestination(
                                     )
                                 }
                             },
-                            navigationToggleIcon = R.drawable.ic_arrow_back,
+                            navigationToggleIcon = R.drawable.ic_sidebar_toggle,
                             navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
                             onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
