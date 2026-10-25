@@ -893,7 +893,16 @@ struct ContentView: View {
                     }
                 }
                 if actionPlacement == .topBarTrailing {
-                    if #available(iOS 26.0, *) {
+                    if articleListChromeMode == .compactLandscape {
+                        // Keep a single native item across compact-display rotations.
+                        // SwiftUI can update the action views without reconciling
+                        // multiple toolbar item identities on the vertical edge.
+                        ToolbarItem(placement: .topBarTrailing) {
+                            HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
+                                articleListActionButtons(directCapacity: directActionCapacity)
+                            }
+                        }
+                    } else if #available(iOS 26.0, *) {
                         ToolbarItem(placement: .topBarTrailing) {
                             IOSSyncToolbarButton(
                                 state: toolbarSyncState,
