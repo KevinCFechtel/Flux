@@ -758,7 +758,7 @@ struct ContentView: View {
                         systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
                     )
                     .toolbarMinimizationBehavior(
-                        systemPrefersVerticalToolbar ? .never : .automatic,
+                        articleListChromeMode == .compactLandscape || systemPrefersVerticalToolbar ? .never : .automatic,
                         for: .navigationBar
                     )
                 }
