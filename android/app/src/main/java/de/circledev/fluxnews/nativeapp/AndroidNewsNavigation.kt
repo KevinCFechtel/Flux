@@ -214,7 +214,8 @@ internal fun NewsNavigationContent(
                         },
                     )
                 }
-            }        }
+            }
+        }
 
         if (projection == null) {
             Text(
