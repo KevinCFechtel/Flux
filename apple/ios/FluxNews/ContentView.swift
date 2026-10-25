@@ -802,6 +802,14 @@ struct ContentView: View {
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
         )
+        // Resolve both sync states before constructing the native toolbar content.
+        let toolbarSyncState = IOSSyncButtonPresentation.resolve(
+            manualSyncState: newsreaderStore.manualSyncState,
+            transientState: syncPresentation
+        )
+        let toolbarSyncSymbol = IOSSyncButtonPresentation.symbolName(for: toolbarSyncState)
+        let toolbarSyncAccessibilityLabel = IOSSyncButtonPresentation.accessibilityLabel(for: toolbarSyncState)
+        let toolbarSyncAccessibilityValue = IOSSyncButtonPresentation.accessibilityValue(for: toolbarSyncState)
         let compactPortraitBottomInset = IOSCompactPortraitBottomInsetPolicy.presentation(
             chromeMode: articleListChromeMode,
             actionPlacement: actionPlacement,
@@ -889,7 +897,12 @@ struct ContentView: View {
                 }
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 27.0, *) {
-                        articleListPrioritizedToolbarActions(directCapacity: directActionCapacity)
+                        articleListPrioritizedToolbarActions(
+                            directCapacity: directActionCapacity,
+                            syncSymbol: toolbarSyncSymbol,
+                            syncAccessibilityLabel: toolbarSyncAccessibilityLabel,
+                            syncAccessibilityValue: toolbarSyncAccessibilityValue
+                        )
                     } else if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             articleListActionButtons(directCapacity: directActionCapacity)
@@ -990,7 +1003,12 @@ struct ContentView: View {
 
     @available(iOS 27.0, *)
     @ToolbarContentBuilder
-    private func articleListPrioritizedToolbarActions(directCapacity: Int) -> some ToolbarContent {
+    private func articleListPrioritizedToolbarActions(
+        directCapacity: Int,
+        syncSymbol: String,
+        syncAccessibilityLabel: String,
+        syncAccessibilityValue: String
+    ) -> some ToolbarContent {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
@@ -1000,21 +1018,14 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        // Diagnostic: keep the Sync button directly in its toolbar item while
-        // restoring its state-dependent symbol (without the switch/Group wrapper).
+        // Only pass precomputed values into the toolbar's Sync label.
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: performManualSyncControlAction) {
-                // Isolation test 2: only the store's manual sync state drives the symbol.
-                // Do not read the local transient syncPresentation in this toolbar label.
-                Image(systemName: IOSSyncButtonPresentation.symbolName(
-                    for: IOSSyncButtonPresentation.resolve(
-                        manualSyncState: newsreaderStore.manualSyncState,
-                        transientState: .idle
-                    )
-                ))
-                .frame(width: 24, height: 24)
+                Image(systemName: syncSymbol)
+                    .frame(width: 24, height: 24)
             }
-            .accessibilityLabel(String(localized: "Sync news"))
+            .accessibilityLabel(syncAccessibilityLabel)
+            .accessibilityValue(syncAccessibilityValue)
             .accessibilityIdentifier("articleList.sync")
         }
         .visibilityPriority(.high)
