@@ -311,8 +311,6 @@ internal fun NewsRootContent(
                     } else if (scopeTitleLeading) {
                         TopAppBar(
                             title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.weight(1f, fill = false)) {
                                     ScopeNavigationCapsule(
                                         scope = scope,
                                         showArticleCount = articlePreferences.showArticleCount,
@@ -321,19 +319,17 @@ internal fun NewsRootContent(
                                         syncing = syncInProgress,
                                         opensNavigation = !persistentNavigation,
                                         onOpenNavigation = onOpenNavigation,
+                                        trailingContent = if (toolbarPlayerVisible) {
+                                            {
+                                                AndroidToolbarMiniPlayer(
+                                                    playback = playbackState,
+                                                    coordinator = mediaPlaybackCoordinator,
+                                                    onOpenPlayer = { nowPlayingPresented = true },
+                                                    modifier = Modifier.widthIn(max = 220.dp),
+                                                )
+                                            }
+                                        } else null,
                                     )
-                                    }
-                                    if (toolbarPlayerVisible) {
-                                        AndroidToolbarMiniPlayer(
-                                            playback = playbackState,
-                                            coordinator = mediaPlaybackCoordinator,
-                                            onOpenPlayer = { nowPlayingPresented = true },
-                                            modifier = Modifier
-                                                .padding(start = 8.dp)
-                                                .widthIn(max = 220.dp),
-                                        )
-                                    }
-                                }
                             },
                             actions = {
                                 if (isLandscape || collapsedPersistentNavigation) {
@@ -359,8 +355,6 @@ internal fun NewsRootContent(
                     } else {
                         CenterAlignedTopAppBar(
                             title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.weight(1f, fill = false)) {
                                         ScopeNavigationCapsule(
                                             scope = scope,
                                             showArticleCount = articlePreferences.showArticleCount,
@@ -369,17 +363,17 @@ internal fun NewsRootContent(
                                             syncing = syncInProgress,
                                             opensNavigation = !persistentNavigation,
                                             onOpenNavigation = onOpenNavigation,
+                                                trailingContent = if (toolbarPlayerVisible) {
+                                                {
+                                                    AndroidToolbarMiniPlayer(
+                                                        playback = playbackState,
+                                                        coordinator = mediaPlaybackCoordinator,
+                                                        onOpenPlayer = { nowPlayingPresented = true },
+                                                        modifier = Modifier.widthIn(max = 220.dp),
+                                                    )
+                                                }
+                                            } else null,
                                         )
-                                    }
-                                    if (toolbarPlayerVisible) {
-                                        AndroidToolbarMiniPlayer(
-                                            playback = playbackState,
-                                            coordinator = mediaPlaybackCoordinator,
-                                            onOpenPlayer = { nowPlayingPresented = true },
-                                            modifier = Modifier.padding(start = 8.dp).widthIn(max = 220.dp),
-                                        )
-                                    }
-                                }
                             },
                             actions = {
                                 if (isLandscape) {
