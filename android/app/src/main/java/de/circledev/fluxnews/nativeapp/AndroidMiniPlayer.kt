@@ -259,13 +259,8 @@ internal fun AndroidToolbarMiniPlayer(
             null -> null
         }
     }
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+    Row(
+            modifier = modifier,
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -337,6 +332,5 @@ internal fun AndroidToolbarMiniPlayer(
                     )
                 }
             }
-        }
     }
 }
