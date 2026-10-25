@@ -805,11 +805,14 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                                 // Native leading toolbar items receive Liquid Glass.
                                 usesSystemToolbarGlass: true
                             )
-                            if chromeMode == .compactLandscape {
-                                // The iPhone Duo landscape player shares the native
-                                // leading toolbar allocation with the scope capsule.
-                                // A separate .principal item was compressed to its
-                                // icon-only fallback despite free space beside it.
+                            if chromeMode == .compactLandscape
+                                || (UIDevice.current.userInterfaceIdiom == .pad
+                                    && chromeMode == .persistentSplitCollapsed
+                                    && actionPlacement == .topBarTrailing) {
+                                // Keep the compact player beside the scope capsule in
+                                // the native leading toolbar allocation on Duo and iPad.
+                                // A separate .principal item can introduce full-width
+                                // navigation-bar chrome on iPad.
                                 topAccessory()
                             }
                         }
@@ -826,7 +829,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
 
                 if chromeMode == .persistentSplitCollapsed,
                    actionPlacement == .topBarTrailing,
-                   !systemPrefersVerticalToolbar {
+                   !systemPrefersVerticalToolbar,
+                   UIDevice.current.userInterfaceIdiom != .pad {
                     ToolbarItem(placement: .principal) {
                         topAccessory()
                     }
