@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -238,11 +239,14 @@ internal fun NewsRootContent(
     val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
+    val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
             32.dp +
             (44.dp * actionCapsuleScale) +
             if (miniPlayerVisible) 78.dp else 0.dp
+    } else if (standaloneMiniPlayerVisible) {
+        navigationBarHeight + 110.dp
     } else {
         0.dp
     }
@@ -437,6 +441,27 @@ internal fun NewsRootContent(
                         .align(Alignment.BottomCenter)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = 12.dp),
+                )
+            }
+        }
+
+        if (standaloneMiniPlayerVisible) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .widthIn(max = 420.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shadowElevation = 6.dp,
+            ) {
+                AndroidCompactMiniPlayer(
+                    playback = playbackState,
+                    coordinator = mediaPlaybackCoordinator,
+                    onOpenPlayer = { nowPlayingPresented = true },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
         }
