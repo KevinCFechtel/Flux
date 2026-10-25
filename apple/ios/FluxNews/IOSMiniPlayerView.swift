@@ -56,8 +56,6 @@ enum IOSMiniPlayerMetrics {
     static let topBarCompactWidth: CGFloat = 68
     static let regularFloatingArtworkSize: CGFloat = 34
     static let regularFloatingWidth: CGFloat = 320
-    static let regularToolbarMinimumHeight: CGFloat = 58
-    static let regularToolbarVerticalPadding: CGFloat = 9
     static let dockCornerRadius: CGFloat = 26
     static let sidebarCornerRadius: CGFloat = 18
 }
@@ -125,9 +123,9 @@ struct IOSMiniPlayerView: View {
             case .compactTopBar:
                 compactTopBarContent
             case .regularFloating:
-                regularFloatingContent(drawsOwnBackground: true)
+                regularFloatingContent
             case .regularToolbar:
-                regularFloatingContent(drawsOwnBackground: false)
+                regularToolbarContent
             case .sidebarFooter:
                 sidebarFooterContent
             }
@@ -204,9 +202,71 @@ struct IOSMiniPlayerView: View {
         }
     }
 
-    private func regularFloatingContent(
-        drawsOwnBackground: Bool
-    ) -> some View {
+    // Native toolbar glass has a system-controlled height. Keep the artwork,
+    // labels, time and progress inside a single compact row rather than trying
+    // to enlarge the toolbar with a minimum-height frame.
+    private var regularToolbarContent: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 8) {
+                Button(action: onOpen) {
+                    HStack(spacing: 8) {
+                        artwork(size: 30)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(displayTitle)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+
+                            HStack(spacing: 6) {
+                                if let displayFeedTitle {
+                                    Text(displayFeedTitle)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+
+                                Spacer(minLength: 0)
+
+                                if let timeLabel = IOSMiniPlayerPresentation.elapsedDurationLabel(
+                                    positionMs: playbackState.positionMs,
+                                    durationMs: playbackState.durationMs
+                                ) {
+                                    Text(timeLabel)
+                                        .monospacedDigit()
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    "\(String(localized: "Now Playing")), \(displayTitle)"
+                )
+
+                playPauseButton(diameter: 30)
+            }
+
+            if let progressFraction {
+                ProgressView(value: progressFraction)
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+                    .controlSize(.mini)
+                    .accessibilityLabel(String(localized: "Playback progress"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
+    }
+
+    private var regularFloatingContent: some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
                 openButton(
@@ -219,24 +279,10 @@ struct IOSMiniPlayerView: View {
             progressWithTime
         }
         .padding(.horizontal, 10)
-        .padding(
-            .vertical,
-            drawsOwnBackground
-                ? 7
-                : IOSMiniPlayerMetrics.regularToolbarVerticalPadding
-        )
+        .padding(.vertical, 7)
         .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
-        .frame(
-            minHeight: drawsOwnBackground
-                ? nil
-                : IOSMiniPlayerMetrics.regularToolbarMinimumHeight
-        )
         .background {
-            if drawsOwnBackground {
-                IOSMiniPlayerCapsuleBackground()
-            } else {
-                Color.clear
-            }
+            IOSMiniPlayerCapsuleBackground()
         }
     }
 
