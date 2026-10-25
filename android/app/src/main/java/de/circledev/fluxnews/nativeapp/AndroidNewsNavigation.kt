@@ -57,6 +57,7 @@ internal fun NewsNavigationContent(
     onAddFeed: () -> Unit,
     onAddCategory: () -> Unit,
     sidebarMiniPlayer: (@Composable () -> Unit)? = null,
+    activeDestination: String = "timeline",
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -149,28 +150,28 @@ internal fun NewsNavigationContent(
         )
         NavigationDrawerItem(
             label = { DrawerLabel(stringResource(R.string.nav_all_news), projection?.unreadTotal ?: 0uL) },
-            selected = selectedScope == AndroidNewsScope.All,
+            selected = activeDestination == "timeline" && selectedScope == AndroidNewsScope.All,
             onClick = { onScopeSelected(AndroidNewsScope.All) },
             icon = { DrawerIcon(R.drawable.ic_news, stringResource(R.string.nav_all_news)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { DrawerLabel(stringResource(R.string.nav_starred), projection?.starredTotal ?: 0uL) },
-            selected = selectedScope == AndroidNewsScope.Starred,
+            selected = activeDestination == "timeline" && selectedScope == AndroidNewsScope.Starred,
             onClick = { onScopeSelected(AndroidNewsScope.Starred) },
             icon = { DrawerIcon(R.drawable.ic_star, stringResource(R.string.nav_starred)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text(stringResource(R.string.nav_listening_list)) },
-            selected = false,
+            selected = activeDestination == "listening-list",
             onClick = onListeningList,
             icon = { DrawerIcon(R.drawable.ic_headphones, stringResource(R.string.nav_listening_list)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text(stringResource(R.string.nav_search)) },
-            selected = false,
+            selected = activeDestination == "search",
             onClick = onSearch,
             icon = { DrawerIcon(R.drawable.ic_search, stringResource(R.string.nav_search)) },
             colors = drawerItemColors,
@@ -232,7 +233,7 @@ internal fun NewsNavigationContent(
                     CategoryNavigationRow(
                         title = category.title,
                         count = categoryCounts[category.id] ?: 0uL,
-                        selected = selectedScope == categoryScope,
+                        selected = activeDestination == "timeline" && selectedScope == categoryScope,
                         containsSelectedFeed = selectedScope is AndroidNewsScope.Feed && selectedScope.categoryId == category.id,
                         expanded = expanded,
                         onToggleExpanded = {
@@ -249,7 +250,7 @@ internal fun NewsNavigationContent(
                                     feedId = feed.id,
                                     title = feed.title,
                                     count = feedCounts[feed.id] ?: 0uL,
-                                    selected = selectedScope == feedScope,
+                                    selected = activeDestination == "timeline" && selectedScope == feedScope,
                                     iconPng = timelineState.feedIconPngByFeedId[feed.id],
                                     iconVariant = feedIconVariant,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
@@ -269,7 +270,7 @@ internal fun NewsNavigationContent(
                         feedId = feed.id,
                         title = feed.title,
                         count = feedCounts[feed.id] ?: 0uL,
-                        selected = selectedScope == feedScope,
+                        selected = activeDestination == "timeline" && selectedScope == feedScope,
                         iconPng = timelineState.feedIconPngByFeedId[feed.id],
                         iconVariant = feedIconVariant,
                         onRequestFeedIcon = timelineStore::ensureFeedIcon,
