@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -365,7 +364,7 @@ internal fun NewsRootContent(
                             colors = appBarColors,
                         )
                     } else {
-                        CenterAlignedTopAppBar(
+                        TopAppBar(
                             title = {
                                         ScopeNavigationCapsule(
                                             scope = scope,
