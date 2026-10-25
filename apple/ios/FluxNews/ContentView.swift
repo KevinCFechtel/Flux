@@ -1000,8 +1000,15 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
+        // Diagnostic: static Sync control to isolate toolbar rendering from
+        // the state-dependent symbol and action presentation.
         ToolbarItem(placement: .topBarTrailing) {
-            articleListActionButton(.sync)
+            Button(action: performManualSyncControlAction) {
+                Image(systemName: "arrow.clockwise")
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(String(localized: "Sync news"))
+            .accessibilityIdentifier("articleList.sync")
         }
         .visibilityPriority(.high)
 
