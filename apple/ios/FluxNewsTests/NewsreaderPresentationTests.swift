@@ -1116,6 +1116,42 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMediaPlayerFoldPolicyUsesTabletopOnlyForHorizontalDivision() {
+        XCTAssertTrue(
+            IOSMediaPlayerFoldLayoutPolicy.usesTabletopLayout(
+                for: CGRect(x: 0, y: 300, width: 800, height: 12)
+            )
+        )
+        XCTAssertFalse(
+            IOSMediaPlayerFoldLayoutPolicy.usesTabletopLayout(
+                for: CGRect(x: 400, y: 0, width: 12, height: 700)
+            )
+        )
+        XCTAssertFalse(
+            IOSMediaPlayerFoldLayoutPolicy.usesTabletopLayout(
+                for: .zero
+            )
+        )
+    }
+
+    func testMediaPlayerQueriesDivisionReservedRegionForTabletopLayout() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let playerSource = try String(
+            contentsOf: iosDirectory
+                .appendingPathComponent("FluxNews/IOSMediaPlayerView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            playerSource.contains("reservedRegions(kind: .division)")
+        )
+        XCTAssertTrue(
+            playerSource.contains("tabletopPlayerContent(")
+        )
+    }
+
     func testIPadRegularModesKeepActionsInTopToolbar() {
         for mode in [IOSArticleListChromeMode.persistentSplit, .persistentSplitCollapsed] {
             XCTAssertEqual(
