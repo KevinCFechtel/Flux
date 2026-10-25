@@ -816,7 +816,11 @@ struct ContentView: View {
             topAccessory: {
                 if miniPlayerPlacement == .compactTopBar,
                    articleListChromeMode == .persistentSplitCollapsed {
-                    compactMiniPlayer
+                    if systemPrefersVerticalToolbar {
+                        regularFloatingMiniPlayer
+                    } else {
+                        compactMiniPlayer
+                    }
                 }
             },
             content: { naturalTopContentInset in
@@ -914,6 +918,18 @@ struct ContentView: View {
                 playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 style: .compactTopBar,
+                onOpen: presentNowPlayingPlayer
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var regularFloatingMiniPlayer: some View {
+        if miniPlayerIsVisible {
+            IOSMiniPlayerView(
+                playbackState: playbackState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                style: .regularFloating,
                 onOpen: presentNowPlayingPlayer
             )
         }
