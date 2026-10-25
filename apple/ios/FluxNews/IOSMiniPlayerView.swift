@@ -74,6 +74,7 @@ enum IOSMiniPlayerPresentation {
 enum IOSMiniPlayerStyle: Equatable {
     case portraitDock
     case compactTopBar
+    case expandedLandscapeTopBar
     case regularFloating
     case regularToolbar
     case sidebarFooter
@@ -153,6 +154,13 @@ struct IOSMiniPlayerView: View {
                 portraitDockContent
             case .compactTopBar:
                 compactTopBarContent
+            case .expandedLandscapeTopBar:
+                // Force the title-bearing width in folded landscape. Letting
+                // ViewThatFits negotiate inside a native toolbar item caused
+                // premature fallback to the 68pt icon-only player.
+                compactTopBarCandidate(showsTitle: true)
+                    .frame(width: IOSMiniPlayerMetrics.topBarExpandedWidth)
+                    .fixedSize(horizontal: true, vertical: false)
             case .regularFloating:
                 regularFloatingContent
             case .regularToolbar:

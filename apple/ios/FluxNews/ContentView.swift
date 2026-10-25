@@ -925,7 +925,9 @@ struct ContentView: View {
             IOSMiniPlayerView(
                 playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                style: .compactTopBar,
+                style: articleListChromeMode == .compactLandscape
+                    ? .expandedLandscapeTopBar
+                    : .compactTopBar,
                 onOpen: presentNowPlayingPlayer
             )
         }
