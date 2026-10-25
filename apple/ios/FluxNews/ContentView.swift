@@ -898,8 +898,14 @@ struct ContentView: View {
                         // SwiftUI can update the action views without reconciling
                         // multiple toolbar item identities on the vertical edge.
                         ToolbarItem(placement: .topBarTrailing) {
-                            HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
-                                articleListActionButtons(directCapacity: directActionCapacity)
+                            if systemPrefersVerticalToolbar {
+                                VStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
+                                    articleListActionButtons(directCapacity: directActionCapacity)
+                                }
+                            } else {
+                                HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
+                                    articleListActionButtons(directCapacity: directActionCapacity)
+                                }
                             }
                         }
                     } else if #available(iOS 26.0, *) {
