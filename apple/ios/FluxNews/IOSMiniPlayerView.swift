@@ -550,6 +550,10 @@ struct IOSArticleListBottomDock<Actions: View>: View {
                 Spacer(minLength: 0)
                 actions()
                     .labelStyle(.iconOnly)
+                    // Keep the small portrait dock actions legible over
+                    // the dark player background, regardless of app accent.
+                    .tint(.black)
+                    .foregroundStyle(.black)
                 Spacer(minLength: 0)
             }
             .frame(minHeight: 44)
