@@ -263,6 +263,7 @@ internal fun AdaptiveAppShell(
                 sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
                 onToggleSidebar = if (tabletNavigation) ({ tabletSidebarCollapsed = !tabletSidebarCollapsed }) else null,
+                sidebarExpanded = tabletNavigation && !tabletSidebarCollapsed,
             )
         }
         composable(ShellRoute.ListeningList) {
@@ -273,6 +274,7 @@ internal fun AdaptiveAppShell(
                 sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
                 onToggleSidebar = if (tabletNavigation) ({ tabletSidebarCollapsed = !tabletSidebarCollapsed }) else null,
+                sidebarExpanded = tabletNavigation && !tabletSidebarCollapsed,
             )
         }
         composable(ShellRoute.FeedSettings) {
