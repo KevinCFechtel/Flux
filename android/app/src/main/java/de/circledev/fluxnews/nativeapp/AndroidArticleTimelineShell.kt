@@ -34,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -327,7 +328,7 @@ internal fun NewsRootContent(
                             },
                             colors = appBarColors,
                         )
-                    } else if (scopeTitleLeading || wideActionLayout) {
+                    } else if (!bottomActionsVisible) {
                         TopAppBar(
                             navigationIcon = {
                                 if (collapsedPersistentNavigation) {
@@ -382,7 +383,7 @@ internal fun NewsRootContent(
                             colors = appBarColors,
                         )
                     } else {
-                        TopAppBar(
+                        CenterAlignedTopAppBar(
                             title = {
                                         ScopeNavigationCapsule(
                                             scope = scope,
