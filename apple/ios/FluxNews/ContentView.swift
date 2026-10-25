@@ -893,21 +893,22 @@ struct ContentView: View {
                     }
                 }
                 if actionPlacement == .topBarTrailing {
-                    if articleListChromeMode == .compactLandscape {
-                        // Keep a single native item across compact-display rotations.
-                        // SwiftUI can update the action views without reconciling
-                        // multiple toolbar item identities on the vertical edge.
-                        ToolbarItem(placement: .topBarTrailing) {
-                            if systemPrefersVerticalToolbar {
-                                VStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
-                                    articleListActionButtons(directCapacity: directActionCapacity)
-                                }
-                            } else {
-                                HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
-                                    articleListActionButtons(directCapacity: directActionCapacity)
-                                }
-                            }
+                    if #available(iOS 27.0, *) {
+                        // Let the system distribute individual actions on the Duo's
+                        // vertical bar. Pin Sync rather than wrapping all controls
+                        // in a custom stack that cannot adapt to the bar axis.
+                        ToolbarItem(placement: .topBarPinnedTrailing) {
+                            IOSSyncToolbarButton(
+                                state: toolbarSyncState,
+                                action: performManualSyncControlAction
+                            )
                         }
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            articleListConfigurableActionButtons(
+                                directCapacity: directActionCapacity
+                            )
+                        }
+                        .visibilityPriority(.high)
                     } else if #available(iOS 26.0, *) {
                         ToolbarItem(placement: .topBarTrailing) {
                             IOSSyncToolbarButton(
@@ -919,7 +920,6 @@ struct ContentView: View {
                             articleListConfigurableActionButtons(
                                 directCapacity: directActionCapacity
                             )
-                            .layoutPriority(10)
                         }
                     } else {
                         ToolbarItem(placement: .topBarTrailing) {
