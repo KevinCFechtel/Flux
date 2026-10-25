@@ -756,15 +756,24 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
                     .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
                 case (.floatingTopLeading, .topBarTrailing, .persistentSplitCollapsed):
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(landscapeSubtitle),
-                        widthReservationSubtitle: nil,
-                        layout: .inline,
-                        action: nil,
-                        showsBrandMark: true
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: nil,
+                            layout: .inline,
+                            action: nil,
+                            showsBrandMark: true
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if systemPrefersVerticalToolbar {
+                            HStack {
+                                topAccessory()
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
                     .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
                 default:
@@ -793,7 +802,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                 }
 
                 if chromeMode == .persistentSplitCollapsed,
-                   actionPlacement == .topBarTrailing {
+                   actionPlacement == .topBarTrailing,
+                   !systemPrefersVerticalToolbar {
                     ToolbarItem(placement: .principal) {
                         topAccessory()
                     }
