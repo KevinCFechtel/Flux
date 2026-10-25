@@ -252,6 +252,14 @@ enum IOSMediaPlayerLayoutPolicy {
     }
 }
 
+enum IOSMediaPlayerFoldLayoutPolicy {
+    static func usesTabletopLayout(for divisionFrame: CGRect) -> Bool {
+        divisionFrame.width > divisionFrame.height
+            && divisionFrame.width > 0
+            && divisionFrame.height > 0
+    }
+}
+
 struct IOSMediaPlayerView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -353,34 +361,7 @@ struct IOSMediaPlayerView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                switch layoutMode {
-                case .stacked:
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            artwork
-                                .frame(maxWidth: 300)
-                            controls
-                        }
-                        .frame(maxWidth: 560)
-                        .padding(24)
-                        .frame(maxWidth: .infinity)
-                    }
-
-                case .sideBySide:
-                    ScrollView {
-                        HStack(alignment: .top, spacing: 32) {
-                            artwork
-                                .frame(maxWidth: 360)
-
-                            controls
-                                .frame(maxWidth: 520)
-                        }
-                        .padding(28)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                }
-            }
+            playerContent
             .navigationTitle("Player")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -418,10 +399,111 @@ struct IOSMediaPlayerView: View {
         }
     }
 
+    @ViewBuilder
+    private var playerContent: some View {
+#if FLUX_HAS_VERTICAL_TOOLBAR_API
+        if #available(iOS 27.1, *) {
+            GeometryReader { proxy in
+                let divisions = proxy.reservedRegions(kind: .division)
+                if let division = divisions.first?.frame,
+                   IOSMediaPlayerFoldLayoutPolicy.usesTabletopLayout(
+                       for: division
+                   ) {
+                    tabletopPlayerContent(
+                        size: proxy.size,
+                        divisionFrame: division
+                    )
+                } else {
+                    standardPlayerContent
+                }
+            }
+        } else {
+            standardPlayerContent
+        }
+#else
+        standardPlayerContent
+#endif
+    }
+
+    @ViewBuilder
+    private var standardPlayerContent: some View {
+        switch layoutMode {
+        case .stacked:
+            ScrollView {
+                VStack(spacing: 24) {
+                    artwork
+                        .frame(maxWidth: 300)
+                    controls
+                }
+                .frame(maxWidth: 560)
+                .padding(24)
+                .frame(maxWidth: .infinity)
+            }
+
+        case .sideBySide:
+            ScrollView {
+                HStack(alignment: .top, spacing: 32) {
+                    artwork
+                        .frame(maxWidth: 360)
+
+                    controls
+                        .frame(maxWidth: 520)
+                }
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+#if FLUX_HAS_VERTICAL_TOOLBAR_API
+    @available(iOS 27.1, *)
+    private func tabletopPlayerContent(
+        size: CGSize,
+        divisionFrame: CGRect
+    ) -> some View {
+        let topHeight = max(0, divisionFrame.minY)
+        let bottomHeight = max(0, size.height - divisionFrame.maxY)
+
+        return VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    artwork
+                        .frame(maxWidth: min(260, max(160, topHeight * 0.58)))
+                    header
+                }
+                .frame(maxWidth: 560)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(height: topHeight)
+
+            Color.clear
+                .frame(height: divisionFrame.height)
+                .accessibilityHidden(true)
+
+            ScrollView {
+                playbackControls
+                    .frame(maxWidth: 560)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(height: bottomHeight)
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+    }
+#endif
+
     private var controls: some View {
         VStack(spacing: 24) {
             header
+            playbackControls
+        }
+    }
 
+    private var playbackControls: some View {
+        VStack(spacing: 24) {
             if let item,
                item.audioEnclosures.count > 1,
                let audioSelection = IOSMediaPlayerAudioSelection.resolve(
