@@ -83,7 +83,7 @@ enum IOSMiniPlayerMetrics {
     static let portraitArtworkSize: CGFloat = 38
     static let topBarArtworkSize: CGFloat = 26
     static let sidebarArtworkSize: CGFloat = 34
-    static let topBarExpandedWidth: CGFloat = 210
+    static let topBarExpandedWidth: CGFloat = 270
     static let topBarCompactWidth: CGFloat = 68
     static let regularFloatingArtworkSize: CGFloat = 34
     static let regularFloatingWidth: CGFloat = 320

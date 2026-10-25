@@ -793,17 +793,26 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {
                     ToolbarItem(placement: .topBarLeading) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(landscapeSubtitle),
-                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
-                            action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
-                            showsBrandMark: chromeMode == .persistentSplitCollapsed,
-                            reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
-                            // Native leading toolbar items receive Liquid Glass.
-                            usesSystemToolbarGlass: true
-                        )
+                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
+                            ArticleListTitleCapsule(
+                                title: title,
+                                subtitle: capsuleSubtitle(landscapeSubtitle),
+                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                                layout: chromeMode == .persistentSplitCollapsed ? .regularToolbar : .compactStacked,
+                                action: chromeMode == .persistentSplitCollapsed ? nil : onSelectScope,
+                                showsBrandMark: chromeMode == .persistentSplitCollapsed,
+                                reservesInlineMinimumWidth: chromeMode != .persistentSplitCollapsed,
+                                // Native leading toolbar items receive Liquid Glass.
+                                usesSystemToolbarGlass: true
+                            )
+                            if chromeMode == .compactLandscape {
+                                // The iPhone Duo landscape player shares the native
+                                // leading toolbar allocation with the scope capsule.
+                                // A separate .principal item was compressed to its
+                                // icon-only fallback despite free space beside it.
+                                topAccessory()
+                            }
+                        }
                     }
                 }
 

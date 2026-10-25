@@ -819,12 +819,15 @@ struct ContentView: View {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
             topAccessory: {
-                if miniPlayerPlacement == .compactTopBar,
-                   articleListChromeMode == .persistentSplitCollapsed {
-                    if systemPrefersVerticalToolbar {
-                        regularFloatingMiniPlayer
-                    } else {
+                if miniPlayerPlacement == .compactTopBar {
+                    if articleListChromeMode == .compactLandscape {
                         compactMiniPlayer
+                    } else if articleListChromeMode == .persistentSplitCollapsed {
+                        if systemPrefersVerticalToolbar {
+                            regularFloatingMiniPlayer
+                        } else {
+                            compactMiniPlayer
+                        }
                     }
                 }
             },
@@ -884,14 +887,6 @@ struct ContentView: View {
                         )
                     }
                 }
-                if miniPlayerPlacement == .compactTopBar,
-                   articleListChromeMode == .compactLandscape,
-                   miniPlayerIsVisible {
-                    ToolbarItem(placement: .principal) {
-                        compactMiniPlayer
-                    }
-                }
-
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 27.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {

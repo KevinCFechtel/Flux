@@ -1175,6 +1175,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testCompactLandscapePlayerPrefersExpandedTitleWidth() {
+        XCTAssertEqual(IOSMiniPlayerMetrics.topBarExpandedWidth, 270)
+        XCTAssertLessThan(IOSMiniPlayerMetrics.topBarCompactWidth, IOSMiniPlayerMetrics.topBarExpandedWidth)
+        XCTAssertEqual(IOSMiniPlayerPlacementPolicy.placement(for: .compactLandscape), .compactTopBar)
+    }
+
     func testRegularCollapsedMiniPlayerHasLargerFloatingStyle() {
         XCTAssertEqual(IOSMiniPlayerMetrics.regularFloatingArtworkSize, 34)
         XCTAssertEqual(IOSMiniPlayerMetrics.regularFloatingWidth, 320)
