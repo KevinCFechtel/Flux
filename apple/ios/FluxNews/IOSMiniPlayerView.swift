@@ -236,8 +236,12 @@ struct IOSMiniPlayerView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
+        // The native iPhone landscape toolbar already supplies its own glass
+        // capsule. Drawing another capsule inside it creates a double shell.
         .background {
-            IOSMiniPlayerCapsuleBackground()
+            if style != .expandedLandscapeTopBar {
+                IOSMiniPlayerCapsuleBackground()
+            }
         }
     }
 
@@ -550,6 +554,10 @@ struct IOSArticleListBottomDock<Actions: View>: View {
                 Spacer(minLength: 0)
                 actions()
                     .labelStyle(.iconOnly)
+                    // Use the adaptive primary color for portrait dock actions
+                    // instead of the app accent or a fixed black.
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
             .frame(minHeight: 44)

@@ -515,7 +515,8 @@ final class IOSLegacyMigrationCoordinator {
         var failedCount = 0
         var importedCount = 0
         for record in records {
-            let reference = "downloads/legacy/enclosure-\(record.enclosureID).audio"
+            let detectedExtension = Self.legacyAudioExtension(at: record.sourceFile)
+            let reference = "downloads/legacy/enclosure-\(record.enclosureID).\(detectedExtension ?? "audio")"
             guard let sourceSize = readableRegularFileSize(at: record.sourceFile) else {
                 hasRetryableRecord = true
                 failedCount += 1
@@ -944,6 +945,23 @@ final class IOSLegacyMigrationCoordinator {
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {
         logger.error("Legacy media settings migration remains retryable: \(String(reflecting: error))")
         return .retryableFailure
+    }
+
+    private static func legacyAudioExtension(at source: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: source) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 16) else { return nil }
+        let bytes = [UInt8](data)
+        if bytes.starts(with: [0x49, 0x44, 0x33])
+            || (bytes.count >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+            return "mp3"
+        }
+        if bytes.count >= 12 && Array(bytes[4..<8]) == [0x66, 0x74, 0x79, 0x70] {
+            return "m4a"
+        }
+        if bytes.starts(with: [0x4F, 0x67, 0x67, 0x53]) { return "ogg" }
+        if bytes.starts(with: [0x66, 0x4C, 0x61, 0x43]) { return "flac" }
+        return nil
     }
 
     private func readableRegularFileSize(at url: URL) -> UInt64? {
