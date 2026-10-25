@@ -712,6 +712,8 @@ internal fun AndroidSearchDestination(
             AndroidArticleContextAction.CopyLink -> if (AndroidArticlePlatformActions.copyLink(context, article)) showMessage(linkCopiedMessage) else showMessage(badArticleUrlMessage)
             AndroidArticleContextAction.Share -> performSwipe(article, AndroidArticleSwipeAction.Share)
             AndroidArticleContextAction.SaveToService -> performSwipe(article, AndroidArticleSwipeAction.SaveToService)
+            AndroidArticleContextAction.ListeningList -> performSwipe(article, AndroidArticleSwipeAction.ListeningList)
+            AndroidArticleContextAction.DownloadAudio -> performSwipe(article, AndroidArticleSwipeAction.DownloadAudio)
         }
     }
 
