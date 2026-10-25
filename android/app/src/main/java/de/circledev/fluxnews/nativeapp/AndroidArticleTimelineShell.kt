@@ -114,7 +114,10 @@ internal fun NewsRootContent(
     )
     val playbackState by mediaPlaybackCoordinator.state.collectAsState()
     var nowPlayingPresented by remember { mutableStateOf(false) }
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // The action bar can move to the top before the permanent tablet sidebar is available.
+    val wideActionLayout = configuration.screenWidthDp >= 600
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
     val projection = navigation.projection
     val categoryRefs = projection?.catalog?.categories?.map {
@@ -236,7 +239,7 @@ internal fun NewsRootContent(
     val navigationBarHeight = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
-    val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
+    val bottomActionsVisible = !isLandscape && !wideActionLayout && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
     val toolbarMiniPlayerEligible = !persistentNavigation && (collapsedPersistentNavigation || isLandscape)
@@ -332,7 +335,7 @@ internal fun NewsRootContent(
                                     )
                             },
                             actions = {
-                                if (isLandscape || collapsedPersistentNavigation) {
+                                if (isLandscape || wideActionLayout || collapsedPersistentNavigation) {
                                     AndroidArticleActionCapsule(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
@@ -376,7 +379,7 @@ internal fun NewsRootContent(
                                         )
                             },
                             actions = {
-                                if (isLandscape) {
+                                if (isLandscape || wideActionLayout) {
                                     AndroidArticleActionCapsule(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
