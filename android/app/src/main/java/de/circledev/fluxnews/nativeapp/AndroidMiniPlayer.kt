@@ -259,79 +259,115 @@ internal fun AndroidToolbarMiniPlayer(
             null -> null
         }
     }
-    Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val expanded = maxWidth >= 300.dp
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(
-                modifier = Modifier.weight(1f).clickable(onClick = onOpenPlayer),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Box(
-                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    modifier = Modifier.weight(1f).clickable(onClick = onOpenPlayer),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (artworkModel != null) {
-                        AsyncImage(
-                            model = artworkModel,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        Image(
-                            painter = painterResource(R.drawable.fallback_artwork),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    Box(
+                        modifier = Modifier.size(if (expanded) 38.dp else 26.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (artworkModel != null) {
+                            AsyncImage(
+                                model = artworkModel,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(R.drawable.fallback_artwork),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
-                }
-                Text(
-                    playback.articleTitle?.takeIf { it.isNotBlank() }
-                        ?: stringResource(R.string.article_audio),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            IconButton(
-                onClick = {
-                    if (!playback.isLoading) {
-                        playback.enclosureId?.let { id ->
-                            scope.launch {
-                                if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                                    coordinator.pause()
-                                } else {
-                                    coordinator.play(id)
-                                }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            playback.articleTitle?.takeIf { it.isNotBlank() }
+                                ?: stringResource(R.string.article_audio),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (expanded) {
+                            val feed = playback.feedTitle?.takeIf { it.isNotBlank() }
+                            val duration = playback.durationMs?.takeIf { it > 0L }
+                            val subtitle = listOfNotNull(
+                                feed,
+                                duration?.let {
+                                    androidCompactMediaTime(playback.positionMs) + " / " +
+                                        androidCompactMediaTime(it)
+                                },
+                            ).joinToString(" · ")
+                            if (subtitle.isNotEmpty()) {
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }
-                },
-            ) {
-                if (playback.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Icon(
-                        if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                            Icons.Rounded.Pause
-                        } else {
-                            Icons.Rounded.PlayArrow
+                }
+                IconButton(
+                    onClick = {
+                        if (!playback.isLoading) {
+                            playback.enclosureId?.let { id ->
+                                scope.launch {
+                                    if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                        coordinator.pause()
+                                    } else {
+                                        coordinator.play(id)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    if (playback.isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                Icons.Rounded.Pause
+                            } else {
+                                Icons.Rounded.PlayArrow
+                            },
+                            contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                "Pause"
+                            } else {
+                                "Play"
+                            },
+                        )
+                    }
+                }
+            }
+            if (expanded) {
+                playback.durationMs?.takeIf { it > 0L }?.let { duration ->
+                    LinearProgressIndicator(
+                        progress = {
+                            (playback.positionMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
                         },
-                        contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
-                            "Pause"
-                        } else {
-                            "Play"
-                        },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
+        }
     }
 }
