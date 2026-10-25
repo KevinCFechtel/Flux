@@ -83,6 +83,7 @@ internal fun AndroidListeningListDestination(
     transferCoordinator: AndroidMediaTransferCoordinator,
     sessionGeneration: Long?,
     onBack: () -> Unit,
+    onToggleSidebar: (() -> Unit)? = null,
 ) {
     val state by store.state.collectAsState()
     val playback by playbackCoordinator.state.collectAsState()
@@ -119,11 +120,18 @@ internal fun AndroidListeningListDestination(
             TopAppBar(
                 title = { Text(stringResource(R.string.nav_listening_list)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = stringResource(R.string.list_back),
-                        )
+                    IconButton(onClick = onToggleSidebar ?: onBack) {
+                        if (onToggleSidebar != null) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_sidebar_toggle),
+                                contentDescription = stringResource(R.string.nav_toggle),
+                            )
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = stringResource(R.string.list_back),
+                            )
+                        }
                     }
                 },
                 actions = {
