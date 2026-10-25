@@ -336,7 +336,7 @@ internal fun NewsRootContent(
                                                     playback = playbackState,
                                                     coordinator = mediaPlaybackCoordinator,
                                                     onOpenPlayer = { nowPlayingPresented = true },
-                                                    modifier = Modifier.widthIn(max = if (maxWidth >= 1100.dp) 340.dp else if (wideActionLayout && !isLandscape && !collapsedPersistentNavigation) 150.dp else 220.dp),
+                                                    modifier = Modifier.weight(1f),
                                                 )
                                             }
                                         } else null,
@@ -885,7 +885,7 @@ private fun ScopeNavigationCapsule(
     syncing: Boolean,
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
-    trailingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
 ) {
     val darkMode = isSystemInDarkTheme()
     Surface(
@@ -900,7 +900,8 @@ private fun ScopeNavigationCapsule(
         shadowElevation = if (darkMode) 0.5.dp else 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+            modifier = (if (trailingContent != null) Modifier.fillMaxWidth() else Modifier)
+                .padding(horizontal = 14.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -910,7 +911,9 @@ private fun ScopeNavigationCapsule(
                 modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
-            Column {
+            Column(
+                modifier = if (trailingContent != null) Modifier.widthIn(max = 150.dp) else Modifier,
+            ) {
                 Text(
                     scopeTitle(scope),
                     maxLines = 1,
