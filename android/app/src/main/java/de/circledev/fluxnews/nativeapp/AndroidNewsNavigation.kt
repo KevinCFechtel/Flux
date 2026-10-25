@@ -187,7 +187,34 @@ internal fun NewsNavigationContent(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
-        }
+            Box {
+                IconButton(onClick = { addMenuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.nav_add_feed_short) +
+                            " / " + stringResource(R.string.nav_add_category_short),
+                    )
+                }
+                DropdownMenu(
+                    expanded = addMenuExpanded,
+                    onDismissRequest = { addMenuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_feed_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddFeed()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_category_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddCategory()
+                        },
+                    )
+                }
+            }        }
 
         if (projection == null) {
             Text(
@@ -249,40 +276,6 @@ internal fun NewsNavigationContent(
                         onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                     )
                 }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.Start,
-        ) {
-            Box {
-                IconButton(onClick = { addMenuExpanded = true }) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = stringResource(R.string.nav_add_feed_short) +
-                            " / " + stringResource(R.string.nav_add_category_short),
-                    )
-                }
-                DropdownMenu(
-                    expanded = addMenuExpanded,
-                    onDismissRequest = { addMenuExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.nav_add_feed_short)) },
-                        onClick = {
-                            addMenuExpanded = false
-                            onAddFeed()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.nav_add_category_short)) },
-                        onClick = {
-                            addMenuExpanded = false
-                            onAddCategory()
-                        },
-                    )
-                }
-            }
         }
 
         Spacer(Modifier.height(12.dp))
