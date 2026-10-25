@@ -43,6 +43,7 @@ enum IOSMiniPlayerPresentation {
 enum IOSMiniPlayerStyle: Equatable {
     case portraitDock
     case compactTopBar
+    case regularFloating
     case sidebarFooter
 }
 
@@ -52,6 +53,8 @@ enum IOSMiniPlayerMetrics {
     static let sidebarArtworkSize: CGFloat = 34
     static let topBarExpandedWidth: CGFloat = 210
     static let topBarCompactWidth: CGFloat = 68
+    static let regularFloatingArtworkSize: CGFloat = 34
+    static let regularFloatingWidth: CGFloat = 320
     static let dockCornerRadius: CGFloat = 26
     static let sidebarCornerRadius: CGFloat = 18
 }
@@ -118,6 +121,8 @@ struct IOSMiniPlayerView: View {
                 portraitDockContent
             case .compactTopBar:
                 compactTopBarContent
+            case .regularFloating:
+                regularFloatingContent
             case .sidebarFooter:
                 sidebarFooterContent
             }
@@ -189,6 +194,26 @@ struct IOSMiniPlayerView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
+        .background {
+            IOSMiniPlayerCapsuleBackground()
+        }
+    }
+
+    private var regularFloatingContent: some View {
+        VStack(spacing: 5) {
+            HStack(spacing: 8) {
+                openButton(
+                    artworkSize: IOSMiniPlayerMetrics.regularFloatingArtworkSize,
+                    showsFeedTitle: true
+                )
+                playPauseButton(diameter: 32)
+            }
+
+            progressWithTime
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
         .background {
             IOSMiniPlayerCapsuleBackground()
         }
