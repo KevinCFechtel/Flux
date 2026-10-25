@@ -22,6 +22,37 @@ enum IOSMiniPlayerPlacementPolicy {
     }
 }
 
+enum IOSCompactPortraitBottomInsetPresentation: Equatable {
+    case none
+    case standaloneMiniPlayer
+    case combinedMiniPlayerAndActions
+}
+
+enum IOSCompactPortraitBottomInsetPolicy {
+    static func presentation(
+        chromeMode: IOSArticleListChromeMode,
+        actionPlacement: IOSArticleListActionPlacement,
+        miniPlayerIsVisible: Bool
+    ) -> IOSCompactPortraitBottomInsetPresentation {
+        guard chromeMode == .compactPortrait, miniPlayerIsVisible else {
+            return .none
+        }
+
+        switch actionPlacement {
+        case .topBarTrailing:
+            // Vertical toolbar actions remain in native navigation chrome. The
+            // player occupies the bottom inset independently.
+            return .standaloneMiniPlayer
+        case .bottomBar:
+            // Ordinary compact portrait keeps its established combined bottom
+            // dock when the system does not offer a vertical toolbar edge.
+            return .combinedMiniPlayerAndActions
+        case .floatingTopTrailing:
+            return .none
+        }
+    }
+}
+
 enum IOSMiniPlayerPresentation {
     static func isVisible(
         loadedEnclosureID: Int64?,
@@ -452,6 +483,28 @@ struct IOSMiniPlayerView: View {
             return
         }
         artworkImage = data.flatMap(UIImage.init(data:))
+    }
+}
+
+struct IOSStandalonePortraitMiniPlayerDock: View {
+    @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
+    let playbackCoordinator: IOSMediaPlaybackCoordinator
+    let onOpenPlayer: () -> Void
+
+    var body: some View {
+        IOSMiniPlayerView(
+            playbackState: playbackState,
+            playbackCoordinator: playbackCoordinator,
+            style: .portraitDock,
+            onOpen: onOpenPlayer
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background {
+            IOSMiniPlayerCapsuleBackground()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 

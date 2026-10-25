@@ -105,7 +105,12 @@ enum IOSArticleListChromePresentation {
     ) -> Visibility {
         switch mode {
         case .compactPortrait:
-            return .hidden
+            // On iOS 27.1+ a non-nil toolbarVerticalEdge reports the system's
+            // preferred vertical-bar edge even when that bar is currently hidden.
+            // Compact portrait actions move to .topBarTrailing in that context,
+            // and on iOS the top bar is the navigation bar. Keep that host visible
+            // so the system can actually render the actions on the vertical edge.
+            return systemPrefersVerticalToolbar ? .visible : .hidden
         case .compactLandscape:
             return .visible
         case .persistentSplit, .persistentSplitCollapsed:

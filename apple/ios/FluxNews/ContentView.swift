@@ -802,6 +802,11 @@ struct ContentView: View {
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
         )
+        let compactPortraitBottomInset = IOSCompactPortraitBottomInsetPolicy.presentation(
+            chromeMode: articleListChromeMode,
+            actionPlacement: actionPlacement,
+            miniPlayerIsVisible: miniPlayerIsVisible
+        )
 
         return ArticleListNavigationChrome(
             store: newsreaderStore,
@@ -848,19 +853,14 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if articleListChromeMode == .compactPortrait,
-                   actionPlacement == .topBarTrailing,
-                   miniPlayerIsVisible {
-                    IOSMiniPlayerView(
+                switch compactPortraitBottomInset {
+                case .standaloneMiniPlayer:
+                    IOSStandalonePortraitMiniPlayerDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                        style: .portraitDock,
-                        onOpen: presentNowPlayingPlayer
+                        onOpenPlayer: presentNowPlayingPlayer
                     )
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 8)
-                } else if actionPlacement == .bottomBar,
-                          miniPlayerIsVisible {
+                case .combinedMiniPlayerAndActions:
                     IOSArticleListBottomDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -871,6 +871,8 @@ struct ContentView: View {
                             minimumHitTarget: 44
                         )
                     }
+                case .none:
+                    EmptyView()
                 }
             }
             .toolbar {

@@ -649,6 +649,41 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testCompactPortraitBottomInsetKeepsVerticalActionsIndependentOfMiniPlayer() {
+        XCTAssertEqual(
+            IOSCompactPortraitBottomInsetPolicy.presentation(
+                chromeMode: .compactPortrait,
+                actionPlacement: .topBarTrailing,
+                miniPlayerIsVisible: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            IOSCompactPortraitBottomInsetPolicy.presentation(
+                chromeMode: .compactPortrait,
+                actionPlacement: .topBarTrailing,
+                miniPlayerIsVisible: true
+            ),
+            .standaloneMiniPlayer
+        )
+        XCTAssertEqual(
+            IOSCompactPortraitBottomInsetPolicy.presentation(
+                chromeMode: .compactPortrait,
+                actionPlacement: .bottomBar,
+                miniPlayerIsVisible: true
+            ),
+            .combinedMiniPlayerAndActions
+        )
+        XCTAssertEqual(
+            IOSCompactPortraitBottomInsetPolicy.presentation(
+                chromeMode: .compactLandscape,
+                actionPlacement: .topBarTrailing,
+                miniPlayerIsVisible: true
+            ),
+            .none
+        )
+    }
+
     func testMiniPlayerVisibilityRequiresLoadedNonStoppedPlayback() {
         XCTAssertFalse(
             IOSMiniPlayerPresentation.isVisible(
@@ -824,6 +859,14 @@ final class NewsreaderPresentationTests: XCTestCase {
             .navigationTopLeading
         )
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactPortrait), .hidden)
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.navigationBarVisibility(
+                for: .compactPortrait,
+                systemPrefersVerticalToolbar: true,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .visible
+        )
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .compactLandscape), .visible)
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .persistentSplit), .hidden)
         XCTAssertEqual(IOSArticleListChromePresentation.navigationBarVisibility(for: .persistentSplitCollapsed), .hidden)
@@ -1046,6 +1089,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         XCTAssertEqual(portrait, .compactPortrait)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: portrait), .bottomBar)
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.actionPlacement(
+                for: portrait,
+                systemPrefersVerticalToolbar: true,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .topBarTrailing
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.navigationBarVisibility(
+                for: portrait,
+                systemPrefersVerticalToolbar: true,
+                systemUsesAdaptiveToolbar: true
+            ),
+            .visible
+        )
 
         let landscape = IOSArticleListChromePresentation.mode(
             for: .compact,
