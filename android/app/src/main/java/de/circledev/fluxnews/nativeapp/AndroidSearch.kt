@@ -599,6 +599,7 @@ internal fun AndroidSearchDestination(
     openResolver: AndroidArticleOpenResolver,
     sessionGeneration: Long?,
     onBack: () -> Unit,
+    onToggleSidebar: (() -> Unit)? = null,
 ) {
     val state by store.state.collectAsState()
     val preferences by LocalAndroidArticlePreferences.current.state.collectAsState(initial = AndroidArticlePreferenceState())
@@ -724,8 +725,11 @@ internal fun AndroidSearchDestination(
                 TopAppBar(
                     title = { Text(stringResource(R.string.nav_search)) },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.search_back_news))
+                        IconButton(onClick = onToggleSidebar ?: onBack) {
+                            Icon(
+                                painter = painterResource(if (onToggleSidebar != null) R.drawable.ic_sidebar_toggle else R.drawable.ic_arrow_back),
+                                contentDescription = if (onToggleSidebar != null) stringResource(R.string.nav_toggle) else stringResource(R.string.search_back_news),
+                            )
                         }
                     },
                 )
