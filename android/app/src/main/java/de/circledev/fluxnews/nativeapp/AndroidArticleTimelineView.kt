@@ -206,6 +206,10 @@ internal fun AndroidArticleTimeline(
                 performSwipeAction(article, AndroidArticleSwipeAction.Share)
             AndroidArticleContextAction.SaveToService ->
                 performSwipeAction(article, AndroidArticleSwipeAction.SaveToService)
+            AndroidArticleContextAction.ListeningList ->
+                performSwipeAction(article, AndroidArticleSwipeAction.ListeningList)
+            AndroidArticleContextAction.DownloadAudio ->
+                performSwipeAction(article, AndroidArticleSwipeAction.DownloadAudio)
         }
     }
 
