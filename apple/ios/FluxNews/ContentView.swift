@@ -923,6 +923,7 @@ struct ContentView: View {
                 playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 style: articleListChromeMode == .compactLandscape
+                    || UIDevice.current.userInterfaceIdiom == .pad
                     ? .expandedLandscapeTopBar
                     : .compactTopBar,
                 onOpen: presentNowPlayingPlayer
