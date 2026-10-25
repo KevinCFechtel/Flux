@@ -51,7 +51,7 @@ enum IOSArticleListChromePresentation {
     ) -> IOSArticleListActionPlacement {
         switch mode {
         case .compactPortrait:
-            .bottomBar
+            systemPrefersVerticalToolbar ? .topBarTrailing : .bottomBar
         case .compactLandscape:
             .topBarTrailing
         case .persistentSplit, .persistentSplitCollapsed:
@@ -712,7 +712,8 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
                 switch (capsulePlacement, actionPlacement, chromeMode) {
-                case (.floatingTopCenter, .bottomBar, .compactPortrait):
+                case (.floatingTopCenter, .bottomBar, .compactPortrait),
+                     (.floatingTopCenter, .topBarTrailing, .compactPortrait):
                     ArticleListTitleCapsule(
                         title: title,
                         subtitle: capsuleSubtitle(portraitSubtitle),
