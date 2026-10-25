@@ -281,10 +281,11 @@ internal fun AndroidToolbarMiniPlayer(
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Headphones,
+                        Image(
+                            painter = painterResource(R.drawable.fallback_artwork),
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
