@@ -894,10 +894,15 @@ struct ContentView: View {
                 }
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 26.0, *) {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            IOSSyncToolbarButton(
+                                state: toolbarSyncState,
+                                action: performManualSyncControlAction
+                            )
+                        }
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons(
-                                directCapacity: directActionCapacity,
-                                syncState: toolbarSyncState
+                            articleListConfigurableActionButtons(
+                                directCapacity: directActionCapacity
                             )
                             .layoutPriority(10)
                         }
@@ -970,8 +975,25 @@ struct ContentView: View {
     @ViewBuilder
     private func articleListActionButtons(
         directCapacity: Int,
-        minimumHitTarget: CGFloat? = nil,
-        syncState: IOSSyncButtonPresentation.State? = nil
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
+        IOSSyncToolbarButton(
+            state: IOSSyncButtonPresentation.resolve(
+                manualSyncState: newsreaderStore.manualSyncState,
+                transientState: syncPresentation
+            ),
+            action: performManualSyncControlAction
+        )
+        articleListConfigurableActionButtons(
+            directCapacity: directCapacity,
+            minimumHitTarget: minimumHitTarget
+        )
+    }
+
+    @ViewBuilder
+    private func articleListConfigurableActionButtons(
+        directCapacity: Int,
+        minimumHitTarget: CGFloat? = nil
     ) -> some View {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
@@ -982,13 +1004,6 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        IOSSyncToolbarButton(
-            state: syncState ?? IOSSyncButtonPresentation.resolve(
-                manualSyncState: newsreaderStore.manualSyncState,
-                transientState: syncPresentation
-            ),
-            action: performManualSyncControlAction
-        )
         ForEach(resolved.direct) { action in
             articleListActionButton(
                 action,
