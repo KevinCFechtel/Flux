@@ -242,13 +242,12 @@ internal fun NewsRootContent(
     val bottomActionsVisible = !isLandscape && !wideActionLayout && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
-    val toolbarMiniPlayerEligible = !persistentNavigation && (collapsedPersistentNavigation || isLandscape)
+    val toolbarMiniPlayerEligible = !persistentNavigation && (collapsedPersistentNavigation || isLandscape || wideActionLayout)
     val availableToolbarWidth = LocalConfiguration.current.screenWidthDp.dp -
         (if (persistentNavigation) 320.dp else 0.dp)
     // Landscape phones should use the compact player beside the scope title,
     // not consume a second row at the bottom of the timeline.
-    val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
-        (isLandscape || availableToolbarWidth >= (if (persistentNavigation) 520.dp else 950.dp))
+    val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible
     val standaloneMiniPlayerVisible = miniPlayerVisible && !persistentNavigation && !bottomActionsVisible && !toolbarMiniPlayerVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
@@ -276,7 +275,7 @@ internal fun NewsRootContent(
             topBar = {
                 androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val toolbarPlayerVisible = !persistentNavigation && toolbarMiniPlayerVisible &&
-                        (isLandscape || collapsedPersistentNavigation || maxWidth >= 950.dp)
+                        (isLandscape || collapsedPersistentNavigation || wideActionLayout)
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
@@ -311,7 +310,7 @@ internal fun NewsRootContent(
                             },
                             colors = appBarColors,
                         )
-                    } else if (scopeTitleLeading) {
+                    } else if (scopeTitleLeading || wideActionLayout) {
                         TopAppBar(
                             navigationIcon = {
                                 if (collapsedPersistentNavigation) {
@@ -338,7 +337,7 @@ internal fun NewsRootContent(
                                                     playback = playbackState,
                                                     coordinator = mediaPlaybackCoordinator,
                                                     onOpenPlayer = { nowPlayingPresented = true },
-                                                    modifier = Modifier.widthIn(max = 220.dp),
+                                                    modifier = Modifier.widthIn(max = if (wideActionLayout && !isLandscape && !collapsedPersistentNavigation) 150.dp else 220.dp),
                                                 )
                                             }
                                         } else null,
