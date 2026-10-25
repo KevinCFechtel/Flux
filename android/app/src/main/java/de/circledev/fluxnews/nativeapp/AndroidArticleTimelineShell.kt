@@ -882,6 +882,7 @@ private fun ScopeNavigationCapsule(
     onOpenNavigation: () -> Unit,
 ) {
     val darkMode = isSystemInDarkTheme()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Surface(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
@@ -901,7 +902,7 @@ private fun ScopeNavigationCapsule(
             Icon(
                 painter = painterResource(R.drawable.ic_fluxnews_logo),
                 contentDescription = null,
-                modifier = Modifier.size(26.dp),
+                modifier = Modifier.size(if (isLandscape) 34.dp else 26.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column {
