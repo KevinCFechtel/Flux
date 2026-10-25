@@ -534,7 +534,7 @@ final class IOSMediaPlaybackCoordinator {
     private static func legacyPlayableURL(for source: URL) -> URL? {
         guard let handle = try? FileHandle(forReadingFrom: source) else { return nil }
         defer { try? handle.close() }
-        guard let header = try? handle.read(upToCount: 16), let header else { return nil }
+        guard let header = try? handle.read(upToCount: 16) else { return nil }
         let bytes = [UInt8](header)
         let ext: String
         if bytes.starts(with: [0x49, 0x44, 0x33])
