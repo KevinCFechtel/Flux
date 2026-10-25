@@ -409,6 +409,31 @@ private fun TimelineDestination(
                     onSelectionChanged = onSelectionChanged,
                 )
             }
+        } else if (collapsedPersistentNavigation) {
+            // Tablet navigation toggles directly between the permanent sidebar and
+            // the full-width timeline. A modal drawer is only used on compact windows.
+            NewsRootContent(
+                selection = selection,
+                navigation = navigation,
+                state = state,
+                timelineStore = timelineStore,
+                syncCoordinator = syncCoordinator,
+                mediaPlaybackCoordinator = mediaPlaybackCoordinator,
+                readerStore = readerStore,
+                articleOpenResolver = articleOpenResolver,
+                navigationPreferences = preferences,
+                sessionGeneration = sessionGeneration,
+                pendingWidgetArticle = pendingWidgetArticle,
+                onWidgetArticleConsumed = onWidgetArticleConsumed,
+                persistentNavigation = false,
+                collapsedPersistentNavigation = true,
+                scopeTitleLeading = true,
+                onOpenNavigation = { persistentNavigationCollapsed = false },
+                onSearch = { navController.navigate(ShellRoute.Search) },
+                onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+                onSettings = { navController.navigate(ShellRoute.Settings) },
+                onSelectionChanged = onSelectionChanged,
+            )
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
             val coroutineScope = rememberCoroutineScope()
