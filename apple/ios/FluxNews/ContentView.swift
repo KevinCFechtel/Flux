@@ -758,7 +758,7 @@ struct ContentView: View {
                         systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
                     )
                     .toolbarMinimizationBehavior(
-                        articleListChromeMode == .compactLandscape || systemPrefersVerticalToolbar ? .never : .automatic,
+                        systemPrefersVerticalToolbar ? .never : .automatic,
                         for: .navigationBar
                     )
                 }
@@ -801,11 +801,6 @@ struct ContentView: View {
         let directActionCapacity = IOSArticleListChromePresentation.configurableDirectActionCapacity(
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
-        )
-        // Resolve both sync states before constructing the native toolbar content.
-        let toolbarSyncState = IOSSyncButtonPresentation.resolve(
-            manualSyncState: newsreaderStore.manualSyncState,
-            transientState: syncPresentation
         )
         let compactPortraitBottomInset = IOSCompactPortraitBottomInsetPolicy.presentation(
             chromeMode: articleListChromeMode,
@@ -893,33 +888,11 @@ struct ContentView: View {
                     }
                 }
                 if actionPlacement == .topBarTrailing {
-                    if #available(iOS 27.0, *) {
-                        // Let the system distribute individual actions on the Duo's
-                        // vertical bar. Pin Sync rather than wrapping all controls
-                        // in a custom stack that cannot adapt to the bar axis.
-                        ToolbarItem(placement: .topBarPinnedTrailing) {
-                            IOSSyncToolbarButton(
-                                state: toolbarSyncState,
-                                action: performManualSyncControlAction
-                            )
-                        }
+                    if #available(iOS 26.0, *) {
+                        // Keep all actions in one native group. The system owns
+                        // horizontal/vertical placement and overflow behavior.
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListConfigurableActionButtons(
-                                directCapacity: directActionCapacity
-                            )
-                        }
-                        .visibilityPriority(.high)
-                    } else if #available(iOS 26.0, *) {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            IOSSyncToolbarButton(
-                                state: toolbarSyncState,
-                                action: performManualSyncControlAction
-                            )
-                        }
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListConfigurableActionButtons(
-                                directCapacity: directActionCapacity
-                            )
+                            articleListActionButtons(directCapacity: directActionCapacity)
                         }
                     } else {
                         ToolbarItem(placement: .topBarTrailing) {
