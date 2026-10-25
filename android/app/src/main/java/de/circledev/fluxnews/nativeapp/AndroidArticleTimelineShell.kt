@@ -880,9 +880,9 @@ private fun ScopeNavigationCapsule(
     syncing: Boolean,
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val darkMode = isSystemInDarkTheme()
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Surface(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
@@ -902,7 +902,7 @@ private fun ScopeNavigationCapsule(
             Icon(
                 painter = painterResource(R.drawable.ic_fluxnews_logo),
                 contentDescription = null,
-                modifier = Modifier.size(if (isLandscape) 34.dp else 26.dp),
+                modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column {
@@ -925,6 +925,9 @@ private fun ScopeNavigationCapsule(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            if (trailingContent != null) {
+                trailingContent()
             }
             if (opensNavigation) {
                 Icon(
