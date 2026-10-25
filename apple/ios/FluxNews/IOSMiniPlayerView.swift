@@ -236,8 +236,12 @@ struct IOSMiniPlayerView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
+        // The native iPhone landscape toolbar already supplies its own glass
+        // capsule. Drawing another capsule inside it creates a double shell.
         .background {
-            IOSMiniPlayerCapsuleBackground()
+            if style != .expandedLandscapeTopBar {
+                IOSMiniPlayerCapsuleBackground()
+            }
         }
     }
 
