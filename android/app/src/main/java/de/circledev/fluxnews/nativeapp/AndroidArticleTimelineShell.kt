@@ -242,8 +242,10 @@ internal fun NewsRootContent(
     val toolbarMiniPlayerEligible = persistentNavigation || collapsedPersistentNavigation || isLandscape
     val availableToolbarWidth = LocalConfiguration.current.screenWidthDp.dp -
         (if (persistentNavigation) 320.dp else 0.dp)
+    // Landscape phones should use the compact player beside the scope title,
+    // not consume a second row at the bottom of the timeline.
     val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
-        availableToolbarWidth >= (if (persistentNavigation) 520.dp else 950.dp)
+        (isLandscape || availableToolbarWidth >= (if (persistentNavigation) 520.dp else 950.dp))
     val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible && !toolbarMiniPlayerVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
@@ -271,7 +273,7 @@ internal fun NewsRootContent(
             topBar = {
                 androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val toolbarPlayerVisible = toolbarMiniPlayerVisible &&
-                        maxWidth >= (if (persistentNavigation) 520.dp else 950.dp)
+                        (isLandscape || maxWidth >= (if (persistentNavigation) 520.dp else 950.dp))
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
@@ -357,15 +359,27 @@ internal fun NewsRootContent(
                     } else {
                         CenterAlignedTopAppBar(
                             title = {
-                                ScopeNavigationCapsule(
-                                    scope = scope,
-                                    showArticleCount = articlePreferences.showArticleCount,
-                                    timelineCount = timelineCount,
-                                    readFilter = timelineState.selection?.readFilter,
-                                    syncing = syncInProgress,
-                                    opensNavigation = !persistentNavigation,
-                                    onOpenNavigation = onOpenNavigation,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.weight(1f, fill = false)) {
+                                        ScopeNavigationCapsule(
+                                            scope = scope,
+                                            showArticleCount = articlePreferences.showArticleCount,
+                                            timelineCount = timelineCount,
+                                            readFilter = timelineState.selection?.readFilter,
+                                            syncing = syncInProgress,
+                                            opensNavigation = !persistentNavigation,
+                                            onOpenNavigation = onOpenNavigation,
+                                        )
+                                    }
+                                    if (toolbarPlayerVisible) {
+                                        AndroidToolbarMiniPlayer(
+                                            playback = playbackState,
+                                            coordinator = mediaPlaybackCoordinator,
+                                            onOpenPlayer = { nowPlayingPresented = true },
+                                            modifier = Modifier.padding(start = 8.dp).widthIn(max = 220.dp),
+                                        )
+                                    }
+                                }
                             },
                             actions = {
                                 if (isLandscape) {
