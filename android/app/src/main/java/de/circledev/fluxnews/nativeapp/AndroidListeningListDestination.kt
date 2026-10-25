@@ -84,6 +84,7 @@ internal fun AndroidListeningListDestination(
     sessionGeneration: Long?,
     onBack: () -> Unit,
     onToggleSidebar: (() -> Unit)? = null,
+    sidebarExpanded: Boolean = false,
 ) {
     val state by store.state.collectAsState()
     val playback by playbackCoordinator.state.collectAsState()
@@ -120,7 +121,7 @@ internal fun AndroidListeningListDestination(
             TopAppBar(
                 title = { Text(stringResource(R.string.nav_listening_list)) },
                 navigationIcon = {
-                    IconButton(onClick = onToggleSidebar ?: onBack) {
+                    if (!sidebarExpanded) IconButton(onClick = onToggleSidebar ?: onBack) {
                         if (onToggleSidebar != null) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_sidebar_toggle),
