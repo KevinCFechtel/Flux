@@ -107,7 +107,7 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
                     if !self.currentSourceIsLocal { self.onLoadingChanged?(false) }
                 case .failed:
                     let message = item.error?.localizedDescription ?? "Media playback failed."
-                    self.logger.error("AVPlayer item failed: \(message)")
+                    self.logger.error("AVPlayer item failed local=\(self.currentSourceIsLocal) domain=\((item.error as NSError?)?.domain ?? "none") code=\((item.error as NSError?)?.code ?? 0) message=\(message)")
                     self.onLoadingChanged?(false)
                     self.onError?(message)
                 default: break
@@ -507,7 +507,16 @@ final class IOSMediaPlaybackCoordinator {
     private func startFailureDescription(stage: String, error: Error) -> String { "\(String(localized: "Playback start failed")) [\(stage)]: \(error.localizedDescription)" }
     private func playbackURL(for preparation: PlaybackPreparation) throws -> URL {
         if let localFile = preparation.localFile, let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL,
-           let localURL = try? MediaTransferFileLayout.destination(reference: localFile, under: mediaRoot), FileManager.default.isReadableFile(atPath: localURL.path) { logger.info("using downloaded local media file"); return localURL }
+           let localURL = try? MediaTransferFileLayout.destination(reference: localFile, under: mediaRoot) {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: localURL.path)
+            let size = (attributes?[.size] as? NSNumber)?.int64Value ?? -1
+            let readable = FileManager.default.isReadableFile(atPath: localURL.path)
+            logger.info("download source check exists=\(attributes != nil) readable=\(readable) bytes=\(size) legacy=\(localFile.hasPrefix("downloads/legacy/"))")
+            if readable && size > 0 {
+                logger.info("using downloaded local media file")
+                return localURL
+            }
+        }
         if preparation.localFile != nil { logger.notice("downloaded media reference unavailable; falling back to remote URL") }
         guard let remoteURL = URL(string: preparation.enclosure.url), remoteURL.scheme == "http" || remoteURL.scheme == "https" else { throw IOSMediaPlaybackError.invalidMediaURL }
         return remoteURL
