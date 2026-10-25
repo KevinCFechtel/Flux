@@ -333,7 +333,10 @@ private struct ArticleListTitleCapsule: View {
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: glyphHeight, height: glyphHeight)
+                    .frame(
+                        width: layout == .compactStacked ? max(glyphHeight, 34) : glyphHeight,
+                        height: layout == .compactStacked ? max(glyphHeight, 34) : glyphHeight
+                    )
                     // `.plain` hands its content the label colour. The brand mark
                     // keeps the accent it had as a standalone button.
                     .foregroundStyle(Color.accentColor)
