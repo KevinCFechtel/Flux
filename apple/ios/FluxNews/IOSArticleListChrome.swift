@@ -776,15 +776,6 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                     }
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
                     .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
-                case (.navigationTopLeading, .topBarTrailing, .persistentSplitCollapsed):
-                    if systemPrefersVerticalToolbar {
-                        HStack {
-                            topAccessory()
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
-                        .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
-                    }
                 default:
                     EmptyView()
                 }
@@ -807,6 +798,14 @@ struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory
                             // Native leading toolbar items receive Liquid Glass.
                             usesSystemToolbarGlass: true
                         )
+                    }
+                }
+
+                if chromeMode == .persistentSplitCollapsed,
+                   actionPlacement == .topBarTrailing,
+                   systemPrefersVerticalToolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        topAccessory()
                     }
                 }
 
