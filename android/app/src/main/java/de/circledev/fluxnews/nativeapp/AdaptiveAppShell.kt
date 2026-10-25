@@ -341,7 +341,7 @@ private fun TimelineDestination(
 ) {
     val scope = selection.scope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-        val supportsPersistentNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
+        val supportsPersistentNavigation = maxWidth >= 840.dp && maxHeight >= 600.dp
         var persistentNavigationCollapsed by rememberSaveable { mutableStateOf(false) }
         val persistentNewsNavigation = supportsPersistentNavigation && !persistentNavigationCollapsed
         val collapsedPersistentNavigation = supportsPersistentNavigation && persistentNavigationCollapsed
