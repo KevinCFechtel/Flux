@@ -889,8 +889,15 @@ struct ContentView: View {
                 }
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 27.0, *) {
+                        // Keep Sync independently eligible for the vertical
+                        // system toolbar. The grouped items can otherwise lose
+                        // their first action when the bar changes sides.
+                        ToolbarItem(placement: .topBarTrailing) {
+                            articleListActionButton(.sync)
+                        }
+                        .visibilityPriority(.high)
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons(directCapacity: directActionCapacity)
+                            articleListConfigurableActionButtons(directCapacity: directActionCapacity)
                         }
                         .visibilityPriority(.high)
                     } else if #available(iOS 26.0, *) {
@@ -989,6 +996,22 @@ struct ContentView: View {
             overflowActions: resolved.overflow,
             minimumHitTarget: minimumHitTarget
         )
+    }
+
+    @ViewBuilder
+    private func articleListConfigurableActionButtons(directCapacity: Int) -> some View {
+        let resolved = IOSArticleListActionPolicy.resolvedActions(
+            configuredActions: articleListActionPreferences.actions,
+            directCapacity: directCapacity,
+            scope: newsreaderStore.scope,
+            hasNextScope: nextScope != nil,
+            hasLoadedMedia: playbackState.loadedEnclosure != nil,
+            playbackStatus: playbackState.status
+        )
+        ForEach(resolved.direct) { action in
+            articleListActionButton(action)
+        }
+        articleListMoreMenu(overflowActions: resolved.overflow)
     }
 
     @ViewBuilder
