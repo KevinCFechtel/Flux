@@ -1004,11 +1004,10 @@ struct ContentView: View {
         // restoring its state-dependent symbol (without the switch/Group wrapper).
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: performManualSyncControlAction) {
+                // Isolation test 1: only the local transient state drives the symbol.
+                // Do not read newsreaderStore.manualSyncState in this toolbar label.
                 Image(systemName: IOSSyncButtonPresentation.symbolName(
-                    for: IOSSyncButtonPresentation.resolve(
-                        manualSyncState: newsreaderStore.manualSyncState,
-                        transientState: syncPresentation
-                    )
+                    for: syncPresentation
                 ))
                 .frame(width: 24, height: 24)
             }
