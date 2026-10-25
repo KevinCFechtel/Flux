@@ -848,8 +848,19 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if actionPlacement == .bottomBar,
+                if articleListChromeMode == .compactPortrait,
+                   actionPlacement == .topBarTrailing,
                    miniPlayerIsVisible {
+                    IOSMiniPlayerView(
+                        playbackState: playbackState,
+                        playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                        style: .portraitDock,
+                        onOpen: presentNowPlayingPlayer
+                    )
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                } else if actionPlacement == .bottomBar,
+                          miniPlayerIsVisible {
                     IOSArticleListBottomDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
