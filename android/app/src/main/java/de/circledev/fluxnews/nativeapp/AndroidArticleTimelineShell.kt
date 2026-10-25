@@ -240,7 +240,11 @@ internal fun NewsRootContent(
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
     val toolbarMiniPlayerEligible = persistentNavigation || collapsedPersistentNavigation || isLandscape
-    val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible
+    val availableToolbarWidth = LocalConfiguration.current.screenWidthDp.dp -
+        (if (persistentNavigation) 320.dp else 0.dp)
+    val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
+        availableToolbarWidth >= (if (persistentNavigation) 520.dp else 950.dp)
+    val standaloneMiniPlayerVisible = miniPlayerVisible && !bottomActionsVisible && !toolbarMiniPlayerVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
             32.dp +
@@ -266,7 +270,7 @@ internal fun NewsRootContent(
             },
             topBar = {
                 androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val toolbarPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible &&
+                    val toolbarPlayerVisible = toolbarMiniPlayerVisible &&
                         maxWidth >= (if (persistentNavigation) 520.dp else 950.dp)
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
@@ -471,7 +475,7 @@ internal fun NewsRootContent(
             }
         }
 
-        if (standaloneMiniPlayerVisible && !((persistentNavigation || collapsedPersistentNavigation || isLandscape) && (if (persistentNavigation) true else false))) {
+        if (standaloneMiniPlayerVisible) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
