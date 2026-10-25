@@ -807,9 +807,6 @@ struct ContentView: View {
             manualSyncState: newsreaderStore.manualSyncState,
             transientState: syncPresentation
         )
-        let toolbarSyncSymbol = IOSSyncButtonPresentation.symbolName(for: toolbarSyncState)
-        let toolbarSyncAccessibilityLabel = IOSSyncButtonPresentation.accessibilityLabel(for: toolbarSyncState)
-        let toolbarSyncAccessibilityValue = IOSSyncButtonPresentation.accessibilityValue(for: toolbarSyncState)
         let compactPortraitBottomInset = IOSCompactPortraitBottomInsetPolicy.presentation(
             chromeMode: articleListChromeMode,
             actionPlacement: actionPlacement,
@@ -896,17 +893,13 @@ struct ContentView: View {
                     }
                 }
                 if actionPlacement == .topBarTrailing {
-                    if #available(iOS 27.0, *) {
-                        articleListPrioritizedToolbarActions(
-                            directCapacity: directActionCapacity,
-                            syncSymbol: toolbarSyncSymbol,
-                            syncAccessibilityLabel: toolbarSyncAccessibilityLabel,
-                            syncAccessibilityValue: toolbarSyncAccessibilityValue
-                        )
-                    } else if #available(iOS 26.0, *) {
+                    if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons(directCapacity: directActionCapacity)
-                                .layoutPriority(10)
+                            articleListActionButtons(
+                                directCapacity: directActionCapacity,
+                                syncState: toolbarSyncState
+                            )
+                            .layoutPriority(10)
                         }
                     } else {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -977,7 +970,8 @@ struct ContentView: View {
     @ViewBuilder
     private func articleListActionButtons(
         directCapacity: Int,
-        minimumHitTarget: CGFloat? = nil
+        minimumHitTarget: CGFloat? = nil,
+        syncState: IOSSyncButtonPresentation.State? = nil
     ) -> some View {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
@@ -988,7 +982,13 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        articleListActionButton(.sync, minimumHitTarget: minimumHitTarget)
+        IOSSyncToolbarButton(
+            state: syncState ?? IOSSyncButtonPresentation.resolve(
+                manualSyncState: newsreaderStore.manualSyncState,
+                transientState: syncPresentation
+            ),
+            action: performManualSyncControlAction
+        )
         ForEach(resolved.direct) { action in
             articleListActionButton(
                 action,
@@ -1001,47 +1001,6 @@ struct ContentView: View {
         )
     }
 
-    @available(iOS 27.0, *)
-    @ToolbarContentBuilder
-    private func articleListPrioritizedToolbarActions(
-        directCapacity: Int,
-        syncSymbol: String,
-        syncAccessibilityLabel: String,
-        syncAccessibilityValue: String
-    ) -> some ToolbarContent {
-        let resolved = IOSArticleListActionPolicy.resolvedActions(
-            configuredActions: articleListActionPreferences.actions,
-            directCapacity: directCapacity,
-            scope: newsreaderStore.scope,
-            hasNextScope: nextScope != nil,
-            hasLoadedMedia: playbackState.loadedEnclosure != nil,
-            playbackStatus: playbackState.status
-        )
-
-        // Only pass precomputed values into the toolbar's Sync label.
-        ToolbarItem(placement: .topBarTrailing) {
-            Button(action: performManualSyncControlAction) {
-                Image(systemName: syncSymbol)
-                    .frame(width: 24, height: 24)
-            }
-            .accessibilityLabel(syncAccessibilityLabel)
-            .accessibilityValue(syncAccessibilityValue)
-            .accessibilityIdentifier("articleList.sync")
-        }
-        .visibilityPriority(.high)
-
-        ForEach(resolved.direct) { action in
-            ToolbarItem(placement: .topBarTrailing) {
-                articleListActionButton(action)
-            }
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            articleListMoreMenu(overflowActions: resolved.overflow)
-        }
-        .visibilityPriority(.high)
-    }
-
     @ViewBuilder
     private func articleListActionButton(
         _ action: IOSBottomAction,
@@ -1050,17 +1009,13 @@ struct ContentView: View {
         Group {
             switch action {
         case .sync:
-            let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
-                manualSyncState: newsreaderStore.manualSyncState,
-                transientState: syncPresentation
+            IOSSyncToolbarButton(
+                state: IOSSyncButtonPresentation.resolve(
+                    manualSyncState: newsreaderStore.manualSyncState,
+                    transientState: syncPresentation
+                ),
+                action: performManualSyncControlAction
             )
-            Button { performManualSyncControlAction() } label: {
-                Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncButtonPresentation))
-                    .frame(width: 24, height: 24)
-            }
-            .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: syncButtonPresentation))
-            .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
-            .accessibilityIdentifier("articleList.sync")
 
         case .filterAndSort:
             Menu {
@@ -2017,5 +1972,20 @@ extension ContentView {
             return
         }
         UIApplication.shared.open(url, options: [:])
+    }
+}
+
+private struct IOSSyncToolbarButton: View {
+    let state: IOSSyncButtonPresentation.State
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: IOSSyncButtonPresentation.symbolName(for: state))
+                .frame(width: 24, height: 24)
+        }
+        .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: state))
+        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: state))
+        .accessibilityIdentifier("articleList.sync")
     }
 }
