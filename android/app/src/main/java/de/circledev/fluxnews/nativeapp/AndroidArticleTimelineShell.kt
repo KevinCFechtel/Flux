@@ -313,6 +313,16 @@ internal fun NewsRootContent(
                         )
                     } else if (scopeTitleLeading) {
                         TopAppBar(
+                            navigationIcon = {
+                                if (collapsedPersistentNavigation) {
+                                    IconButton(onClick = onOpenNavigation) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_sidebar_toggle),
+                                            contentDescription = stringResource(R.string.l10n_expand_navigation),
+                                        )
+                                    }
+                                }
+                            },
                             title = {
                                     ScopeNavigationCapsule(
                                         scope = scope,
@@ -320,7 +330,7 @@ internal fun NewsRootContent(
                                         timelineCount = timelineCount,
                                         readFilter = timelineState.selection?.readFilter,
                                         syncing = syncInProgress,
-                                        opensNavigation = !persistentNavigation,
+                                        opensNavigation = !persistentNavigation && !collapsedPersistentNavigation,
                                         onOpenNavigation = onOpenNavigation,
                                         trailingContent = if (toolbarPlayerVisible) {
                                             {
@@ -364,7 +374,7 @@ internal fun NewsRootContent(
                                             timelineCount = timelineCount,
                                             readFilter = timelineState.selection?.readFilter,
                                             syncing = syncInProgress,
-                                            opensNavigation = !persistentNavigation,
+                                            opensNavigation = !persistentNavigation && !collapsedPersistentNavigation,
                                             onOpenNavigation = onOpenNavigation,
                                                 trailingContent = if (toolbarPlayerVisible) {
                                                 {
