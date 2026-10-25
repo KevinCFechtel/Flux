@@ -367,6 +367,18 @@ private fun TimelineDestination(
                             onFeedSettings = onFeedSettings,
                             onAddFeed = onAddFeed,
                             onAddCategory = onAddCategory,
+                            sidebarMiniPlayer = {
+                                val playback by mediaPlaybackCoordinator.state.collectAsState()
+                                if (playback.enclosureId != null &&
+                                    playback.status != AndroidMediaPlaybackPresentationStatus.Stopped) {
+                                    AndroidCompactMiniPlayer(
+                                        playback = playback,
+                                        coordinator = mediaPlaybackCoordinator,
+                                        onOpenPlayer = { navController.navigate(ShellRoute.ListeningList) },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                    )
+                                }
+                            },
                             navigationToggleIcon = R.drawable.ic_arrow_back,
                             navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
                             onNavigationToggle = { persistentNavigationCollapsed = true },
