@@ -233,3 +233,76 @@ private fun androidCompactMediaTime(milliseconds: Long): String {
         "%d:%02d".format(minutes, seconds)
     }
 }
+
+/**
+ * Space-efficient player for wide timeline top bars. The full player remains
+ * available by tapping its title; narrow layouts use the existing bottom dock.
+ */
+@Composable
+internal fun AndroidToolbarMiniPlayer(
+    playback: AndroidMediaPlaybackState,
+    coordinator: AndroidMediaPlaybackCoordinator,
+    onOpenPlayer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onOpenPlayer),
+            ) {
+                Text(
+                    playback.articleTitle?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.article_audio),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                playback.feedTitle?.takeIf { it.isNotBlank() }?.let { feed ->
+                    Text(
+                        feed,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            IconButton(
+                onClick = {
+                    playback.enclosureId?.let { id ->
+                        scope.launch {
+                            if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                coordinator.pause()
+                            } else {
+                                coordinator.play(id)
+                            }
+                        }
+                    }
+                },
+            ) {
+                Icon(
+                    if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                        Icons.Rounded.Pause
+                    } else {
+                        Icons.Rounded.PlayArrow
+                    },
+                    contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                        "Pause"
+                    } else {
+                        "Play"
+                    },
+                )
+            }
+        }
+    }
+}
