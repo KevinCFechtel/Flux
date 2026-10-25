@@ -56,6 +56,7 @@ internal fun NewsNavigationContent(
     onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     onAddFeed: () -> Unit,
     onAddCategory: () -> Unit,
+    sidebarMiniPlayer: (@Composable () -> Unit)? = null,
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -110,9 +111,8 @@ internal fun NewsNavigationContent(
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxHeight().padding(horizontal = 12.dp)) {
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -289,6 +289,10 @@ internal fun NewsNavigationContent(
             colors = drawerItemColors,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         )
+        }
+        if (sidebarMiniPlayer != null) {
+            sidebarMiniPlayer()
+        }
     }
 }
 
