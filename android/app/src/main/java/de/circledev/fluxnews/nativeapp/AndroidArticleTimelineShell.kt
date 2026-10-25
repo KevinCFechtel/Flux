@@ -239,7 +239,7 @@ internal fun NewsRootContent(
     val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
-    val toolbarMiniPlayerEligible = persistentNavigation || collapsedPersistentNavigation || isLandscape
+    val toolbarMiniPlayerEligible = !persistentNavigation && (collapsedPersistentNavigation || isLandscape)
     val availableToolbarWidth = LocalConfiguration.current.screenWidthDp.dp -
         (if (persistentNavigation) 320.dp else 0.dp)
     // Landscape phones should use the compact player beside the scope title,
