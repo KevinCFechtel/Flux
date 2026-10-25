@@ -142,7 +142,25 @@ internal fun NewsRootContent(
     val syncInProgress = syncState is AndroidSyncCoordinator.State.Syncing
     val manualSyncInProgress =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
-    var dismissedSyncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
+    // A successful sync retained by the coordinator must not flash again when
+    // orientation changes recreate this composable.
+    var dismissedSyncSuccessGeneration by remember {
+        mutableStateOf((syncState as? AndroidSyncCoordinator.State.Succeeded)?.generation)
+    }
+    // The pull indicator belongs to the gesture, not every manual sync
+    // (including toolbar actions and background-triggered requests).
+    var pullRefreshRequested by remember { mutableStateOf(false) }
+    var pullRefreshStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(syncState) {
+        if (pullRefreshRequested) {
+            if (syncState is AndroidSyncCoordinator.State.Syncing) {
+                pullRefreshStarted = true
+            } else if (pullRefreshStarted) {
+                pullRefreshRequested = false
+                pullRefreshStarted = false
+            }
+        }
+    }
     val syncSuccessVisible = AndroidSyncPresentationPolicy.successVisible(
         state = syncState,
         dismissedGeneration = dismissedSyncSuccessGeneration,
@@ -412,10 +430,11 @@ internal fun NewsRootContent(
             },
         ) { padding ->
             PullToRefreshBox(
-                isRefreshing = manualSyncInProgress,
+                isRefreshing = pullRefreshRequested && manualSyncInProgress,
                 onRefresh = {
                     if (!syncInProgress && !markReadRunning) {
-                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                        pullRefreshRequested = syncCoordinator.requestSync(SyncReason.MANUAL)
+                        pullRefreshStarted = false
                     }
                 },
                 modifier = Modifier
