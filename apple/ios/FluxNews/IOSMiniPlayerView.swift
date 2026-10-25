@@ -225,8 +225,8 @@ struct IOSMiniPlayerView: View {
                 ? 7
                 : IOSMiniPlayerMetrics.regularToolbarVerticalPadding
         )
+        .frame(width: IOSMiniPlayerMetrics.regularFloatingWidth)
         .frame(
-            width: IOSMiniPlayerMetrics.regularFloatingWidth,
             minHeight: drawsOwnBackground
                 ? nil
                 : IOSMiniPlayerMetrics.regularToolbarMinimumHeight
