@@ -1000,12 +1000,17 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        // Diagnostic: static Sync control to isolate toolbar rendering from
-        // the state-dependent symbol and action presentation.
+        // Diagnostic: keep the Sync button directly in its toolbar item while
+        // restoring its state-dependent symbol (without the switch/Group wrapper).
         ToolbarItem(placement: .topBarTrailing) {
             Button(action: performManualSyncControlAction) {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 24, height: 24)
+                Image(systemName: IOSSyncButtonPresentation.symbolName(
+                    for: IOSSyncButtonPresentation.resolve(
+                        manualSyncState: newsreaderStore.manualSyncState,
+                        transientState: syncPresentation
+                    )
+                ))
+                .frame(width: 24, height: 24)
             }
             .accessibilityLabel(String(localized: "Sync news"))
             .accessibilityIdentifier("articleList.sync")
