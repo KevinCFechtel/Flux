@@ -35,6 +35,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.CoreEvent
@@ -211,10 +212,15 @@ internal fun AdaptiveAppShell(
         }
     }
 
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
+        val tabletNavigation = maxWidth >= 840.dp && maxHeight >= 600.dp
+        var tabletSidebarCollapsed by rememberSaveable { mutableStateOf(false) }
+        val navHostContent: @Composable () -> Unit = {
     NavHost(
         navController = navController,
         startDestination = ShellRoute.Timeline,
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         enterTransition = { AndroidMotion.topLevelEnter() },
         exitTransition = { AndroidMotion.topLevelExit() },
         popEnterTransition = { AndroidMotion.topLevelEnter() },
@@ -244,6 +250,9 @@ internal fun AdaptiveAppShell(
                     navController.navigate(ShellRoute.FeedSettings)
                 },
                 onSelectionChanged = { timelineSelection = it },
+                tabletNavigationManaged = tabletNavigation,
+                tabletSidebarCollapsed = tabletSidebarCollapsed,
+                onExpandTabletSidebar = { tabletSidebarCollapsed = false },
             )
         }
         composable(ShellRoute.Search) {
@@ -253,6 +262,8 @@ internal fun AdaptiveAppShell(
                 openResolver = articleOpenResolver,
                 sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
+                onToggleSidebar = if (tabletNavigation) ({ tabletSidebarCollapsed = !tabletSidebarCollapsed }) else null,
+                sidebarExpanded = tabletNavigation && !tabletSidebarCollapsed,
             )
         }
         composable(ShellRoute.ListeningList) {
@@ -262,6 +273,8 @@ internal fun AdaptiveAppShell(
                 transferCoordinator = mediaTransferCoordinator,
                 sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
+                onToggleSidebar = if (tabletNavigation) ({ tabletSidebarCollapsed = !tabletSidebarCollapsed }) else null,
+                sidebarExpanded = tabletNavigation && !tabletSidebarCollapsed,
             )
         }
         composable(ShellRoute.FeedSettings) {
@@ -286,6 +299,73 @@ internal fun AdaptiveAppShell(
                 onAccountChanged = onAccountChanged,
                 onBack = navController::popBackStack,
             )
+        }
+    }
+        }
+        if (tabletNavigation && !tabletSidebarCollapsed &&
+            currentRoute in listOf(ShellRoute.Timeline, ShellRoute.Search, ShellRoute.ListeningList)) {
+            PermanentNavigationDrawer(
+                drawerContent = {
+                    PermanentDrawerSheet(
+                        modifier = Modifier.width(320.dp),
+                        drawerContainerColor = MaterialTheme.colorScheme.background,
+                        drawerTonalElevation = 0.dp,
+                    ) {
+                        NewsNavigationContent(
+                            navigation = navigation,
+                            preferences = currentPreferences,
+                            timelineStore = timelineStore,
+                            selectedScope = timelineSelection.scope,
+                            activeDestination = currentRoute ?: ShellRoute.Timeline,
+                            onScopeSelected = { selectedScope ->
+                                timelineSelection = timelineSelection.selectingScope(selectedScope)
+                                navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+                            },
+                            onSearch = {
+                                if (currentRoute != ShellRoute.Search) navController.navigate(ShellRoute.Search) {
+                                    popUpTo(ShellRoute.Timeline)
+                                    launchSingleTop = true
+                                }
+                            },
+                            onListeningList = {
+                                if (currentRoute != ShellRoute.ListeningList) navController.navigate(ShellRoute.ListeningList) {
+                                    popUpTo(ShellRoute.Timeline)
+                                    launchSingleTop = true
+                                }
+                            },
+                            onSettings = { navController.navigate(ShellRoute.Settings) },
+                            onFeedSettings = { feed ->
+                                feedSettingsTarget = feed
+                                navController.navigate(ShellRoute.FeedSettings)
+                            },
+                            onAddFeed = { creationDialog = "feed" },
+                            onAddCategory = { creationDialog = "category" },
+                            sidebarMiniPlayer = {
+                                val playback by mediaPlaybackCoordinator.state.collectAsState()
+                                if (playback.enclosureId != null &&
+                                    playback.status != AndroidMediaPlaybackPresentationStatus.Stopped) {
+                                    AndroidCompactMiniPlayer(
+                                        playback = playback,
+                                        coordinator = mediaPlaybackCoordinator,
+                                        onOpenPlayer = {
+                                            if (currentRoute != ShellRoute.ListeningList) navController.navigate(ShellRoute.ListeningList) {
+                                                popUpTo(ShellRoute.Timeline)
+                                                launchSingleTop = true
+                                            }
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                    )
+                                }
+                            },
+                            navigationToggleIcon = R.drawable.ic_sidebar_toggle,
+                            navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
+                            onNavigationToggle = { tabletSidebarCollapsed = true },
+                        )
+                    }
+                },
+            ) { navHostContent() }
+        } else {
+            navHostContent()
         }
     }
     val generation = sessionGeneration
@@ -338,10 +418,38 @@ private fun TimelineDestination(
     onAddFeed: () -> Unit,
     onAddCategory: () -> Unit,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
+    tabletNavigationManaged: Boolean = false,
+    tabletSidebarCollapsed: Boolean = false,
+    onExpandTabletSidebar: () -> Unit = {},
 ) {
+    if (tabletNavigationManaged) {
+        NewsRootContent(
+            selection = selection,
+            navigation = navigation,
+            state = state,
+            timelineStore = timelineStore,
+            syncCoordinator = syncCoordinator,
+            mediaPlaybackCoordinator = mediaPlaybackCoordinator,
+            readerStore = readerStore,
+            articleOpenResolver = articleOpenResolver,
+            navigationPreferences = preferences,
+            sessionGeneration = sessionGeneration,
+            pendingWidgetArticle = pendingWidgetArticle,
+            onWidgetArticleConsumed = onWidgetArticleConsumed,
+            persistentNavigation = !tabletSidebarCollapsed,
+            collapsedPersistentNavigation = tabletSidebarCollapsed,
+            scopeTitleLeading = tabletSidebarCollapsed,
+            onOpenNavigation = onExpandTabletSidebar,
+            onSearch = { navController.navigate(ShellRoute.Search) },
+            onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+            onSettings = { navController.navigate(ShellRoute.Settings) },
+            onSelectionChanged = onSelectionChanged,
+        )
+        return
+    }
     val scope = selection.scope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-        val supportsPersistentNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
+        val supportsPersistentNavigation = maxWidth >= 840.dp && maxHeight >= 600.dp
         var persistentNavigationCollapsed by rememberSaveable { mutableStateOf(false) }
         val persistentNewsNavigation = supportsPersistentNavigation && !persistentNavigationCollapsed
         val collapsedPersistentNavigation = supportsPersistentNavigation && persistentNavigationCollapsed
@@ -367,7 +475,19 @@ private fun TimelineDestination(
                             onFeedSettings = onFeedSettings,
                             onAddFeed = onAddFeed,
                             onAddCategory = onAddCategory,
-                            navigationToggleIcon = R.drawable.ic_arrow_back,
+                            sidebarMiniPlayer = {
+                                val playback by mediaPlaybackCoordinator.state.collectAsState()
+                                if (playback.enclosureId != null &&
+                                    playback.status != AndroidMediaPlaybackPresentationStatus.Stopped) {
+                                    AndroidCompactMiniPlayer(
+                                        playback = playback,
+                                        coordinator = mediaPlaybackCoordinator,
+                                        onOpenPlayer = { navController.navigate(ShellRoute.ListeningList) },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                    )
+                                }
+                            },
+                            navigationToggleIcon = R.drawable.ic_sidebar_toggle,
                             navigationToggleDescription = stringResource(R.string.l10n_collapse_navigation),
                             onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
@@ -397,6 +517,31 @@ private fun TimelineDestination(
                     onSelectionChanged = onSelectionChanged,
                 )
             }
+        } else if (collapsedPersistentNavigation) {
+            // Tablet navigation toggles directly between the permanent sidebar and
+            // the full-width timeline. A modal drawer is only used on compact windows.
+            NewsRootContent(
+                selection = selection,
+                navigation = navigation,
+                state = state,
+                timelineStore = timelineStore,
+                syncCoordinator = syncCoordinator,
+                mediaPlaybackCoordinator = mediaPlaybackCoordinator,
+                readerStore = readerStore,
+                articleOpenResolver = articleOpenResolver,
+                navigationPreferences = preferences,
+                sessionGeneration = sessionGeneration,
+                pendingWidgetArticle = pendingWidgetArticle,
+                onWidgetArticleConsumed = onWidgetArticleConsumed,
+                persistentNavigation = false,
+                collapsedPersistentNavigation = true,
+                scopeTitleLeading = true,
+                onOpenNavigation = { persistentNavigationCollapsed = false },
+                onSearch = { navController.navigate(ShellRoute.Search) },
+                onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+                onSettings = { navController.navigate(ShellRoute.Settings) },
+                onSelectionChanged = onSelectionChanged,
+            )
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
             val coroutineScope = rememberCoroutineScope()

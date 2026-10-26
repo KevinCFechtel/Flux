@@ -16,11 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -34,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -113,7 +114,10 @@ internal fun NewsRootContent(
     )
     val playbackState by mediaPlaybackCoordinator.state.collectAsState()
     var nowPlayingPresented by remember { mutableStateOf(false) }
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // The action bar can move to the top before the permanent tablet sidebar is available.
+    val wideActionLayout = configuration.screenWidthDp >= 600
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
     val projection = navigation.projection
     val categoryRefs = projection?.catalog?.categories?.map {
@@ -139,7 +143,25 @@ internal fun NewsRootContent(
     val syncInProgress = syncState is AndroidSyncCoordinator.State.Syncing
     val manualSyncInProgress =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
-    var dismissedSyncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
+    // A successful sync retained by the coordinator must not flash again when
+    // orientation changes recreate this composable.
+    var dismissedSyncSuccessGeneration by remember {
+        mutableStateOf((syncState as? AndroidSyncCoordinator.State.Succeeded)?.generation)
+    }
+    // The pull indicator belongs to the gesture, not every manual sync
+    // (including toolbar actions and background-triggered requests).
+    var pullRefreshRequested by remember { mutableStateOf(false) }
+    var pullRefreshStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(syncState) {
+        if (pullRefreshRequested) {
+            if (syncState is AndroidSyncCoordinator.State.Syncing) {
+                pullRefreshStarted = true
+            } else if (pullRefreshStarted) {
+                pullRefreshRequested = false
+                pullRefreshStarted = false
+            }
+        }
+    }
     val syncSuccessVisible = AndroidSyncPresentationPolicy.successVisible(
         state = syncState,
         dismissedGeneration = dismissedSyncSuccessGeneration,
@@ -235,14 +257,23 @@ internal fun NewsRootContent(
     val navigationBarHeight = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
-    val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
+    val bottomActionsVisible = !isLandscape && !wideActionLayout && !persistentNavigation && !collapsedPersistentNavigation
     val miniPlayerVisible = playbackState.enclosureId != null &&
         playbackState.status != AndroidMediaPlaybackPresentationStatus.Stopped
+    val toolbarMiniPlayerEligible = !persistentNavigation && (collapsedPersistentNavigation || isLandscape || wideActionLayout)
+    val availableToolbarWidth = LocalConfiguration.current.screenWidthDp.dp -
+        (if (persistentNavigation) 320.dp else 0.dp)
+    // Landscape phones should use the compact player beside the scope title,
+    // not consume a second row at the bottom of the timeline.
+    val toolbarMiniPlayerVisible = miniPlayerVisible && toolbarMiniPlayerEligible
+    val standaloneMiniPlayerVisible = miniPlayerVisible && !persistentNavigation && !bottomActionsVisible && !toolbarMiniPlayerVisible
     val bottomActionClearance = if (bottomActionsVisible) {
         navigationBarHeight +
             32.dp +
             (44.dp * actionCapsuleScale) +
             if (miniPlayerVisible) 78.dp else 0.dp
+    } else if (standaloneMiniPlayerVisible) {
+        navigationBarHeight + 110.dp
     } else {
         0.dp
     }
@@ -260,13 +291,24 @@ internal fun NewsRootContent(
                 )
             },
             topBar = {
-                Box(Modifier.fillMaxWidth()) {
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val toolbarPlayerVisible = !persistentNavigation && toolbarMiniPlayerVisible &&
+                        (isLandscape || collapsedPersistentNavigation || wideActionLayout)
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                     if (persistentNavigation) {
                         TopAppBar(
-                            title = {},
+                            title = {
+                                if (toolbarPlayerVisible) {
+                                    AndroidToolbarMiniPlayer(
+                                        playback = playbackState,
+                                        coordinator = mediaPlaybackCoordinator,
+                                        onOpenPlayer = { nowPlayingPresented = true },
+                                        modifier = Modifier.widthIn(max = 250.dp),
+                                    )
+                                }
+                            },
                             actions = {
                                 AndroidArticleActionCapsule(
                                     selection = selection,
@@ -286,21 +328,41 @@ internal fun NewsRootContent(
                             },
                             colors = appBarColors,
                         )
-                    } else if (scopeTitleLeading) {
+                    } else if (!bottomActionsVisible) {
                         TopAppBar(
+                            navigationIcon = {
+                                if (collapsedPersistentNavigation) {
+                                    IconButton(onClick = onOpenNavigation) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_sidebar_toggle),
+                                            contentDescription = stringResource(R.string.l10n_expand_navigation),
+                                        )
+                                    }
+                                }
+                            },
                             title = {
-                                ScopeNavigationCapsule(
-                                    scope = scope,
-                                    showArticleCount = articlePreferences.showArticleCount,
-                                    timelineCount = timelineCount,
-                                    readFilter = timelineState.selection?.readFilter,
-                                    syncing = syncInProgress,
-                                    opensNavigation = !persistentNavigation,
-                                    onOpenNavigation = onOpenNavigation,
-                                )
+                                    ScopeNavigationCapsule(
+                                        scope = scope,
+                                        showArticleCount = articlePreferences.showArticleCount,
+                                        timelineCount = timelineCount,
+                                        readFilter = timelineState.selection?.readFilter,
+                                        syncing = syncInProgress,
+                                        opensNavigation = !persistentNavigation && !collapsedPersistentNavigation,
+                                        onOpenNavigation = onOpenNavigation,
+                                        trailingContent = if (toolbarPlayerVisible) {
+                                            {
+                                                AndroidToolbarMiniPlayer(
+                                                    playback = playbackState,
+                                                    coordinator = mediaPlaybackCoordinator,
+                                                    onOpenPlayer = { nowPlayingPresented = true },
+                                                    modifier = Modifier.widthIn(min = 120.dp, max = 240.dp),
+                                                )
+                                            }
+                                        } else null,
+                                    )
                             },
                             actions = {
-                                if (isLandscape || collapsedPersistentNavigation) {
+                                if (isLandscape || wideActionLayout || collapsedPersistentNavigation) {
                                     AndroidArticleActionCapsule(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
@@ -323,18 +385,28 @@ internal fun NewsRootContent(
                     } else {
                         CenterAlignedTopAppBar(
                             title = {
-                                ScopeNavigationCapsule(
-                                    scope = scope,
-                                    showArticleCount = articlePreferences.showArticleCount,
-                                    timelineCount = timelineCount,
-                                    readFilter = timelineState.selection?.readFilter,
-                                    syncing = syncInProgress,
-                                    opensNavigation = !persistentNavigation,
-                                    onOpenNavigation = onOpenNavigation,
-                                )
+                                        ScopeNavigationCapsule(
+                                            scope = scope,
+                                            showArticleCount = articlePreferences.showArticleCount,
+                                            timelineCount = timelineCount,
+                                            readFilter = timelineState.selection?.readFilter,
+                                            syncing = syncInProgress,
+                                            opensNavigation = !persistentNavigation && !collapsedPersistentNavigation,
+                                            onOpenNavigation = onOpenNavigation,
+                                                trailingContent = if (toolbarPlayerVisible) {
+                                                {
+                                                    AndroidToolbarMiniPlayer(
+                                                        playback = playbackState,
+                                                        coordinator = mediaPlaybackCoordinator,
+                                                        onOpenPlayer = { nowPlayingPresented = true },
+                                                        modifier = Modifier.widthIn(max = 220.dp),
+                                                    )
+                                                }
+                                            } else null,
+                                        )
                             },
                             actions = {
-                                if (isLandscape) {
+                                if (isLandscape || wideActionLayout) {
                                     AndroidArticleActionCapsule(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
@@ -359,10 +431,11 @@ internal fun NewsRootContent(
             },
         ) { padding ->
             PullToRefreshBox(
-                isRefreshing = manualSyncInProgress,
+                isRefreshing = pullRefreshRequested && manualSyncInProgress,
                 onRefresh = {
                     if (!syncInProgress && !markReadRunning) {
-                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                        pullRefreshRequested = syncCoordinator.requestSync(SyncReason.MANUAL)
+                        pullRefreshStarted = false
                     }
                 },
                 modifier = Modifier
@@ -437,6 +510,27 @@ internal fun NewsRootContent(
                         .align(Alignment.BottomCenter)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = 12.dp),
+                )
+            }
+        }
+
+        if (standaloneMiniPlayerVisible) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .widthIn(max = 420.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shadowElevation = 6.dp,
+            ) {
+                AndroidCompactMiniPlayer(
+                    playback = playbackState,
+                    coordinator = mediaPlaybackCoordinator,
+                    onOpenPlayer = { nowPlayingPresented = true },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
         }
@@ -811,6 +905,7 @@ private fun ScopeNavigationCapsule(
     syncing: Boolean,
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
+    trailingContent: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
 ) {
     val darkMode = isSystemInDarkTheme()
     Surface(
@@ -825,7 +920,8 @@ private fun ScopeNavigationCapsule(
         shadowElevation = if (darkMode) 0.5.dp else 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+            modifier = (if (trailingContent != null) Modifier.fillMaxWidth() else Modifier)
+                .padding(horizontal = 14.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -835,7 +931,9 @@ private fun ScopeNavigationCapsule(
                 modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
-            Column {
+            Column(
+                modifier = if (trailingContent != null) Modifier.weight(1f, fill = false) else Modifier,
+            ) {
                 Text(
                     scopeTitle(scope),
                     maxLines = 1,
@@ -863,6 +961,9 @@ private fun ScopeNavigationCapsule(
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (trailingContent != null) {
+                trailingContent()
             }
         }
     }

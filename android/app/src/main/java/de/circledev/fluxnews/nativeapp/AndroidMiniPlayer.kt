@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Headphones
@@ -21,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -231,5 +233,141 @@ private fun androidCompactMediaTime(milliseconds: Long): String {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+/**
+ * Space-efficient player for wide timeline top bars. The full player remains
+ * available by tapping its title; narrow layouts use the existing bottom dock.
+ */
+@Composable
+internal fun AndroidToolbarMiniPlayer(
+    playback: AndroidMediaPlaybackState,
+    coordinator: AndroidMediaPlaybackCoordinator,
+    onOpenPlayer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val artworkModel by produceState<Any?>(
+        initialValue = null,
+        key1 = playback.artworkSource,
+        key2 = playback.enclosureId,
+    ) {
+        value = when (val source = playback.artworkSource) {
+            is MediaArtworkSource.LocalReference -> coordinator.artworkBytes(source.reference)
+            is MediaArtworkSource.RemoteUrl -> source.url
+            null -> null
+        }
+    }
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val expanded = maxWidth >= 300.dp
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f).clickable(onClick = onOpenPlayer),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.size(if (expanded) 38.dp else 26.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (artworkModel != null) {
+                            AsyncImage(
+                                model = artworkModel,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(R.drawable.fallback_artwork),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            playback.articleTitle?.takeIf { it.isNotBlank() }
+                                ?: stringResource(R.string.article_audio),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (expanded) {
+                            val feed = playback.feedTitle?.takeIf { it.isNotBlank() }
+                            val duration = playback.durationMs?.takeIf { it > 0L }
+                            val subtitle = listOfNotNull(
+                                feed,
+                                duration?.let {
+                                    androidCompactMediaTime(playback.positionMs) + " / " +
+                                        androidCompactMediaTime(it)
+                                },
+                            ).joinToString(" · ")
+                            if (subtitle.isNotEmpty()) {
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        if (!playback.isLoading) {
+                            playback.enclosureId?.let { id ->
+                                scope.launch {
+                                    if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                        coordinator.pause()
+                                    } else {
+                                        coordinator.play(id)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    if (playback.isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                Icons.Rounded.Pause
+                            } else {
+                                Icons.Rounded.PlayArrow
+                            },
+                            contentDescription = if (playback.status == AndroidMediaPlaybackPresentationStatus.Playing) {
+                                "Pause"
+                            } else {
+                                "Play"
+                            },
+                        )
+                    }
+                }
+            }
+            if (expanded) {
+                playback.durationMs?.takeIf { it > 0L }?.let { duration ->
+                    LinearProgressIndicator(
+                        progress = {
+                            (playback.positionMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
     }
 }

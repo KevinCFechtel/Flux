@@ -20,6 +20,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
@@ -54,10 +56,13 @@ internal fun NewsNavigationContent(
     onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     onAddFeed: () -> Unit,
     onAddCategory: () -> Unit,
+    sidebarMiniPlayer: (@Composable () -> Unit)? = null,
+    activeDestination: String = "timeline",
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
 ) {
+    var addMenuExpanded by remember { mutableStateOf(false) }
     val projection = navigation.projection
     val timelineState by timelineStore.state.collectAsState()
     val feedIconVariant = if (isSystemInDarkTheme()) {
@@ -107,9 +112,8 @@ internal fun NewsNavigationContent(
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxHeight().padding(horizontal = 12.dp)) {
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -146,28 +150,28 @@ internal fun NewsNavigationContent(
         )
         NavigationDrawerItem(
             label = { DrawerLabel(stringResource(R.string.nav_all_news), projection?.unreadTotal ?: 0uL) },
-            selected = selectedScope == AndroidNewsScope.All,
+            selected = activeDestination == "timeline" && selectedScope == AndroidNewsScope.All,
             onClick = { onScopeSelected(AndroidNewsScope.All) },
             icon = { DrawerIcon(R.drawable.ic_news, stringResource(R.string.nav_all_news)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { DrawerLabel(stringResource(R.string.nav_starred), projection?.starredTotal ?: 0uL) },
-            selected = selectedScope == AndroidNewsScope.Starred,
+            selected = activeDestination == "timeline" && selectedScope == AndroidNewsScope.Starred,
             onClick = { onScopeSelected(AndroidNewsScope.Starred) },
             icon = { DrawerIcon(R.drawable.ic_star, stringResource(R.string.nav_starred)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text(stringResource(R.string.nav_listening_list)) },
-            selected = false,
+            selected = activeDestination == "listening-list",
             onClick = onListeningList,
             icon = { DrawerIcon(R.drawable.ic_headphones, stringResource(R.string.nav_listening_list)) },
             colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text(stringResource(R.string.nav_search)) },
-            selected = false,
+            selected = activeDestination == "search",
             onClick = onSearch,
             icon = { DrawerIcon(R.drawable.ic_search, stringResource(R.string.nav_search)) },
             colors = drawerItemColors,
@@ -184,6 +188,34 @@ internal fun NewsNavigationContent(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
+            Box {
+                IconButton(onClick = { addMenuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.nav_add_feed_short) +
+                            " / " + stringResource(R.string.nav_add_category_short),
+                    )
+                }
+                DropdownMenu(
+                    expanded = addMenuExpanded,
+                    onDismissRequest = { addMenuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_feed_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddFeed()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nav_add_category_short)) },
+                        onClick = {
+                            addMenuExpanded = false
+                            onAddCategory()
+                        },
+                    )
+                }
+            }
         }
 
         if (projection == null) {
@@ -201,7 +233,7 @@ internal fun NewsNavigationContent(
                     CategoryNavigationRow(
                         title = category.title,
                         count = categoryCounts[category.id] ?: 0uL,
-                        selected = selectedScope == categoryScope,
+                        selected = activeDestination == "timeline" && selectedScope == categoryScope,
                         containsSelectedFeed = selectedScope is AndroidNewsScope.Feed && selectedScope.categoryId == category.id,
                         expanded = expanded,
                         onToggleExpanded = {
@@ -218,7 +250,7 @@ internal fun NewsNavigationContent(
                                     feedId = feed.id,
                                     title = feed.title,
                                     count = feedCounts[feed.id] ?: 0uL,
-                                    selected = selectedScope == feedScope,
+                                    selected = activeDestination == "timeline" && selectedScope == feedScope,
                                     iconPng = timelineState.feedIconPngByFeedId[feed.id],
                                     iconVariant = feedIconVariant,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
@@ -238,7 +270,7 @@ internal fun NewsNavigationContent(
                         feedId = feed.id,
                         title = feed.title,
                         count = feedCounts[feed.id] ?: 0uL,
-                        selected = selectedScope == feedScope,
+                        selected = activeDestination == "timeline" && selectedScope == feedScope,
                         iconPng = timelineState.feedIconPngByFeedId[feed.id],
                         iconVariant = feedIconVariant,
                         onRequestFeedIcon = timelineStore::ensureFeedIcon,
@@ -246,14 +278,6 @@ internal fun NewsNavigationContent(
                         onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                     )
                 }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Start,
-        ) {
-            androidx.compose.material3.TextButton(onClick = onAddFeed) { Text(stringResource(R.string.nav_add_feed_short)) }
-            androidx.compose.material3.TextButton(onClick = onAddCategory) { Text(stringResource(R.string.nav_add_category_short)) }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -266,6 +290,10 @@ internal fun NewsNavigationContent(
             colors = drawerItemColors,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         )
+        }
+        if (sidebarMiniPlayer != null) {
+            sidebarMiniPlayer()
+        }
     }
 }
 

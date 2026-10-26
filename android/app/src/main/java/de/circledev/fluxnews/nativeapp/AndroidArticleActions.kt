@@ -85,6 +85,8 @@ internal enum class AndroidArticleContextAction {
     CopyLink,
     Share,
     SaveToService,
+    ListeningList,
+    DownloadAudio,
 }
 
 internal data class AndroidResolvedSwipeSide(
@@ -147,7 +149,7 @@ internal object AndroidArticleActionPolicy {
         )
     }
 
-    fun contextActions(article: ArticleSummary): List<AndroidArticleContextAction> = buildList {
+    fun contextActions(article: ArticleSummary, mediaState: AndroidArticleMediaActionState? = null): List<AndroidArticleContextAction> = buildList {
         add(AndroidArticleContextAction.StarUnstar)
         add(AndroidArticleContextAction.ReadUnread)
         if (validWebUrl(article.url)) add(AndroidArticleContextAction.OpenOriginal)
@@ -159,6 +161,10 @@ internal object AndroidArticleActionPolicy {
             add(AndroidArticleContextAction.Share)
         }
         add(AndroidArticleContextAction.SaveToService)
+        if (mediaState?.audioEnclosures?.isNotEmpty() == true) {
+            add(AndroidArticleContextAction.ListeningList)
+            add(AndroidArticleContextAction.DownloadAudio)
+        }
     }
 
     fun swipeLabel(action: AndroidArticleSwipeAction, article: ArticleSummary): String = when (action) {
@@ -183,6 +189,8 @@ internal object AndroidArticleActionPolicy {
         AndroidArticleContextAction.CopyLink -> "Copy link"
         AndroidArticleContextAction.Share -> "Share"
         AndroidArticleContextAction.SaveToService -> "Save to third-party service"
+        AndroidArticleContextAction.ListeningList -> "Listening list"
+        AndroidArticleContextAction.DownloadAudio -> "Download audio"
     }
 }
 
@@ -196,7 +204,7 @@ private fun localizedDownloadActionLabel(state: DownloadState?): String = when (
 }
 
 @Composable
-private fun localizedContextActionLabel(action: AndroidArticleContextAction, article: ArticleSummary): String = when (action) {
+private fun localizedContextActionLabel(action: AndroidArticleContextAction, article: ArticleSummary, mediaState: AndroidArticleMediaActionState?): String = when (action) {
     AndroidArticleContextAction.ReadUnread -> stringResource(if (article.isRead) R.string.audit_mark_unread else R.string.audit_mark_read)
     AndroidArticleContextAction.StarUnstar -> stringResource(if (article.isStarred) R.string.audit_unstar else R.string.audit_star)
     AndroidArticleContextAction.OpenOriginal -> stringResource(R.string.audit_open_original)
@@ -206,6 +214,8 @@ private fun localizedContextActionLabel(action: AndroidArticleContextAction, art
     AndroidArticleContextAction.CopyLink -> stringResource(R.string.audit_copy_link)
     AndroidArticleContextAction.Share -> stringResource(R.string.audit_share)
     AndroidArticleContextAction.SaveToService -> stringResource(R.string.audit_save_service)
+    AndroidArticleContextAction.ListeningList -> stringResource(if (mediaState?.isInListeningList == true) R.string.audit_listening_remove else R.string.audit_listening_add)
+    AndroidArticleContextAction.DownloadAudio -> stringResource(R.string.audit_download)
 }
 
 @Composable
@@ -602,7 +612,7 @@ internal fun AndroidArticleSwipeContainer(
             onDismissRequest = { contextExpanded = false },
         ) {
             var previousGroup: Int? = null
-            AndroidArticleActionPolicy.contextActions(article).forEach { action ->
+            AndroidArticleActionPolicy.contextActions(article, mediaState).forEach { action ->
                 val group = contextActionGroup(action)
                 if (previousGroup != null && previousGroup != group) {
                     HorizontalDivider(
@@ -619,7 +629,7 @@ internal fun AndroidArticleSwipeContainer(
                         )
                     },
                     text = {
-                        Text(localizedContextActionLabel(action, article))
+                        Text(localizedContextActionLabel(action, article, mediaState))
                     },
                     onClick = {
                         contextExpanded = false
@@ -647,6 +657,10 @@ private fun contextActionGroup(action: AndroidArticleContextAction): Int = when 
     AndroidArticleContextAction.Share,
     AndroidArticleContextAction.SaveToService,
     -> 2
+
+    AndroidArticleContextAction.ListeningList,
+    AndroidArticleContextAction.DownloadAudio,
+    -> 3
 }
 
 private fun contextActionIcon(
@@ -665,6 +679,8 @@ private fun contextActionIcon(
     AndroidArticleContextAction.CopyLink -> R.drawable.ic_copy
     AndroidArticleContextAction.Share -> R.drawable.ic_share
     AndroidArticleContextAction.SaveToService -> R.drawable.ic_save
+    AndroidArticleContextAction.ListeningList -> R.drawable.ic_headphones
+    AndroidArticleContextAction.DownloadAudio -> R.drawable.ic_download
 }
 
 @Composable
