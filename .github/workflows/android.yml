@@ -64,6 +64,8 @@ jobs:
       - name: Verify pinned Rust compiler
         run: rustc --version | grep -F 'rustc 1.99.1 '
       - name: Run Android CI gate
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.warning.mode=all"
         run: |
           ./android/Build/test.sh
           ./android/Build/build-app.sh developmentRelease
@@ -74,3 +76,17 @@ jobs:
             echo "productionBundle unexpectedly accepted a missing versionName" >&2
             exit 1
           fi
+      - name: Upload Android Lint reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            android/app/build/reports/lint-results-*.html
+            android/app/build/reports/lint-results-*.xml
+            android/app/build/reports/lint-results-*.sarif
+            android/app/build/reports/lint-results-*.txt
+            android/app/build/intermediates/lint_intermediate_text_report/**/lint-results-*.txt
+            android/app/build/intermediates/lint_intermediate_xml_report/**/lint-results-*.xml
