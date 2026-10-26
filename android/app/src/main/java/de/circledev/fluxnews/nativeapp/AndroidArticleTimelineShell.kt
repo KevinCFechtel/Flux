@@ -291,7 +291,7 @@ internal fun NewsRootContent(
                 )
             },
             topBar = {
-                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth()) {
                     val toolbarPlayerVisible = !persistentNavigation && toolbarMiniPlayerVisible &&
                         (isLandscape || collapsedPersistentNavigation || wideActionLayout)
                     FloatingChromeTopGradient(
